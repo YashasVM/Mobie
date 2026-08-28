@@ -12,6 +12,7 @@ The repository currently contains a buildable native Android foundation with:
 - RAM, storage, ABI, and format compatibility checks
 - model details with runtime, quantization, size, license, and device guidance
 - resumable background downloads using HTTP range requests
+- foreground download execution for multi-gigabyte models
 - optional SHA-256 verification when Hugging Face exposes a digest
 - encrypted local storage for a Hugging Face access token
 - conversion-request API boundary and visible request state
@@ -60,7 +61,7 @@ Requirements: Android Studio with JDK 17 and Android SDK 35.
 ./gradlew testDebugUnitTest lintDebug assembleDebug
 ```
 
-CI runs the same checks on every pull request and uploads a debug APK after a successful build.
+CI runs the same checks on every pull request, installs the APK on an API 35 emulator, runs Compose UI smoke tests, and uploads a debug APK after a successful build.
 
 ## Conversion service
 

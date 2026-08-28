@@ -85,6 +85,8 @@ Every pull request must run:
 ./gradlew testDebugUnitTest lintDebug assembleDebug
 ```
 
+UI or navigation changes must also pass `connectedDebugAndroidTest` on an emulator. Native-runtime claims still require the physical ARM64 test described below; an x86_64 emulator is not evidence that a model engine works on a phone.
+
 Add or update tests for:
 
 - compatibility boundaries (RAM, storage, ABI, format);
