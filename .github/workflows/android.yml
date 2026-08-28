@@ -23,10 +23,8 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.10.2"
       - name: Unit tests, lint, and debug build
-        run: gradle --no-daemon testDebugUnitTest lintDebug assembleDebug
+        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
       - name: Upload debug APK
         if: success()
         uses: actions/upload-artifact@v4

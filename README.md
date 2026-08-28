@@ -57,7 +57,7 @@ app/src/main/java/dev/yashasvm/mobie/
 Requirements: Android Studio with JDK 17 and Android SDK 35.
 
 ```bash
-gradle testDebugUnitTest lintDebug assembleDebug
+./gradlew testDebugUnitTest lintDebug assembleDebug
 ```
 
 CI runs the same checks on every pull request and uploads a debug APK after a successful build.

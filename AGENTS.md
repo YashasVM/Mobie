@@ -82,7 +82,7 @@ ONNX and ExecuTorch must be added as new adapters; do not add format-specific br
 Every pull request must run:
 
 ```bash
-gradle testDebugUnitTest lintDebug assembleDebug
+./gradlew testDebugUnitTest lintDebug assembleDebug
 ```
 
 Add or update tests for:
