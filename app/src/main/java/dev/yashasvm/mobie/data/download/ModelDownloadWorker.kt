@@ -1,84 +1,186 @@
 package dev.yashasvm.mobie.data.download
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
+import android.content.pm.ServiceInfo
+import android.os.Build
+import android.os.SystemClock
+import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.Data
+import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
+import dev.yashasvm.mobie.R
 import dev.yashasvm.mobie.core.security.HuggingFaceTokenStore
 import java.io.File
 import java.io.FileInputStream
+import java.io.IOException
 import java.io.RandomAccessFile
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
-import android.os.SystemClock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
 class ModelDownloadWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+    private val client = OkHttpClient()
+
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        if (runAttemptCount >= MAX_ATTEMPTS) return@withContext Result.failure(dataOf("Download failed after $MAX_ATTEMPTS attempts"))
-        val url = inputData.getString(KEY_URL) ?: return@withContext Result.failure()
-        val fileName = inputData.getString(KEY_FILE_NAME) ?: return@withContext Result.failure()
-        val expectedSha = inputData.getString(KEY_SHA256)
+        if (runAttemptCount >= MAX_ATTEMPTS) {
+            return@withContext Result.failure(dataOf("Download failed after $MAX_ATTEMPTS attempts"))
+        }
+
+        val url = inputData.getString(KEY_URL) ?: return@withContext invalidInput("Missing download URL")
+        val modelId = inputData.getString(KEY_MODEL_ID) ?: return@withContext invalidInput("Missing model ID")
+        val fileName = inputData.getString(KEY_FILE_NAME) ?: return@withContext invalidInput("Missing file name")
+        val expectedSha = inputData.getString(KEY_SHA256)?.lowercase()
         val expectedSize = inputData.getLong(KEY_SIZE, 0)
-        val modelDir = File(applicationContext.filesDir, "models").apply { mkdirs() }
-        val destination = File(modelDir, fileName.substringAfterLast('/'))
+        setForeground(createForegroundInfo(fileName))
+
+        val modelDir = File(
+            File(applicationContext.filesDir, "models"),
+            DownloadFilePolicy.storageKey(modelId),
+        ).apply { mkdirs() }
+        val destination = File(modelDir, DownloadFilePolicy.safeFileName(fileName))
         val partial = File(destination.path + ".part")
-        val downloaded = partial.takeIf(File::exists)?.length() ?: 0
 
         try {
-            if (expectedSize > 0 && expectedSize > usableSpace(modelDir)) {
+            if (
+                isComplete(destination, expectedSize, expectedSha) ||
+                (expectedSize <= 0 && expectedSha.isNullOrBlank() && destination.isFile && destination.length() > 0)
+            ) {
+                return@withContext success(destination)
+            }
+            if (destination.exists()) destination.delete()
+
+            var downloaded = partial.takeIf(File::exists)?.length() ?: 0
+            if (expectedSize > 0 && downloaded > expectedSize) {
+                partial.delete()
+                downloaded = 0
+            }
+            if (isComplete(partial, expectedSize, expectedSha)) {
+                finalizeFile(partial, destination)
+                return@withContext success(destination)
+            }
+
+            val remaining = DownloadFilePolicy.remainingBytes(expectedSize, downloaded)
+            if (expectedSize > 0 && remaining > modelDir.usableSpace) {
                 return@withContext Result.failure(dataOf("Not enough free storage"))
             }
+
             val request = Request.Builder().url(url).apply {
                 if (downloaded > 0) header("Range", "bytes=$downloaded-")
                 HuggingFaceTokenStore(applicationContext).read()?.let { header("Authorization", "Bearer $it") }
             }.build()
-            OkHttpClient().newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext Result.retry()
+
+            client.newCall(request).execute().use { response ->
+                when (response.code) {
+                    401, 403 -> return@withContext Result.failure(
+                        dataOf("Access denied. Check the model terms and Hugging Face token."),
+                    )
+                    404 -> return@withContext Result.failure(dataOf("Model artifact was not found"))
+                    416 -> {
+                        val serverSize = response.header("Content-Range")
+                            ?.substringAfter("*/", missingDelimiterValue = "")
+                            ?.toLongOrNull()
+                        if (
+                            isComplete(partial, expectedSize, expectedSha) ||
+                            (serverSize != null && partial.isFile && partial.length() == serverSize)
+                        ) {
+                            finalizeFile(partial, destination)
+                            return@withContext success(destination)
+                        }
+                        partial.delete()
+                        return@withContext Result.retry()
+                    }
+                }
+                if (response.code >= 500) return@withContext Result.retry()
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(dataOf("Download failed with HTTP ${response.code}"))
+                }
+
                 val append = downloaded > 0 && response.code == 206
-                if (!append && partial.exists()) partial.delete()
+                if (append) {
+                    val contentRange = response.header("Content-Range")
+                    if (contentRange?.startsWith("bytes $downloaded-") != true) {
+                        partial.delete()
+                        return@withContext Result.retry()
+                    }
+                } else if (partial.exists()) {
+                    partial.delete()
+                    downloaded = 0
+                }
+
+                val body = response.body ?: return@withContext Result.retry()
                 val startAt = if (append) downloaded else 0
+                val total = expectedSize.takeIf { it > 0 }
+                    ?: body.contentLength().takeIf { it >= 0 }?.plus(startAt)
+                    ?: 0
+
                 RandomAccessFile(partial, "rw").use { output ->
                     output.seek(startAt)
-                    val body = response.body ?: return@withContext Result.retry()
-                    val total = expectedSize.takeIf { it > 0 } ?: (body.contentLength() + startAt)
                     body.byteStream().use { input ->
                         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                         var current = startAt
+                        var lastProgressAt = 0L
                         val startedAt = SystemClock.elapsedRealtime()
                         while (true) {
                             val read = input.read(buffer)
                             if (read < 0) break
                             output.write(buffer, 0, read)
                             current += read
-                            val elapsedMs = (SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(1)
-                            val speed = ((current - startAt) * 1000L) / elapsedMs
-                            setProgress(
-                                Data.Builder()
-                                    .putLong(KEY_DOWNLOADED, current)
-                                    .putLong(KEY_SIZE, total)
-                                    .putLong(KEY_SPEED, speed)
-                                    .build(),
-                            )
+                            val now = SystemClock.elapsedRealtime()
+                            if (now - lastProgressAt >= PROGRESS_INTERVAL_MS) {
+                                val elapsedMs = (now - startedAt).coerceAtLeast(1)
+                                setProgress(progressData(current, total, ((current - startAt) * 1000L) / elapsedMs))
+                                lastProgressAt = now
+                            }
                             if (isStopped) return@withContext Result.retry()
                         }
                     }
                 }
             }
-            if (!expectedSha.isNullOrBlank() && sha256(partial) != expectedSha.lowercase()) {
+
+            if (expectedSize > 0 && partial.length() != expectedSize) return@withContext Result.retry()
+            if (!expectedSha.isNullOrBlank() && sha256(partial) != expectedSha) {
                 partial.delete()
                 return@withContext Result.failure(dataOf("Checksum validation failed"))
             }
-            check(partial.renameTo(destination)) { "Could not finalize model file" }
-            Result.success(Data.Builder().putString(KEY_PATH, destination.absolutePath).build())
-        } catch (_: Exception) {
+            finalizeFile(partial, destination)
+            success(destination)
+        } catch (_: IOException) {
             Result.retry()
+        } catch (error: Exception) {
+            Result.failure(dataOf(error.message?.take(160) ?: "Download failed"))
         }
     }
 
-    private fun usableSpace(dir: File): Long = dir.usableSpace
+    private fun isComplete(file: File, expectedSize: Long, expectedSha: String?): Boolean {
+        if (!file.isFile) return false
+        if (expectedSize > 0 && file.length() != expectedSize) return false
+        return when {
+            !expectedSha.isNullOrBlank() -> sha256(file) == expectedSha
+            expectedSize > 0 -> true
+            else -> false
+        }
+    }
+
+    private fun finalizeFile(partial: File, destination: File) {
+        try {
+            Files.move(
+                partial.toPath(),
+                destination.toPath(),
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        } catch (_: AtomicMoveNotSupportedException) {
+            Files.move(partial.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
+    }
 
     private fun sha256(file: File): String {
         val digest = MessageDigest.getInstance("SHA-256")
@@ -93,10 +195,50 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
+    private fun createForegroundInfo(fileName: String): ForegroundInfo {
+        val manager = applicationContext.getSystemService(NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            manager.createNotificationChannel(
+                NotificationChannel(CHANNEL_ID, "Model downloads", NotificationManager.IMPORTANCE_LOW),
+            )
+        }
+        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle("Downloading model")
+            .setContentText(DownloadFilePolicy.safeFileName(fileName))
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+            .build()
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ForegroundInfo(notificationId(), notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else {
+            ForegroundInfo(notificationId(), notification)
+        }
+    }
+
+    private fun notificationId(): Int = (id.hashCode() and Int.MAX_VALUE).coerceAtLeast(1)
+
+    private fun progressData(downloaded: Long, total: Long, speed: Long) = Data.Builder()
+        .putLong(KEY_DOWNLOADED, downloaded)
+        .putLong(KEY_SIZE, total)
+        .putLong(KEY_SPEED, speed)
+        .build()
+
+    private fun success(destination: File) = Result.success(
+        Data.Builder()
+            .putString(KEY_PATH, destination.absolutePath)
+            .putLong(KEY_DOWNLOADED, destination.length())
+            .putLong(KEY_SIZE, destination.length())
+            .build(),
+    )
+
+    private fun invalidInput(message: String) = Result.failure(dataOf(message))
     private fun dataOf(message: String) = Data.Builder().putString(KEY_ERROR, message).build()
 
     companion object {
         const val KEY_URL = "url"
+        const val KEY_MODEL_ID = "model_id"
         const val KEY_FILE_NAME = "file_name"
         const val KEY_SHA256 = "sha256"
         const val KEY_SIZE = "size"
@@ -105,5 +247,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
         const val KEY_PATH = "path"
         const val KEY_ERROR = "error"
         const val MAX_ATTEMPTS = 4
+        private const val PROGRESS_INTERVAL_MS = 250L
+        private const val CHANNEL_ID = "model_downloads"
     }
 }

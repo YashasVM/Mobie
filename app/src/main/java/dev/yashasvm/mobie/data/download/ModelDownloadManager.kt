@@ -30,6 +30,7 @@ class ModelDownloadManager(context: Context) {
     fun enqueue(modelId: String, artifact: ModelArtifact): UUID {
         val input = Data.Builder()
             .putString(ModelDownloadWorker.KEY_URL, artifact.downloadUrl)
+            .putString(ModelDownloadWorker.KEY_MODEL_ID, modelId)
             .putString(ModelDownloadWorker.KEY_FILE_NAME, artifact.fileName)
             .putLong(ModelDownloadWorker.KEY_SIZE, artifact.sizeBytes)
             .apply { artifact.sha256?.let { putString(ModelDownloadWorker.KEY_SHA256, it) } }
@@ -40,7 +41,8 @@ class ModelDownloadManager(context: Context) {
             .setBackoffCriteria(androidx.work.BackoffPolicy.EXPONENTIAL, 15, TimeUnit.SECONDS)
             .addTag("model-download")
             .build()
-        workManager.enqueueUniqueWork("model-${modelId.hashCode()}", ExistingWorkPolicy.KEEP, request)
+        val workName = "model-${modelId.hashCode()}-${artifact.fileName.hashCode()}"
+        workManager.enqueueUniqueWork(workName, ExistingWorkPolicy.REPLACE, request)
         return request.id
     }
 

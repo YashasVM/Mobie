@@ -1,5 +1,11 @@
 package dev.yashasvm.mobie.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -32,6 +38,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,7 +49,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.yashasvm.mobie.core.AppContainer
 import dev.yashasvm.mobie.core.model.AiModel
@@ -50,6 +59,7 @@ import dev.yashasvm.mobie.core.model.Compatibility
 import dev.yashasvm.mobie.core.model.CompatibilityResult
 import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.ModelArtifact
+import dev.yashasvm.mobie.core.model.ModelType
 import androidx.work.WorkInfo
 import java.util.Locale
 
@@ -60,6 +70,34 @@ fun MobieApp(container: AppContainer) {
     val state by viewModel.state.collectAsState()
     var showSettings by remember { mutableStateOf(false) }
     var confirmWarning by remember { mutableStateOf(false) }
+
+    fun continueDownload() {
+        if (state.compatibility?.status == Compatibility.WARNING) {
+            confirmWarning = true
+        } else {
+            viewModel.download()
+        }
+    }
+
+    val notificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { continueDownload() }
+
+    fun requestDownload() {
+        val context = container.appContext
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            continueDownload()
+        }
+    }
+
+    BackHandler(enabled = state.selected != null) { viewModel.select(null) }
+    LaunchedEffect(state.selected?.id) { confirmWarning = false }
 
     Scaffold(
         topBar = {
@@ -85,13 +123,7 @@ fun MobieApp(container: AppContainer) {
             } else {
                 ModelScreen(
                     state = state,
-                    onDownload = {
-                        if (state.compatibility?.status == Compatibility.WARNING) {
-                            confirmWarning = true
-                        } else {
-                            viewModel.download()
-                        }
-                    },
+                    onDownload = ::requestDownload,
                     onRequest = viewModel::requestConversion,
                     onConfigureToken = { showSettings = true },
                 )
@@ -108,7 +140,7 @@ fun MobieApp(container: AppContainer) {
                 TextButton(
                     onClick = {
                         confirmWarning = false
-                        viewModel.download()
+                        viewModel.download(allowWarning = true)
                     },
                 ) { Text("Download anyway") }
             },
@@ -125,7 +157,7 @@ fun MobieApp(container: AppContainer) {
 }
 
 @Composable
-private fun CatalogScreen(
+internal fun CatalogScreen(
     state: MobieUiState,
     onQuery: (String) -> Unit,
     onSearch: () -> Unit,
@@ -159,7 +191,7 @@ private fun CatalogScreen(
                     ) {
                         Column(Modifier.padding(12.dp)) {
                             Text(model.title, maxLines = 1, fontWeight = FontWeight.SemiBold)
-                            Text(model.bestArtifact?.format?.name ?: "Conversion", style = MaterialTheme.typography.bodySmall)
+                            Text(model.bestArtifact?.runtimeLabel ?: "Conversion", style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
@@ -196,7 +228,7 @@ private fun ModelCard(model: AiModel, onSelect: (AiModel) -> Unit) {
             Text(model.author, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
             Text(model.description, maxLines = 2, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Badge(model.bestArtifact?.format?.name?.replace('_', '-') ?: "Conversion")
+                Badge(model.bestArtifact?.runtimeLabel ?: "Conversion")
                 model.bestArtifact?.let { Badge(formatBytes(it.sizeBytes)) }
                 if (model.gated) Badge("Gated")
             }
@@ -205,7 +237,7 @@ private fun ModelCard(model: AiModel, onSelect: (AiModel) -> Unit) {
 }
 
 @Composable
-private fun ModelScreen(
+internal fun ModelScreen(
     state: MobieUiState,
     onDownload: () -> Unit,
     onRequest: () -> Unit,
@@ -221,6 +253,8 @@ private fun ModelScreen(
             Text(model.id, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
             Text(model.description.ifBlank { "No model description is available." })
+            Spacer(Modifier.height(8.dp))
+            Text("Type: ${model.type.displayLabel()}", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         item { CompatibilityCard(state.compatibility, state.device) }
         if (artifact != null) item { ArtifactCard(artifact, model) }
@@ -230,11 +264,27 @@ private fun ModelScreen(
                 state.conversionStatus?.let { Text("Status: ${it.name.lowercase().replaceFirstChar(Char::uppercase)}") }
             } else {
                 val needsToken = model.gated && !state.tokenConfigured
+                val downloading = state.download?.state in setOf(
+                    WorkInfo.State.ENQUEUED,
+                    WorkInfo.State.BLOCKED,
+                    WorkInfo.State.RUNNING,
+                )
+                val downloaded = state.download?.state == WorkInfo.State.SUCCEEDED
                 Button(
                     onClick = onDownload,
-                    enabled = state.compatibility?.status != Compatibility.INCOMPATIBLE && !needsToken,
+                    enabled = state.compatibility?.status != Compatibility.INCOMPATIBLE &&
+                        !needsToken && !downloading && !downloaded,
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text(if (model.gated) "Authenticate, Download & Run" else "Download & Run") }
+                ) {
+                    Text(
+                        when {
+                            downloading -> "Downloading…"
+                            downloaded -> "Downloaded"
+                            model.gated -> "Authenticate, Download & Run"
+                            else -> "Download & Run"
+                        },
+                    )
+                }
                 if (needsToken) {
                     Text("Accept this model's terms on Hugging Face, then add an access token.")
                     OutlinedButton(onClick = onConfigureToken, modifier = Modifier.fillMaxWidth()) {
@@ -245,13 +295,21 @@ private fun ModelScreen(
                     val fraction = if (download.totalBytes > 0) {
                         (download.downloadedBytes.toFloat() / download.totalBytes).coerceIn(0f, 1f)
                     } else 0f
-                    LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
+                    if (download.totalBytes > 0) {
+                        LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
+                    } else {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
                     Text(
                         when (download.state) {
                             WorkInfo.State.SUCCEEDED -> "Downloaded. Runtime integration is the next milestone."
                             WorkInfo.State.FAILED -> download.error ?: "Download failed"
                             WorkInfo.State.CANCELLED -> "Download cancelled"
-                            else -> "${formatBytes(download.downloadedBytes)} · ${formatBytes(download.bytesPerSecond)}/s"
+                            else -> if (download.bytesPerSecond > 0) {
+                                "${formatBytes(download.downloadedBytes)} · ${formatBytes(download.bytesPerSecond)}/s"
+                            } else {
+                                "${formatBytes(download.downloadedBytes)} · Starting…"
+                            }
                         },
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -286,7 +344,7 @@ private fun CompatibilityCard(result: CompatibilityResult?, device: DeviceProfil
 private fun ArtifactCard(artifact: ModelArtifact, model: AiModel) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Recommended artifact", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        InfoRow("Runtime", artifact.format.name.replace('_', '-'))
+        InfoRow("Runtime", artifact.runtimeLabel)
         InfoRow("Quantization", artifact.quantization ?: "As published")
         InfoRow("Download size", formatBytes(artifact.sizeBytes))
         InfoRow("License", model.license ?: "Check model card")
@@ -331,6 +389,7 @@ private fun TokenDialog(configured: Boolean, onDismiss: () -> Unit, onSave: (Str
                 OutlinedTextField(
                     value = token,
                     onValueChange = { token = it },
+                    modifier = Modifier.testTag("hf_token_input"),
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     label = { Text("hf_…") },
@@ -346,4 +405,12 @@ private fun formatBytes(value: Long): String {
     if (value <= 0) return "Unknown"
     val gib = value / (1024.0 * 1024.0 * 1024.0)
     return if (gib >= 1) String.format(Locale.US, "%.1f GB", gib) else String.format(Locale.US, "%.0f MB", value / (1024.0 * 1024.0))
+}
+
+private fun ModelType.displayLabel(): String = when (this) {
+    ModelType.TEXT_GENERATION -> "Text generation"
+    ModelType.EMBEDDING -> "Embedding"
+    ModelType.VISION -> "Vision"
+    ModelType.AUDIO -> "Audio"
+    ModelType.UNKNOWN -> "Unknown"
 }

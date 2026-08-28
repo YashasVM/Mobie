@@ -11,7 +11,14 @@ data class ModelArtifact(
     val sha256: String? = null,
     val format: ModelFormat,
     val quantization: String? = null,
-)
+) {
+    val runtimeLabel: String
+        get() = when (format) {
+            ModelFormat.GGUF -> "llama.cpp"
+            ModelFormat.LITERT_LM -> "LiteRT-LM"
+            ModelFormat.UNKNOWN -> "Unsupported"
+        }
+}
 
 data class AiModel(
     val id: String,
@@ -25,7 +32,27 @@ data class AiModel(
     val artifacts: List<ModelArtifact> = emptyList(),
 ) {
     val bestArtifact: ModelArtifact?
-        get() = artifacts.minByOrNull { it.sizeBytes.takeIf { size -> size > 0 } ?: Long.MAX_VALUE }
+        get() = artifacts.minWithOrNull(
+            compareBy<ModelArtifact>(
+                { if (it.format == ModelFormat.LITERT_LM) 0 else 1 },
+                { quantizationRank(it.quantization) },
+                { if (it.sizeBytes > 0) 0 else 1 },
+                { it.sizeBytes.takeIf { size -> size > 0 } ?: Long.MAX_VALUE },
+            ),
+        )
+
+    private fun quantizationRank(quantization: String?): Int = when (quantization?.uppercase()) {
+        null -> 20
+        "Q4_K_M" -> 0
+        "Q4_K_S" -> 1
+        "Q5_K_M" -> 2
+        "Q5_K_S" -> 3
+        "Q4_0" -> 4
+        "Q5_0" -> 5
+        "Q6_K" -> 6
+        "Q8_0" -> 7
+        else -> 10
+    }
 }
 
 data class DeviceProfile(

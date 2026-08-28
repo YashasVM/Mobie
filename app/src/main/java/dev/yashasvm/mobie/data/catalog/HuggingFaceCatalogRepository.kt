@@ -14,6 +14,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.HttpUrl.Companion.toHttpUrl
 
 class HuggingFaceCatalogRepository(
     private val client: OkHttpClient,
@@ -60,16 +61,20 @@ private data class HfModel(
 ) {
     fun toDomain(): AiModel? {
         val repoId = modelId ?: id ?: return null
+        val liteRtTagged = tags.any { tag ->
+            val normalized = tag.lowercase()
+            normalized.contains("litert") || normalized.contains("litert-lm")
+        }
         val artifacts = siblings.mapNotNull { file ->
             val format = when {
                 file.rfilename.endsWith(".gguf", ignoreCase = true) -> ModelFormat.GGUF
-                file.rfilename.endsWith(".litertlm", ignoreCase = true) ||
-                    file.rfilename.endsWith(".task", ignoreCase = true) -> ModelFormat.LITERT_LM
+                file.rfilename.endsWith(".litertlm", ignoreCase = true) -> ModelFormat.LITERT_LM
+                file.rfilename.endsWith(".task", ignoreCase = true) && liteRtTagged -> ModelFormat.LITERT_LM
                 else -> return@mapNotNull null
             }
             ModelArtifact(
                 fileName = file.rfilename,
-                downloadUrl = "https://huggingface.co/$repoId/resolve/main/${file.rfilename}",
+                downloadUrl = artifactUrl(repoId, file.rfilename),
                 sizeBytes = file.size ?: file.lfs?.size ?: 0,
                 sha256 = file.lfs?.oid?.removePrefix("sha256:"),
                 format = format,
@@ -98,6 +103,14 @@ private data class HfModel(
 
     private fun quantizationFrom(name: String): String? =
         Regex("(?i)(Q[2-8](?:_[A-Z0-9]+)?)").find(name)?.value?.uppercase()
+
+    private fun artifactUrl(repoId: String, fileName: String): String =
+        "https://huggingface.co".toHttpUrl().newBuilder().apply {
+            repoId.split('/').filter(String::isNotBlank).forEach(::addPathSegment)
+            addPathSegment("resolve")
+            addPathSegment("main")
+            fileName.split('/').filter(String::isNotBlank).forEach(::addPathSegment)
+        }.build().toString()
 }
 
 @Serializable
