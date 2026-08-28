@@ -8,11 +8,11 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkInfo
-import androidx.work.getWorkInfoByIdFlow
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
 
 data class DownloadProgress(
@@ -44,7 +44,7 @@ class ModelDownloadManager(context: Context) {
         return request.id
     }
 
-    fun observe(id: UUID): Flow<DownloadProgress> = workManager.getWorkInfoByIdFlow(id).map { work ->
+    fun observe(id: UUID): Flow<DownloadProgress> = workManager.getWorkInfoByIdFlow(id).filterNotNull().map { work ->
         val data = if (work.state.isFinished) work.outputData else work.progress
         DownloadProgress(
             state = work.state,
