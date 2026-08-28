@@ -59,6 +59,7 @@ fun MobieApp(container: AppContainer) {
     val viewModel: MobieViewModel = viewModel(factory = MobieViewModel.factory(container))
     val state by viewModel.state.collectAsState()
     var showSettings by remember { mutableStateOf(false) }
+    var confirmWarning by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -82,9 +83,37 @@ fun MobieApp(container: AppContainer) {
             if (state.selected == null) {
                 CatalogScreen(state, viewModel::setQuery, viewModel::search, viewModel::select, viewModel::loadFeatured)
             } else {
-                ModelScreen(state, viewModel::download, viewModel::requestConversion)
+                ModelScreen(
+                    state = state,
+                    onDownload = {
+                        if (state.compatibility?.status == Compatibility.WARNING) {
+                            confirmWarning = true
+                        } else {
+                            viewModel.download()
+                        }
+                    },
+                    onRequest = viewModel::requestConversion,
+                    onConfigureToken = { showSettings = true },
+                )
             }
         }
+    }
+
+    if (confirmWarning) {
+        AlertDialog(
+            onDismissRequest = { confirmWarning = false },
+            title = { Text("This model may not load") },
+            text = { Text(state.compatibility?.reason.orEmpty()) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmWarning = false
+                        viewModel.download()
+                    },
+                ) { Text("Download anyway") }
+            },
+            dismissButton = { TextButton(onClick = { confirmWarning = false }) { Text("Cancel") } },
+        )
     }
 
     if (showSettings) {
@@ -176,7 +205,12 @@ private fun ModelCard(model: AiModel, onSelect: (AiModel) -> Unit) {
 }
 
 @Composable
-private fun ModelScreen(state: MobieUiState, onDownload: () -> Unit, onRequest: () -> Unit) {
+private fun ModelScreen(
+    state: MobieUiState,
+    onDownload: () -> Unit,
+    onRequest: () -> Unit,
+    onConfigureToken: () -> Unit,
+) {
     val model = state.selected ?: return
     val artifact = model.bestArtifact
     LazyColumn(
@@ -195,11 +229,18 @@ private fun ModelScreen(state: MobieUiState, onDownload: () -> Unit, onRequest: 
                 Button(onClick = onRequest, modifier = Modifier.fillMaxWidth()) { Text("Request Conversion") }
                 state.conversionStatus?.let { Text("Status: ${it.name.lowercase().replaceFirstChar(Char::uppercase)}") }
             } else {
+                val needsToken = model.gated && !state.tokenConfigured
                 Button(
                     onClick = onDownload,
-                    enabled = state.compatibility?.status != Compatibility.INCOMPATIBLE,
+                    enabled = state.compatibility?.status != Compatibility.INCOMPATIBLE && !needsToken,
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text(if (model.gated) "Authenticate, Download & Run" else "Download & Run") }
+                if (needsToken) {
+                    Text("Accept this model's terms on Hugging Face, then add an access token.")
+                    OutlinedButton(onClick = onConfigureToken, modifier = Modifier.fillMaxWidth()) {
+                        Text("Add Hugging Face token")
+                    }
+                }
                 state.download?.let { download ->
                     val fraction = if (download.totalBytes > 0) {
                         (download.downloadedBytes.toFloat() / download.totalBytes).coerceIn(0f, 1f)
