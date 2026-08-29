@@ -48,7 +48,8 @@ class LiteRtEndToEndTest {
         runtime.unload()
 
         val output = events.filterIsInstance<InferenceEvent.Token>().joinToString("") { it.text }
-        assertTrue("LiteRT-LM produced no output", output.isNotBlank())
+        val errors = events.filterIsInstance<InferenceEvent.Error>().joinToString { it.message }
+        assertTrue("LiteRT-LM produced no output. Runtime errors: $errors", output.isNotBlank())
         assertTrue("Generation did not complete", events.any { it is InferenceEvent.Complete })
         assertTrue("No measured runtime stats", events.any { it is InferenceEvent.Stats })
     }

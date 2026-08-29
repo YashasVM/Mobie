@@ -3,6 +3,8 @@ package dev.yashasvm.mobie
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.fetchSemanticsNodes
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
@@ -15,6 +17,9 @@ class MobieSmokeTest {
 
     @Test
     fun appInstallsLaunchesAndStoresTokenSecurely() {
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            composeRule.onAllNodesWithText("Connect Hugging Face").fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNodeWithText("Connect Hugging Face").assertIsDisplayed()
         composeRule.onNodeWithText("Use public models without a token").performClick()
         composeRule.onNodeWithText("Best models for this phone").assertIsDisplayed()

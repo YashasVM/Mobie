@@ -81,7 +81,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
             Contents.of(Content.ImageFile(imagePath), Content.Text(prompt))
         }
         activeConversation.sendMessageAsync(contents, maxOutputToken = config.maxNewTokens).collect { chunk ->
-            val text = chunk.toString()
+            val text = chunk.toString().ifEmpty { chunk.channels.values.joinToString("") }
             if (text.isNotEmpty()) emit(InferenceEvent.Token(text))
         }
         val benchmark = activeConversation.getBenchmarkInfo()
