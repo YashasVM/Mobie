@@ -344,7 +344,7 @@ internal fun ModelScreen(
 }
 
 @Composable
-private fun ChatScreen(state: MobieUiState, onSend: (String, String?) -> Unit) {
+internal fun ChatScreen(state: MobieUiState, onSend: (String, String?) -> Unit) {
     val model = state.selected ?: return
     val context = LocalContext.current
     var prompt by remember { mutableStateOf("") }
@@ -352,7 +352,7 @@ private fun ChatScreen(state: MobieUiState, onSend: (String, String?) -> Unit) {
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         imagePath = uri?.let { copyImageToCache(context, it) }
     }
-    Column(Modifier.fillMaxSize().padding(horizontal = 14.dp)) {
+    Column(Modifier.fillMaxSize().padding(horizontal = 14.dp).testTag("chat_screen")) {
         when (state.runtimeState) {
             RuntimeState.LOADING -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {

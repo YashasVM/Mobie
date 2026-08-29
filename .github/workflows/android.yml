@@ -83,4 +83,11 @@ jobs:
           profile: pixel_7_pro
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -memory 4096
           disable-animations: true
-          script: ./gradlew --no-daemon connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=dev.yashasvm.mobie.LiteRtEndToEndTest -Pandroid.testInstrumentationRunnerArguments.litertE2E=true
+          script: |
+            ./gradlew --no-daemon connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=dev.yashasvm.mobie.LiteRtEndToEndTest -Pandroid.testInstrumentationRunnerArguments.litertE2E=true
+            adb pull /sdcard/Android/data/dev.yashasvm.mobie/files/mobie-qwen-e2e.png mobie-qwen-e2e.png
+      - name: Upload real Qwen chat screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobie-qwen-e2e-screenshot
+          path: mobie-qwen-e2e.png
