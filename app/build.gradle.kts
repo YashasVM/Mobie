@@ -1,5 +1,3 @@
-[main 0ccd080] build: use Kotlin compiler options DSL
- 1 file changed, 6 insertions(+), 1 deletion(-)
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
