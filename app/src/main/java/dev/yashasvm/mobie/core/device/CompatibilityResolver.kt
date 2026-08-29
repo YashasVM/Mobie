@@ -27,21 +27,31 @@ class CompatibilityResolver {
             )
         }
 
-        val estimatedRam = max((artifact.sizeBytes * 1.4).toLong(), artifact.sizeBytes + 768L * MIB)
-        if (artifact.sizeBytes > device.availableStorageBytes) {
-            return CompatibilityResult(Compatibility.INCOMPATIBLE, "Not enough free storage.", estimatedRam)
+        // ponytail: conservative fixed KV allowance until published LiteRT metadata exposes architecture dimensions.
+        val kvCache = 256L * MIB
+        val runtimeOverhead = max((artifact.sizeBytes * 0.4).toLong(), 512L * MIB)
+        val estimatedRam = artifact.sizeBytes + runtimeOverhead + kvCache
+        val requiredStorage = artifact.sizeBytes + max(artifact.sizeBytes / 20, 64L * MIB)
+        fun result(status: Compatibility, reason: String) = CompatibilityResult(
+            status = status,
+            reason = reason,
+            estimatedRamBytes = estimatedRam,
+            modelWeightsBytes = artifact.sizeBytes,
+            runtimeOverheadBytes = runtimeOverhead,
+            kvCacheBytes = kvCache,
+            contextWindowTokens = 4_096,
+            requiredStorageBytes = requiredStorage,
+        )
+        if (requiredStorage > device.availableStorageBytes) {
+            return result(Compatibility.INCOMPATIBLE, "Not enough free storage, including download headroom.")
         }
         if (estimatedRam > device.totalRamBytes * 0.8) {
-            return CompatibilityResult(Compatibility.INCOMPATIBLE, "The model is too large for this device's RAM.", estimatedRam)
+            return result(Compatibility.INCOMPATIBLE, "The model is too large for this device's RAM.")
         }
         if (estimatedRam > device.availableRamBytes * 0.8) {
-            return CompatibilityResult(
-                Compatibility.WARNING,
-                "It should fit, but close other apps before loading it.",
-                estimatedRam,
-            )
+            return result(Compatibility.WARNING, "It should fit after memory is freed. Close other apps before loading it.")
         }
-        return CompatibilityResult(Compatibility.COMPATIBLE, "Expected to run on this device.", estimatedRam)
+        return result(Compatibility.COMPATIBLE, "Expected to fit this device. Exact performance still depends on the model.")
     }
 
     private companion object { const val MIB = 1024L * 1024L }

@@ -71,7 +71,7 @@ class ModelScreensTest {
 
         composeRule.onNodeWithText("Type: Text generation").assertIsDisplayed()
         composeRule.onNodeWithText("LiteRT-LM").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Download & Run").performScrollTo().performClick()
+        composeRule.onNodeWithText("Download model").performScrollTo().performClick()
         assertTrue(downloadRequested)
     }
 

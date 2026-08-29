@@ -17,6 +17,8 @@ The repository currently contains a buildable native Android foundation with:
 - encrypted local storage for a Hugging Face access token
 - conversion-request API boundary and visible request state
 - real local LiteRT-LM chat inference with streaming output and measured performance
+- an installed-model library that survives process death
+- per-model local chat history restored into the LiteRT-LM conversation
 
 Mobie v1 bundles Google's pinned LiteRT-LM Android SDK and deliberately displays only published `.litertlm` text or vision models that fit the detected device. GGUF, conversion, ONNX, and ExecuTorch are not exposed in v1.
 

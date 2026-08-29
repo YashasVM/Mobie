@@ -21,6 +21,7 @@ import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
+import java.util.Properties
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -225,13 +226,35 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
         .putLong(KEY_SPEED, speed)
         .build()
 
-    private fun success(destination: File) = Result.success(
-        Data.Builder()
-            .putString(KEY_PATH, destination.absolutePath)
-            .putLong(KEY_DOWNLOADED, destination.length())
-            .putLong(KEY_SIZE, destination.length())
-            .build(),
-    )
+    private fun success(destination: File): Result {
+        writeMetadata(destination)
+        return Result.success(
+            Data.Builder()
+                .putString(KEY_PATH, destination.absolutePath)
+                .putLong(KEY_DOWNLOADED, destination.length())
+                .putLong(KEY_SIZE, destination.length())
+                .build(),
+        )
+    }
+
+    private fun writeMetadata(destination: File) {
+        val properties = Properties().apply {
+            setProperty("modelId", inputData.getString(KEY_MODEL_ID).orEmpty())
+            setProperty("title", inputData.getString(KEY_TITLE).orEmpty())
+            setProperty("author", inputData.getString(KEY_AUTHOR).orEmpty())
+            setProperty("description", inputData.getString(KEY_DESCRIPTION).orEmpty())
+            setProperty("type", inputData.getString(KEY_TYPE).orEmpty())
+            setProperty("license", inputData.getString(KEY_LICENSE).orEmpty())
+            setProperty("gated", inputData.getBoolean(KEY_GATED, false).toString())
+            setProperty("fileName", destination.name)
+            setProperty("sha256", inputData.getString(KEY_SHA256).orEmpty())
+            setProperty("quantization", inputData.getString(KEY_QUANTIZATION).orEmpty())
+        }
+        val metadata = File(destination.parentFile, DownloadFilePolicy.METADATA_FILE)
+        val partial = File(metadata.path + ".part")
+        partial.outputStream().use { properties.store(it, null) }
+        finalizeFile(partial, metadata)
+    }
 
     private fun invalidInput(message: String) = Result.failure(dataOf(message))
     private fun dataOf(message: String) = Data.Builder().putString(KEY_ERROR, message).build()
@@ -239,7 +262,14 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
     companion object {
         const val KEY_URL = "url"
         const val KEY_MODEL_ID = "model_id"
+        const val KEY_TITLE = "title"
+        const val KEY_AUTHOR = "author"
+        const val KEY_DESCRIPTION = "description"
+        const val KEY_TYPE = "type"
+        const val KEY_LICENSE = "license"
+        const val KEY_GATED = "gated"
         const val KEY_FILE_NAME = "file_name"
+        const val KEY_QUANTIZATION = "quantization"
         const val KEY_SHA256 = "sha256"
         const val KEY_SIZE = "size"
         const val KEY_DOWNLOADED = "downloaded"

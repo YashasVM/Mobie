@@ -56,7 +56,7 @@ class HuggingFaceCatalogRepository(
                     }.awaitAll()
                 }
                 models.mapNotNull(HfModel::toDomain).filter { model ->
-                    model.artifacts.any { it.format == ModelFormat.LITERT_LM } &&
+                    model.artifacts.any { it.format == ModelFormat.LITERT_LM && it.sizeBytes > 0 } &&
                         model.type in setOf(ModelType.TEXT_GENERATION, ModelType.VISION)
                 }
             }
@@ -101,10 +101,11 @@ private data class HfModel(
                 file.rfilename.endsWith(".litertlm", ignoreCase = true) -> ModelFormat.LITERT_LM
                 else -> return@mapNotNull null
             }
+            val size = file.size ?: file.lfs?.size ?: return@mapNotNull null
             ModelArtifact(
                 fileName = file.rfilename,
                 downloadUrl = artifactUrl(repoId, file.rfilename),
-                sizeBytes = file.size ?: file.lfs?.size ?: 0,
+                sizeBytes = size,
                 sha256 = file.lfs?.oid?.removePrefix("sha256:"),
                 format = format,
                 quantization = quantizationFrom(file.rfilename),

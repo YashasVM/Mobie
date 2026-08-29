@@ -69,6 +69,11 @@ data class CompatibilityResult(
     val status: Compatibility,
     val reason: String,
     val estimatedRamBytes: Long,
+    val modelWeightsBytes: Long = 0,
+    val runtimeOverheadBytes: Long = 0,
+    val kvCacheBytes: Long = 0,
+    val contextWindowTokens: Int = 0,
+    val requiredStorageBytes: Long = 0,
 )
 
 enum class ConversionStatus { REQUESTED, REVIEWING, CONVERTING, TESTING, READY, UNSUPPORTED }

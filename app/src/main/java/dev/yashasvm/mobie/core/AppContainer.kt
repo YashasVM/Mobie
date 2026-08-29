@@ -9,6 +9,7 @@ import dev.yashasvm.mobie.core.security.HuggingFaceTokenStore
 import dev.yashasvm.mobie.data.catalog.HuggingFaceCatalogRepository
 import dev.yashasvm.mobie.data.conversion.ConversionRepository
 import dev.yashasvm.mobie.data.download.ModelDownloadManager
+import dev.yashasvm.mobie.data.history.ChatHistoryStore
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -22,6 +23,7 @@ class AppContainer(context: Context) {
     val catalog = HuggingFaceCatalogRepository(http, tokenStore)
     val conversion = ConversionRepository(http)
     val downloads = ModelDownloadManager(appContext)
+    val chatHistory = ChatHistoryStore(appContext)
     val deviceProfile = DeviceProfileProvider(appContext)
     val compatibility = CompatibilityResolver()
     val runtimes = RuntimeRegistry(setOf(LiteRtLmRuntimeAdapter(appContext)))

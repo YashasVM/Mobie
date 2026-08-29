@@ -5,8 +5,9 @@ import kotlinx.coroutines.flow.Flow
 
 data class GenerationConfig(
     val maxNewTokens: Int = 256,
-    val temperature: Float = 0.7f,
 )
+
+data class RuntimeMessage(val fromUser: Boolean, val text: String)
 
 data class InferenceStats(
     val tokensPerSecond: Double,
@@ -22,11 +23,16 @@ sealed interface InferenceEvent {
 
 interface RuntimeAdapter {
     val format: ModelFormat
-    suspend fun load(modelPath: String, vision: Boolean = false): Result<Unit>
+    suspend fun load(
+        modelPath: String,
+        vision: Boolean = false,
+        history: List<RuntimeMessage> = emptyList(),
+    ): Result<Unit>
     fun generate(
         prompt: String,
         imagePath: String? = null,
         config: GenerationConfig = GenerationConfig(),
     ): Flow<InferenceEvent>
+    suspend fun cancel()
     suspend fun unload()
 }

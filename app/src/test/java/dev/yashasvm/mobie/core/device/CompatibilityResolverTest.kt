@@ -5,6 +5,7 @@ import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CompatibilityResolverTest {
@@ -22,6 +23,17 @@ class CompatibilityResolverTest {
     fun `small LiteRT LM model is compatible`() {
         val result = resolver.resolve(artifact(size = 2 * gib), device)
         assertEquals(Compatibility.COMPATIBLE, result.status)
+        assertEquals(2 * gib, result.modelWeightsBytes)
+        assertTrue(result.runtimeOverheadBytes > 0)
+        assertTrue(result.kvCacheBytes > 0)
+        assertEquals(4_096, result.contextWindowTokens)
+        assertTrue(result.requiredStorageBytes > result.modelWeightsBytes)
+    }
+
+    @Test
+    fun `model that can fit total ram but not current ram warns`() {
+        val constrained = device.copy(availableRamBytes = 2 * gib)
+        assertEquals(Compatibility.WARNING, resolver.resolve(artifact(size = gib), constrained).status)
     }
 
     @Test

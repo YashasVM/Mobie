@@ -6,12 +6,17 @@ import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.Conversation
+import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.ExperimentalApi
 import com.google.ai.edge.litertlm.ExperimentalFlags
+import com.google.ai.edge.litertlm.Message
+import com.google.ai.edge.litertlm.SamplerConfig
 import dev.yashasvm.mobie.core.model.ModelFormat
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flow
@@ -27,11 +32,12 @@ import kotlinx.coroutines.withContext
  */
 class GgufRuntimeAdapter : RuntimeAdapter {
     override val format = ModelFormat.GGUF
-    override suspend fun load(modelPath: String, vision: Boolean) = Result.failure<Unit>(
+    override suspend fun load(modelPath: String, vision: Boolean, history: List<RuntimeMessage>) = Result.failure<Unit>(
         IllegalStateException("llama.cpp native library is not bundled in this MVP build"),
     )
     override fun generate(prompt: String, imagePath: String?, config: GenerationConfig): Flow<InferenceEvent> =
         flowOf(InferenceEvent.Error("GGUF runtime is not installed"))
+    override suspend fun cancel() = Unit
     override suspend fun unload() = Unit
 }
 
@@ -40,12 +46,19 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     override val format = ModelFormat.LITERT_LM
     private val appContext = context.applicationContext
     private val lifecycle = Mutex()
+    private val generation = Mutex()
     private var engine: Engine? = null
     private var conversation: Conversation? = null
 
-    override suspend fun load(modelPath: String, vision: Boolean): Result<Unit> = withContext(Dispatchers.Default) {
-        lifecycle.withLock {
-            runCatching {
+    override suspend fun load(
+        modelPath: String,
+        vision: Boolean,
+        history: List<RuntimeMessage>,
+    ): Result<Unit> = withContext(Dispatchers.Default) {
+        cancel()
+        generation.withLock {
+            lifecycle.withLock {
+                runCatching {
                 closeRuntime()
                 ExperimentalFlags.enableBenchmark = true
                 val createdEngine = Engine(
@@ -59,10 +72,26 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                 try {
                     createdEngine.initialize()
                     engine = createdEngine
-                    conversation = createdEngine.createConversation()
+                    // ponytail: cap restored context; add token-aware trimming when LiteRT exposes cheap counts pre-load.
+                    val restored = history.takeLast(20).filter { it.text.isNotBlank() }.map {
+                        if (it.fromUser) Message.user(it.text) else Message.model(it.text)
+                    }
+                    conversation = createdEngine.createConversation(
+                        ConversationConfig(
+                            initialMessages = restored,
+                            samplerConfig = SamplerConfig(
+                                topK = 40,
+                                topP = 0.95,
+                                temperature = 0.7,
+                                seed = 0,
+                            ),
+                            maxOutputToken = DEFAULT_MAX_OUTPUT_TOKENS,
+                        ),
+                    )
                 } catch (error: Throwable) {
                     createdEngine.close()
                     throw error
+                }
                 }
             }
         }
@@ -73,33 +102,42 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         imagePath: String?,
         config: GenerationConfig,
     ): Flow<InferenceEvent> = flow {
-        val activeConversation = conversation
-            ?: throw IllegalStateException("Load a model before starting a conversation")
-        val contents = if (imagePath == null) {
-            Contents.of(prompt)
-        } else {
-            Contents.of(Content.ImageFile(imagePath), Content.Text(prompt))
-        }
-        activeConversation.sendMessageAsync(contents, maxOutputToken = config.maxNewTokens).collect { chunk ->
-            val text = chunk.toString().ifEmpty { chunk.channels.values.joinToString("") }
-            if (text.isNotEmpty()) emit(InferenceEvent.Token(text))
-        }
-        val benchmark = activeConversation.getBenchmarkInfo()
-        emit(
-            InferenceEvent.Stats(
-                InferenceStats(
-                    tokensPerSecond = benchmark.lastDecodeTokensPerSecond,
-                    ramBytes = currentAppRamBytes(),
+        generation.withLock {
+            val activeConversation = conversation
+                ?: throw IllegalStateException("Load a model before starting a conversation")
+            val contents = if (imagePath == null) {
+                Contents.of(prompt)
+            } else {
+                Contents.of(Content.ImageFile(imagePath), Content.Text(prompt))
+            }
+            activeConversation.sendMessageAsync(contents, maxOutputToken = config.maxNewTokens).collect { chunk ->
+                currentCoroutineContext().ensureActive()
+                val text = chunk.toString().ifEmpty { chunk.channels.values.joinToString("") }
+                if (text.isNotEmpty()) emit(InferenceEvent.Token(text))
+            }
+            val benchmark = activeConversation.getBenchmarkInfo()
+            emit(
+                InferenceEvent.Stats(
+                    InferenceStats(
+                        tokensPerSecond = benchmark.lastDecodeTokensPerSecond,
+                        ramBytes = currentAppRamBytes(),
+                    ),
                 ),
-            ),
-        )
-        emit(InferenceEvent.Complete)
+            )
+            emit(InferenceEvent.Complete)
+        }
     }.catch { error ->
         emit(InferenceEvent.Error(error.message ?: "Inference failed"))
     }.flowOn(Dispatchers.Default)
 
+    override suspend fun cancel() = withContext(Dispatchers.Default) {
+        conversation?.cancelProcess()
+        Unit
+    }
+
     override suspend fun unload() = withContext(Dispatchers.Default) {
-        lifecycle.withLock { closeRuntime() }
+        cancel()
+        generation.withLock { lifecycle.withLock { closeRuntime() } }
     }
 
     private fun closeRuntime() {
@@ -114,4 +152,6 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         return manager.getProcessMemoryInfo(intArrayOf(android.os.Process.myPid()))
             .firstOrNull()?.totalPss?.toLong()?.times(1024L) ?: 0L
     }
+
+    private companion object { const val DEFAULT_MAX_OUTPUT_TOKENS = 256 }
 }

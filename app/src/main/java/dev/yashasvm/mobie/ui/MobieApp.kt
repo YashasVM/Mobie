@@ -8,9 +8,6 @@ import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,9 +17,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -52,7 +51,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -64,43 +62,42 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.work.WorkInfo
 import dev.yashasvm.mobie.core.AppContainer
 import dev.yashasvm.mobie.core.model.AiModel
+import dev.yashasvm.mobie.core.model.Compatibility
 import dev.yashasvm.mobie.core.model.CompatibilityResult
 import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelType
 import java.io.File
 import java.util.Locale
-import kotlinx.coroutines.delay
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 fun MobieApp(container: AppContainer) {
     val viewModel: MobieViewModel = viewModel(factory = MobieViewModel.factory(container))
     val state by viewModel.state.collectAsState()
-    var splashFinished by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
-
-    if (!splashFinished) {
-        MobieSplash { splashFinished = true }
-        return
-    }
     if (!state.onboardingComplete) {
         OnboardingScreen(viewModel::finishOnboarding)
         return
     }
 
+    var warningOverride by remember { mutableStateOf(false) }
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
-    ) { viewModel.download() }
-    fun requestDownload() {
+    ) {
+        viewModel.download(warningOverride)
+        warningOverride = false
+    }
+    fun requestDownload(allowWarning: Boolean) {
         if (
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(container.appContext, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
         ) {
+            warningOverride = allowWarning
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
-            viewModel.download()
+            viewModel.download(allowWarning)
         }
     }
 
@@ -128,7 +125,9 @@ fun MobieApp(container: AppContainer) {
                     }
                 },
                 actions = {
-                    if (state.selected == null) {
+                    if (state.chatting) {
+                        TextButton(onClick = viewModel::newChat) { Text("New chat") }
+                    } else if (state.selected == null) {
                         TextButton(onClick = { showSettings = true }) { Text("HF token") }
                     }
                 },
@@ -137,7 +136,7 @@ fun MobieApp(container: AppContainer) {
     ) { padding ->
         Surface(Modifier.fillMaxSize().padding(padding)) {
             when {
-                state.chatting -> ChatScreen(state, viewModel::sendMessage)
+                state.chatting -> ChatScreen(state, viewModel::sendMessage, viewModel::stopGeneration)
                 state.selected != null -> ModelScreen(state, ::requestDownload, viewModel::runInstalled) {
                     showSettings = true
                 }
@@ -156,33 +155,6 @@ fun MobieApp(container: AppContainer) {
         TokenDialog(state.tokenConfigured, onDismiss = { showSettings = false }) {
             viewModel.saveToken(it)
             showSettings = false
-        }
-    }
-}
-
-@Composable
-private fun MobieSplash(onFinished: () -> Unit) {
-    val alpha = remember { Animatable(0f) }
-    val scale = remember { Animatable(0.86f) }
-    LaunchedEffect(Unit) {
-        alpha.animateTo(1f, tween(420))
-        scale.animateTo(1f, tween(420))
-        delay(520)
-        alpha.animateTo(0f, tween(260))
-        onFinished()
-    }
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(
-            modifier = Modifier.graphicsLayer(alpha = alpha.value, scaleX = scale.value, scaleY = scale.value),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary) {
-                Box(Modifier.padding(horizontal = 24.dp, vertical = 14.dp)) {
-                    Text("M", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.displayMedium)
-                }
-            }
-            Spacer(Modifier.height(14.dp))
-            Text("Mobie", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -231,12 +203,42 @@ internal fun CatalogScreen(
     onSelect: (AiModel) -> Unit,
     onFeatured: () -> Unit,
 ) {
+    var installedOnly by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        Text("Best models for this phone", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text(
-            "${formatBytes(state.device?.totalRamBytes ?: 0)} RAM · Only ready-to-run LiteRT-LM models",
+            if (installedOnly) "Installed on this phone" else "Models for this phone",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            "${formatBytes(state.device?.totalRamBytes ?: 0)} RAM · Published LiteRT-LM packages only",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (installedOnly) {
+                OutlinedButton(onClick = { installedOnly = false }) { Text("Discover") }
+                Button(onClick = {}, enabled = false) { Text("Installed (${state.installedModels.size})") }
+            } else {
+                Button(onClick = {}, enabled = false) { Text("Discover") }
+                OutlinedButton(onClick = { installedOnly = true }) { Text("Installed (${state.installedModels.size})") }
+            }
+        }
+        if (installedOnly) {
+            Spacer(Modifier.height(16.dp))
+            if (state.installedModels.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Downloaded models will appear here.")
+                }
+            } else {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    items(state.installedModels, key = { it.model.id }) { entry ->
+                        ModelCard(entry.model, Compatibility.COMPATIBLE, installed = true, onSelect)
+                    }
+                }
+            }
+            return@Column
+        }
         Spacer(Modifier.height(16.dp))
         OutlinedTextField(
             value = state.query,
@@ -257,10 +259,20 @@ internal fun CatalogScreen(
             state.loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             state.error != null -> ErrorState(state.error, onFeatured)
             state.models.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("No verified LiteRT-LM model fits this device.")
+                Text("No published LiteRT-LM models matched.")
             }
             else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(state.models, key = { it.id }) { model -> ModelCard(model, onSelect) }
+                items(state.models, key = { it.id }) { model ->
+                    val status = state.device?.let {
+                        dev.yashasvm.mobie.core.device.CompatibilityResolver().resolve(model.bestArtifact, it).status
+                    } ?: Compatibility.INCOMPATIBLE
+                    ModelCard(
+                        model,
+                        status,
+                        installed = state.installedModels.any { it.model.id == model.id },
+                        onSelect,
+                    )
+                }
                 item { Spacer(Modifier.height(24.dp)) }
             }
         }
@@ -268,7 +280,12 @@ internal fun CatalogScreen(
 }
 
 @Composable
-private fun ModelCard(model: AiModel, onSelect: (AiModel) -> Unit) {
+private fun ModelCard(
+    model: AiModel,
+    compatibility: Compatibility,
+    installed: Boolean,
+    onSelect: (AiModel) -> Unit,
+) {
     Card(
         modifier = Modifier.fillMaxWidth().clickable { onSelect(model) },
         shape = RoundedCornerShape(18.dp),
@@ -278,8 +295,15 @@ private fun ModelCard(model: AiModel, onSelect: (AiModel) -> Unit) {
             Text(model.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(model.author, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Badge("LiteRT-LM")
+                Badge(
+                    when (compatibility) {
+                        Compatibility.COMPATIBLE -> "Ready"
+                        Compatibility.WARNING -> "Needs memory"
+                        else -> "Cannot run"
+                    },
+                )
                 model.bestArtifact?.let { Badge(formatBytes(it.sizeBytes)) }
+                if (installed) Badge("Installed")
                 if (model.supportsVision) Badge("Vision")
             }
         }
@@ -289,12 +313,13 @@ private fun ModelCard(model: AiModel, onSelect: (AiModel) -> Unit) {
 @Composable
 internal fun ModelScreen(
     state: MobieUiState,
-    onDownload: () -> Unit,
+    onDownload: (Boolean) -> Unit,
     onRun: () -> Unit,
     onConfigureToken: () -> Unit,
 ) {
     val model = state.selected ?: return
     val artifact = model.bestArtifact ?: return
+    var confirmWarning by remember { mutableStateOf(false) }
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -313,11 +338,16 @@ internal fun ModelScreen(
                 Button(onClick = onRun, modifier = Modifier.fillMaxWidth()) { Text("Run locally") }
             } else {
                 Button(
-                    onClick = onDownload,
-                    enabled = !downloading && (!model.gated || state.tokenConfigured),
+                    onClick = {
+                        if (state.compatibility?.status == Compatibility.WARNING) confirmWarning = true
+                        else onDownload(false)
+                    },
+                    enabled = !downloading &&
+                        state.compatibility?.status in setOf(Compatibility.COMPATIBLE, Compatibility.WARNING) &&
+                        (!model.gated || state.tokenConfigured),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(if (downloading) "Downloading…" else "Download & Run")
+                    Text(if (downloading) "Downloading…" else "Download model")
                 }
             }
             if (model.gated && !state.tokenConfigured) {
@@ -341,16 +371,38 @@ internal fun ModelScreen(
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
     }
+    if (confirmWarning) {
+        AlertDialog(
+            onDismissRequest = { confirmWarning = false },
+            title = { Text("Free memory before running") },
+            text = { Text(state.compatibility?.reason.orEmpty()) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmWarning = false
+                    onDownload(true)
+                }) { Text("Download anyway") }
+            },
+            dismissButton = { TextButton(onClick = { confirmWarning = false }) { Text("Cancel") } },
+        )
+    }
 }
 
 @Composable
-internal fun ChatScreen(state: MobieUiState, onSend: (String, String?) -> Unit) {
+internal fun ChatScreen(
+    state: MobieUiState,
+    onSend: (String, String?) -> Unit,
+    onStop: () -> Unit = {},
+) {
     val model = state.selected ?: return
     val context = LocalContext.current
     var prompt by remember { mutableStateOf("") }
     var imagePath by remember { mutableStateOf<String?>(null) }
+    val listState = rememberLazyListState()
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         imagePath = uri?.let { copyImageToCache(context, it) }
+    }
+    LaunchedEffect(state.messages.size, state.messages.lastOrNull()?.text) {
+        if (state.messages.isNotEmpty()) listState.animateScrollToItem(state.messages.lastIndex)
     }
     Column(Modifier.fillMaxSize().padding(horizontal = 14.dp).testTag("chat_screen")) {
         when (state.runtimeState) {
@@ -365,9 +417,19 @@ internal fun ChatScreen(state: MobieUiState, onSend: (String, String?) -> Unit) 
                 Text(state.error ?: "The model could not run.", color = MaterialTheme.colorScheme.error)
             }
             else -> {
-                LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
                     if (state.messages.isEmpty()) item {
-                        Text("Running completely on this device", color = MaterialTheme.colorScheme.primary)
+                        Column(Modifier.padding(vertical = 24.dp)) {
+                            Text("Private, local chat", style = MaterialTheme.typography.titleLarge)
+                            Text(
+                                "Prompts and replies stay on this device.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                     items(state.messages) { message ->
                         Row(
@@ -390,6 +452,19 @@ internal fun ChatScreen(state: MobieUiState, onSend: (String, String?) -> Unit) 
                         style = MaterialTheme.typography.labelMedium,
                     )
                 }
+                state.error?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 6.dp))
+                }
+                if (state.runtimeState == RuntimeState.GENERATING) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Generating on device…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        OutlinedButton(onClick = onStop) { Text("Stop") }
+                    }
+                }
                 imagePath?.let { Text("Image attached", color = MaterialTheme.colorScheme.primary) }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (model.supportsVision) {
@@ -399,7 +474,7 @@ internal fun ChatScreen(state: MobieUiState, onSend: (String, String?) -> Unit) 
                         value = prompt,
                         onValueChange = { prompt = it },
                         modifier = Modifier.weight(1f).testTag("chat_input"),
-                        placeholder = { Text("Message") },
+                        label = { Text("Message") },
                         enabled = state.runtimeState == RuntimeState.READY,
                         maxLines = 4,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
@@ -427,12 +502,33 @@ internal fun ChatScreen(state: MobieUiState, onSend: (String, String?) -> Unit) 
 private fun CompatibilityCard(result: CompatibilityResult?, device: DeviceProfile?) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Verified for this device", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                when (result?.status) {
+                    Compatibility.COMPATIBLE -> "Ready for this phone"
+                    Compatibility.WARNING -> "Needs memory first"
+                    Compatibility.INCOMPATIBLE -> "Cannot run on this phone"
+                    else -> "Not directly runnable"
+                },
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = when (result?.status) {
+                    Compatibility.COMPATIBLE -> MaterialTheme.colorScheme.primary
+                    Compatibility.WARNING -> MaterialTheme.colorScheme.tertiary
+                    else -> MaterialTheme.colorScheme.error
+                },
+            )
             Text(result?.reason.orEmpty())
             HorizontalDivider()
+            InfoRow("Model weights", formatBytes(result?.modelWeightsBytes ?: 0))
+            InfoRow("Runtime overhead", formatBytes(result?.runtimeOverheadBytes ?: 0))
+            InfoRow("KV cache", formatBytes(result?.kvCacheBytes ?: 0))
+            InfoRow("Prompt context", "${result?.contextWindowTokens ?: 0} tokens")
             InfoRow("Estimated RAM", formatBytes(result?.estimatedRamBytes ?: 0))
+            InfoRow("Total RAM", formatBytes(device?.totalRamBytes ?: 0))
             InfoRow("Available RAM", formatBytes(device?.availableRamBytes ?: 0))
+            InfoRow("Storage needed", formatBytes(result?.requiredStorageBytes ?: 0))
             InfoRow("Free storage", formatBytes(device?.availableStorageBytes ?: 0))
+            InfoRow("Device", "Android ${device?.sdkInt ?: 0} · ${device?.supportedAbis?.firstOrNull() ?: "Unknown ABI"}")
         }
     }
 }
@@ -442,17 +538,21 @@ private fun ArtifactCard(artifact: ModelArtifact, model: AiModel) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Model package", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         InfoRow("Runtime", "LiteRT-LM")
+        InfoRow("Artifact", artifact.fileName.substringAfterLast('/'))
         InfoRow("Download", formatBytes(artifact.sizeBytes))
+        InfoRow("Quantization", artifact.quantization ?: "Publisher default")
+        InfoRow("Checksum", if (artifact.sha256.isNullOrBlank()) "Size validation only" else "SHA-256 available")
         InfoRow("Vision", if (model.supportsVision) "Supported" else "Text only")
         InfoRow("License", model.license ?: "Check model card")
+        InfoRow("Access", if (model.gated) "Hugging Face approval required" else "Public")
     }
 }
 
 @Composable
 private fun InfoRow(label: String, value: String) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, fontWeight = FontWeight.Medium)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(0.42f))
+        Text(value, fontWeight = FontWeight.Medium, modifier = Modifier.weight(0.58f))
     }
 }
 
