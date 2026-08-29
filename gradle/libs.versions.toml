@@ -10,6 +10,7 @@ serialization = "1.7.3"
 okhttp = "4.12.0"
 work = "2.10.0"
 securityCrypto = "1.1.0-alpha06"
+litertLm = "0.16.1"
 junit = "4.13.2"
 androidxJunit = "1.2.1"
 espresso = "3.6.1"
@@ -31,6 +32,7 @@ androidx-security-crypto = { module = "androidx.security:security-crypto", versi
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
+litert-lm-android = { module = "com.google.ai.edge.litertlm:litertlm-android", version.ref = "litertLm" }
 junit = { module = "junit:junit", version.ref = "junit" }
 androidx-junit = { module = "androidx.test.ext:junit", version.ref = "androidxJunit" }
 androidx-espresso-core = { module = "androidx.test.espresso:espresso-core", version.ref = "espresso" }

@@ -36,7 +36,7 @@ class ModelScreensTest {
             }
         }
 
-        composeRule.onNodeWithText("Popular models").assertIsDisplayed()
+        composeRule.onNodeWithText("Recommended").assertIsDisplayed()
         composeRule.onNodeWithText("Test Model").assertIsDisplayed().performClick()
         assertTrue(selected)
     }
@@ -63,15 +63,14 @@ class ModelScreensTest {
                         ),
                     ),
                     onDownload = { downloadRequested = true },
-                    onRequest = {},
+                    onRun = {},
                     onConfigureToken = {},
                 )
             }
         }
 
         composeRule.onNodeWithText("Type: Text generation").assertIsDisplayed()
-        composeRule.onNodeWithText("llama.cpp").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Q4_K_M").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("LiteRT-LM").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("Download & Run").performScrollTo().performClick()
         assertTrue(downloadRequested)
     }
@@ -83,11 +82,10 @@ class ModelScreensTest {
         description = "A small test model",
         artifacts = listOf(
             ModelArtifact(
-                fileName = "test-q4-k-m.gguf",
-                downloadUrl = "https://example.invalid/test.gguf",
+                fileName = "test.litertlm",
+                downloadUrl = "https://example.invalid/test.litertlm",
                 sizeBytes = GIB,
-                format = ModelFormat.GGUF,
-                quantization = "Q4_K_M",
+                format = ModelFormat.LITERT_LM,
             ),
         ),
     )

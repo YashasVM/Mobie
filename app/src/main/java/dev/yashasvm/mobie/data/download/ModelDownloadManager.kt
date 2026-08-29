@@ -10,6 +10,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkInfo
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import java.util.UUID
+import java.io.File
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filterNotNull
@@ -25,7 +26,16 @@ data class DownloadProgress(
 )
 
 class ModelDownloadManager(context: Context) {
+    private val appContext = context.applicationContext
     private val workManager = WorkManager.getInstance(context)
+
+    fun completedFile(modelId: String, artifact: ModelArtifact): File? {
+        val file = File(
+            File(File(appContext.filesDir, "models"), DownloadFilePolicy.storageKey(modelId)),
+            DownloadFilePolicy.safeFileName(artifact.fileName),
+        )
+        return file.takeIf { it.isFile && (artifact.sizeBytes <= 0 || it.length() == artifact.sizeBytes) }
+    }
 
     fun enqueue(modelId: String, artifact: ModelArtifact): UUID {
         val input = Data.Builder()

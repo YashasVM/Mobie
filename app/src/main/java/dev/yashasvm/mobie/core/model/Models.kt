@@ -31,6 +31,8 @@ data class AiModel(
     val type: ModelType = ModelType.TEXT_GENERATION,
     val artifacts: List<ModelArtifact> = emptyList(),
 ) {
+    val supportsVision: Boolean get() = type == ModelType.VISION
+
     val bestArtifact: ModelArtifact?
         get() = artifacts.minWithOrNull(
             compareBy<ModelArtifact>(

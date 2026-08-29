@@ -3,7 +3,6 @@ package dev.yashasvm.mobie.core
 import android.content.Context
 import dev.yashasvm.mobie.core.device.CompatibilityResolver
 import dev.yashasvm.mobie.core.device.DeviceProfileProvider
-import dev.yashasvm.mobie.core.runtime.GgufRuntimeAdapter
 import dev.yashasvm.mobie.core.runtime.LiteRtLmRuntimeAdapter
 import dev.yashasvm.mobie.core.runtime.RuntimeRegistry
 import dev.yashasvm.mobie.core.security.HuggingFaceTokenStore
@@ -25,5 +24,5 @@ class AppContainer(context: Context) {
     val downloads = ModelDownloadManager(appContext)
     val deviceProfile = DeviceProfileProvider(appContext)
     val compatibility = CompatibilityResolver()
-    val runtimes = RuntimeRegistry(setOf(GgufRuntimeAdapter(), LiteRtLmRuntimeAdapter()))
+    val runtimes = RuntimeRegistry(setOf(LiteRtLmRuntimeAdapter(appContext)))
 }

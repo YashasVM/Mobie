@@ -22,7 +22,11 @@ sealed interface InferenceEvent {
 
 interface RuntimeAdapter {
     val format: ModelFormat
-    suspend fun load(modelPath: String): Result<Unit>
-    fun generate(prompt: String, config: GenerationConfig = GenerationConfig()): Flow<InferenceEvent>
+    suspend fun load(modelPath: String, vision: Boolean = false): Result<Unit>
+    fun generate(
+        prompt: String,
+        imagePath: String? = null,
+        config: GenerationConfig = GenerationConfig(),
+    ): Flow<InferenceEvent>
     suspend fun unload()
 }

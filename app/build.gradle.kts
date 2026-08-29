@@ -13,8 +13,8 @@ android {
         applicationId = "dev.yashasvm.mobie"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
         buildConfigField("String", "CONVERSION_API_URL", "\"\"")
@@ -53,6 +53,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
+    implementation(libs.litert.lm.android)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

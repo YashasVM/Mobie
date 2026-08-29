@@ -8,7 +8,7 @@ The repository currently contains a buildable native Android foundation with:
 
 - Hugging Face featured-model browsing and search
 - filtering to directly supported artifacts or text models that may be convertible
-- GGUF and LiteRT-LM artifact detection
+- ready-to-run LiteRT-LM discovery from the Hugging Face LiteRT Community
 - RAM, storage, ABI, and format compatibility checks
 - model details with runtime, quantization, size, license, and device guidance
 - resumable background downloads using HTTP range requests
@@ -16,9 +16,9 @@ The repository currently contains a buildable native Android foundation with:
 - optional SHA-256 verification when Hugging Face exposes a digest
 - encrypted local storage for a Hugging Face access token
 - conversion-request API boundary and visible request state
-- runtime-adapter interfaces for llama.cpp and LiteRT-LM
+- real local LiteRT-LM chat inference with streaming output and measured performance
 
-Native llama.cpp and LiteRT-LM binaries are **not yet bundled**. Their adapters fail clearly instead of simulating inference. The next runtime milestone is to add audited native dependencies, wire streaming generation, and expose measured tokens/second and RAM usage.
+Mobie v1 bundles Google's pinned LiteRT-LM Android SDK and deliberately displays only published `.litertlm` text or vision models that fit the detected device. GGUF, conversion, ONNX, and ExecuTorch are not exposed in v1.
 
 ## Product flow
 

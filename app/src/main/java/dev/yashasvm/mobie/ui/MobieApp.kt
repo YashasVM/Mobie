@@ -1,11 +1,16 @@
 package dev.yashasvm.mobie.ui
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,15 +23,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -46,112 +52,173 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.work.WorkInfo
 import dev.yashasvm.mobie.core.AppContainer
 import dev.yashasvm.mobie.core.model.AiModel
-import dev.yashasvm.mobie.core.model.Compatibility
 import dev.yashasvm.mobie.core.model.CompatibilityResult
 import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelType
-import androidx.work.WorkInfo
+import java.io.File
 import java.util.Locale
+import kotlinx.coroutines.delay
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 fun MobieApp(container: AppContainer) {
     val viewModel: MobieViewModel = viewModel(factory = MobieViewModel.factory(container))
     val state by viewModel.state.collectAsState()
+    var splashFinished by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
-    var confirmWarning by remember { mutableStateOf(false) }
 
-    fun continueDownload() {
-        if (state.compatibility?.status == Compatibility.WARNING) {
-            confirmWarning = true
+    if (!splashFinished) {
+        MobieSplash { splashFinished = true }
+        return
+    }
+    if (!state.onboardingComplete) {
+        OnboardingScreen(viewModel::finishOnboarding)
+        return
+    }
+
+    val notificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { viewModel.download() }
+    fun requestDownload() {
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(container.appContext, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
             viewModel.download()
         }
     }
 
-    val notificationPermission = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { continueDownload() }
-
-    fun requestDownload() {
-        val context = container.appContext
-        if (
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-        } else {
-            continueDownload()
-        }
+    BackHandler(enabled = state.selected != null) {
+        if (state.chatting) viewModel.leaveChat() else viewModel.select(null)
     }
-
-    BackHandler(enabled = state.selected != null) { viewModel.select(null) }
-    LaunchedEffect(state.selected?.id) { confirmWarning = false }
-
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Text(
-                        if (state.selected == null) "Mobie" else state.selected?.title.orEmpty(),
+                        when {
+                            state.chatting -> state.selected?.title.orEmpty()
+                            state.selected != null -> state.selected?.title.orEmpty()
+                            else -> "Mobie"
+                        },
                         fontWeight = FontWeight.Bold,
                     )
                 },
                 navigationIcon = {
-                    if (state.selected != null) TextButton(onClick = { viewModel.select(null) }) { Text("Back") }
+                    if (state.selected != null) {
+                        TextButton(onClick = {
+                            if (state.chatting) viewModel.leaveChat() else viewModel.select(null)
+                        }) { Text("Back") }
+                    }
                 },
                 actions = {
-                    if (state.selected == null) TextButton(onClick = { showSettings = true }) { Text("HF token") }
+                    if (state.selected == null) {
+                        TextButton(onClick = { showSettings = true }) { Text("HF token") }
+                    }
                 },
             )
         },
     ) { padding ->
         Surface(Modifier.fillMaxSize().padding(padding)) {
-            if (state.selected == null) {
-                CatalogScreen(state, viewModel::setQuery, viewModel::search, viewModel::select, viewModel::loadFeatured)
-            } else {
-                ModelScreen(
-                    state = state,
-                    onDownload = ::requestDownload,
-                    onRequest = viewModel::requestConversion,
-                    onConfigureToken = { showSettings = true },
+            when {
+                state.chatting -> ChatScreen(state, viewModel::sendMessage)
+                state.selected != null -> ModelScreen(state, ::requestDownload, viewModel::runInstalled) {
+                    showSettings = true
+                }
+                else -> CatalogScreen(
+                    state,
+                    viewModel::setQuery,
+                    viewModel::search,
+                    viewModel::select,
+                    viewModel::loadFeatured,
                 )
             }
         }
-    }
-
-    if (confirmWarning) {
-        AlertDialog(
-            onDismissRequest = { confirmWarning = false },
-            title = { Text("This model may not load") },
-            text = { Text(state.compatibility?.reason.orEmpty()) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmWarning = false
-                        viewModel.download(allowWarning = true)
-                    },
-                ) { Text("Download anyway") }
-            },
-            dismissButton = { TextButton(onClick = { confirmWarning = false }) { Text("Cancel") } },
-        )
     }
 
     if (showSettings) {
         TokenDialog(state.tokenConfigured, onDismiss = { showSettings = false }) {
             viewModel.saveToken(it)
             showSettings = false
+        }
+    }
+}
+
+@Composable
+private fun MobieSplash(onFinished: () -> Unit) {
+    val alpha = remember { Animatable(0f) }
+    val scale = remember { Animatable(0.86f) }
+    LaunchedEffect(Unit) {
+        alpha.animateTo(1f, tween(420))
+        scale.animateTo(1f, tween(420))
+        delay(520)
+        alpha.animateTo(0f, tween(260))
+        onFinished()
+    }
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            modifier = Modifier.graphicsLayer(alpha = alpha.value, scaleX = scale.value, scaleY = scale.value),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary) {
+                Box(Modifier.padding(horizontal = 24.dp, vertical = 14.dp)) {
+                    Text("M", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.displayMedium)
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+            Text("Mobie", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun OnboardingScreen(onContinue: (String?) -> Unit) {
+    var token by remember { mutableStateOf("") }
+    val tokenLooksValid = token.startsWith("hf_") && token.length > 10
+    Column(
+        Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text("Connect Hugging Face", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(10.dp))
+        Text(
+            "Your token unlocks gated models and avoids anonymous rate limits. It is encrypted on this device and sent only to Hugging Face.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(20.dp))
+        OutlinedTextField(
+            value = token,
+            onValueChange = { token = it.trim() },
+            modifier = Modifier.fillMaxWidth().testTag("onboarding_token_input"),
+            label = { Text("Hugging Face access token") },
+            placeholder = { Text("hf_…") },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+        )
+        Spacer(Modifier.height(12.dp))
+        Button(
+            onClick = { onContinue(token) },
+            enabled = tokenLooksValid,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Continue securely") }
+        TextButton(onClick = { onContinue(null) }, modifier = Modifier.fillMaxWidth()) {
+            Text("Use public models without a token")
         }
     }
 }
@@ -165,48 +232,32 @@ internal fun CatalogScreen(
     onFeatured: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        Text("Run open models on your phone", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Text("Inference stays local after download.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Best models for this phone", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text(
+            "${formatBytes(state.device?.totalRamBytes ?: 0)} RAM · Only ready-to-run LiteRT-LM models",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         Spacer(Modifier.height(16.dp))
         OutlinedTextField(
             value = state.query,
             onValueChange = onQuery,
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
-            label = { Text("Search Hugging Face") },
+            label = { Text("Search compatible Hugging Face models") },
             trailingIcon = { TextButton(onClick = onSearch) { Text("Search") } },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = { onSearch() }),
         )
-        Spacer(Modifier.height(20.dp))
-        if (state.query.isBlank() && state.recentModels.isNotEmpty()) {
-            Text("Recently used", style = MaterialTheme.typography.titleLarge)
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                state.recentModels.take(2).forEach { model ->
-                    Surface(
-                        modifier = Modifier.weight(1f).clickable { onSelect(model) },
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                    ) {
-                        Column(Modifier.padding(12.dp)) {
-                            Text(model.title, maxLines = 1, fontWeight = FontWeight.SemiBold)
-                            Text(model.bestArtifact?.runtimeLabel ?: "Conversion", style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                }
-            }
-            Spacer(Modifier.height(20.dp))
-        }
+        Spacer(Modifier.height(18.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(if (state.query.isBlank()) "Popular models" else "Search results", style = MaterialTheme.typography.titleLarge)
-            if (state.query.isNotBlank()) TextButton(onClick = onFeatured) { Text("Featured") }
+            Text(if (state.query.isBlank()) "Recommended" else "Compatible results", style = MaterialTheme.typography.titleLarge)
+            if (state.query.isNotBlank()) TextButton(onClick = onFeatured) { Text("Recommended") }
         }
         when {
             state.loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             state.error != null -> ErrorState(state.error, onFeatured)
             state.models.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("No runnable or convertible models found.")
+                Text("No verified LiteRT-LM model fits this device.")
             }
             else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(state.models, key = { it.id }) { model -> ModelCard(model, onSelect) }
@@ -226,11 +277,10 @@ private fun ModelCard(model: AiModel, onSelect: (AiModel) -> Unit) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(model.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(model.author, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-            Text(model.description, maxLines = 2, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Badge(model.bestArtifact?.runtimeLabel ?: "Conversion")
+                Badge("LiteRT-LM")
                 model.bestArtifact?.let { Badge(formatBytes(it.sizeBytes)) }
-                if (model.gated) Badge("Gated")
+                if (model.supportsVision) Badge("Vision")
             }
         }
     }
@@ -240,11 +290,11 @@ private fun ModelCard(model: AiModel, onSelect: (AiModel) -> Unit) {
 internal fun ModelScreen(
     state: MobieUiState,
     onDownload: () -> Unit,
-    onRequest: () -> Unit,
+    onRun: () -> Unit,
     onConfigureToken: () -> Unit,
 ) {
     val model = state.selected ?: return
-    val artifact = model.bestArtifact
+    val artifact = model.bestArtifact ?: return
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -252,76 +302,124 @@ internal fun ModelScreen(
         item {
             Text(model.id, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
-            Text(model.description.ifBlank { "No model description is available." })
-            Spacer(Modifier.height(8.dp))
+            Text(model.description.ifBlank { "Ready-to-run Hugging Face LiteRT-LM model." })
             Text("Type: ${model.type.displayLabel()}", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         item { CompatibilityCard(state.compatibility, state.device) }
-        if (artifact != null) item { ArtifactCard(artifact, model) }
+        item { ArtifactCard(artifact, model) }
         item {
-            if (artifact == null) {
-                Button(onClick = onRequest, modifier = Modifier.fillMaxWidth()) { Text("Request Conversion") }
-                state.conversionStatus?.let { Text("Status: ${it.name.lowercase().replaceFirstChar(Char::uppercase)}") }
+            val downloading = state.download?.state in setOf(WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED, WorkInfo.State.RUNNING)
+            if (state.downloadedPath != null) {
+                Button(onClick = onRun, modifier = Modifier.fillMaxWidth()) { Text("Run locally") }
             } else {
-                val needsToken = model.gated && !state.tokenConfigured
-                val downloading = state.download?.state in setOf(
-                    WorkInfo.State.ENQUEUED,
-                    WorkInfo.State.BLOCKED,
-                    WorkInfo.State.RUNNING,
-                )
-                val downloaded = state.download?.state == WorkInfo.State.SUCCEEDED
                 Button(
                     onClick = onDownload,
-                    enabled = state.compatibility?.status != Compatibility.INCOMPATIBLE &&
-                        !needsToken && !downloading && !downloaded,
+                    enabled = !downloading && (!model.gated || state.tokenConfigured),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(
-                        when {
-                            downloading -> "Downloading…"
-                            downloaded -> "Downloaded"
-                            model.gated -> "Authenticate, Download & Run"
-                            else -> "Download & Run"
-                        },
-                    )
+                    Text(if (downloading) "Downloading…" else "Download & Run")
                 }
-                if (needsToken) {
-                    Text("Accept this model's terms on Hugging Face, then add an access token.")
-                    OutlinedButton(onClick = onConfigureToken, modifier = Modifier.fillMaxWidth()) {
-                        Text("Add Hugging Face token")
-                    }
-                }
-                state.download?.let { download ->
-                    val fraction = if (download.totalBytes > 0) {
-                        (download.downloadedBytes.toFloat() / download.totalBytes).coerceIn(0f, 1f)
-                    } else 0f
-                    if (download.totalBytes > 0) {
-                        LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
-                    } else {
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                    }
-                    Text(
-                        when (download.state) {
-                            WorkInfo.State.SUCCEEDED -> "Downloaded. Runtime integration is the next milestone."
-                            WorkInfo.State.FAILED -> download.error ?: "Download failed"
-                            WorkInfo.State.CANCELLED -> "Download cancelled"
-                            else -> if (download.bytesPerSecond > 0) {
-                                "${formatBytes(download.downloadedBytes)} · ${formatBytes(download.bytesPerSecond)}/s"
-                            } else {
-                                "${formatBytes(download.downloadedBytes)} · Starting…"
-                            }
-                        },
-                        style = MaterialTheme.typography.bodySmall,
+            }
+            if (model.gated && !state.tokenConfigured) {
+                Text("Accept the model terms on Hugging Face and add your token before downloading.")
+                OutlinedButton(onClick = onConfigureToken, modifier = Modifier.fillMaxWidth()) { Text("Add token") }
+            }
+            state.download?.let { download ->
+                if (download.totalBytes > 0) {
+                    LinearProgressIndicator(
+                        progress = { (download.downloadedBytes.toFloat() / download.totalBytes).coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth(),
                     )
+                } else {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 }
                 Text(
-                    "Download runs in the background, resumes partial files, and validates SHA-256 when Hugging Face provides it.",
+                    download.error ?: "${formatBytes(download.downloadedBytes)} · ${formatBytes(download.bytesPerSecond)}/s",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
-        item { Spacer(Modifier.height(24.dp)) }
+    }
+}
+
+@Composable
+private fun ChatScreen(state: MobieUiState, onSend: (String, String?) -> Unit) {
+    val model = state.selected ?: return
+    val context = LocalContext.current
+    var prompt by remember { mutableStateOf("") }
+    var imagePath by remember { mutableStateOf<String?>(null) }
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        imagePath = uri?.let { copyImageToCache(context, it) }
+    }
+    Column(Modifier.fillMaxSize().padding(horizontal = 14.dp)) {
+        when (state.runtimeState) {
+            RuntimeState.LOADING -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator()
+                    Spacer(Modifier.height(12.dp))
+                    Text("Loading model into memory…")
+                }
+            }
+            RuntimeState.ERROR -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(state.error ?: "The model could not run.", color = MaterialTheme.colorScheme.error)
+            }
+            else -> {
+                LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (state.messages.isEmpty()) item {
+                        Text("Running completely on this device", color = MaterialTheme.colorScheme.primary)
+                    }
+                    items(state.messages) { message ->
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = if (message.fromUser) Arrangement.End else Arrangement.Start,
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = if (message.fromUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.fillMaxWidth(0.88f),
+                            ) {
+                                Text(message.text.ifEmpty { "…" }, Modifier.padding(12.dp))
+                            }
+                        }
+                    }
+                }
+                state.stats?.let {
+                    Text(
+                        String.format(Locale.US, "%.1f tokens/s · %s RAM", it.tokensPerSecond, formatBytes(it.ramBytes)),
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
+                imagePath?.let { Text("Image attached", color = MaterialTheme.colorScheme.primary) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (model.supportsVision) {
+                        TextButton(onClick = { imagePicker.launch("image/*") }) { Text("Image") }
+                    }
+                    OutlinedTextField(
+                        value = prompt,
+                        onValueChange = { prompt = it },
+                        modifier = Modifier.weight(1f).testTag("chat_input"),
+                        placeholder = { Text("Message") },
+                        enabled = state.runtimeState == RuntimeState.READY,
+                        maxLines = 4,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        keyboardActions = KeyboardActions(onSend = {
+                            onSend(prompt, imagePath)
+                            prompt = ""
+                            imagePath = null
+                        }),
+                    )
+                    TextButton(
+                        onClick = {
+                            onSend(prompt, imagePath)
+                            prompt = ""
+                            imagePath = null
+                        },
+                        enabled = prompt.isNotBlank() && state.runtimeState == RuntimeState.READY,
+                    ) { Text("Send") }
+                }
+            }
+        }
     }
 }
 
@@ -329,12 +427,11 @@ internal fun ModelScreen(
 private fun CompatibilityCard(result: CompatibilityResult?, device: DeviceProfile?) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Device compatibility", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text(result?.status?.name?.replace('_', ' ') ?: "Checking")
+            Text("Verified for this device", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(result?.reason.orEmpty())
             HorizontalDivider()
-            InfoRow("Estimated model RAM", formatBytes(result?.estimatedRamBytes ?: 0))
-            InfoRow("Available RAM now", formatBytes(device?.availableRamBytes ?: 0))
+            InfoRow("Estimated RAM", formatBytes(result?.estimatedRamBytes ?: 0))
+            InfoRow("Available RAM", formatBytes(device?.availableRamBytes ?: 0))
             InfoRow("Free storage", formatBytes(device?.availableStorageBytes ?: 0))
         }
     }
@@ -343,10 +440,10 @@ private fun CompatibilityCard(result: CompatibilityResult?, device: DeviceProfil
 @Composable
 private fun ArtifactCard(artifact: ModelArtifact, model: AiModel) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Recommended artifact", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        InfoRow("Runtime", artifact.runtimeLabel)
-        InfoRow("Quantization", artifact.quantization ?: "As published")
-        InfoRow("Download size", formatBytes(artifact.sizeBytes))
+        Text("Model package", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        InfoRow("Runtime", "LiteRT-LM")
+        InfoRow("Download", formatBytes(artifact.sizeBytes))
+        InfoRow("Vision", if (model.supportsVision) "Supported" else "Text only")
         InfoRow("License", model.license ?: "Check model card")
     }
 }
@@ -384,7 +481,7 @@ private fun TokenDialog(configured: Boolean, onDismiss: () -> Unit, onSave: (Str
         title = { Text("Hugging Face token") },
         text = {
             Column {
-                Text(if (configured) "A token is securely stored. Enter a replacement or leave blank to remove it." else "Needed only for private or gated models.")
+                Text(if (configured) "A token is securely stored. Enter a replacement or leave blank to remove it." else "Used only for Hugging Face catalog and model downloads.")
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
                     value = token,
@@ -401,6 +498,14 @@ private fun TokenDialog(configured: Boolean, onDismiss: () -> Unit, onSave: (Str
     )
 }
 
+private fun copyImageToCache(context: Context, uri: Uri): String? = runCatching {
+    val file = File(context.cacheDir, "chat-image-${System.currentTimeMillis()}.bin")
+    context.contentResolver.openInputStream(uri)?.use { input ->
+        file.outputStream().use(input::copyTo)
+    } ?: return null
+    file.absolutePath
+}.getOrNull()
+
 private fun formatBytes(value: Long): String {
     if (value <= 0) return "Unknown"
     val gib = value / (1024.0 * 1024.0 * 1024.0)
@@ -409,8 +514,8 @@ private fun formatBytes(value: Long): String {
 
 private fun ModelType.displayLabel(): String = when (this) {
     ModelType.TEXT_GENERATION -> "Text generation"
+    ModelType.VISION -> "Vision chat"
     ModelType.EMBEDDING -> "Embedding"
-    ModelType.VISION -> "Vision"
     ModelType.AUDIO -> "Audio"
     ModelType.UNKNOWN -> "Unknown"
 }

@@ -19,7 +19,7 @@ class CompatibilityResolverTest {
     )
 
     @Test
-    fun `small GGUF is compatible`() {
+    fun `small LiteRT LM model is compatible`() {
         val result = resolver.resolve(artifact(size = 2 * gib), device)
         assertEquals(Compatibility.COMPATIBLE, result.status)
     }
@@ -49,9 +49,9 @@ class CompatibilityResolverTest {
     }
 
     private fun artifact(size: Long) = ModelArtifact(
-        fileName = "model-q4.gguf",
-        downloadUrl = "https://example.invalid/model.gguf",
+        fileName = "model.litertlm",
+        downloadUrl = "https://example.invalid/model.litertlm",
         sizeBytes = size,
-        format = ModelFormat.GGUF,
+        format = ModelFormat.LITERT_LM,
     )
 }

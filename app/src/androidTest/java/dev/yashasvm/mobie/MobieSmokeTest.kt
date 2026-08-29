@@ -15,8 +15,9 @@ class MobieSmokeTest {
 
     @Test
     fun appInstallsLaunchesAndStoresTokenSecurely() {
-        composeRule.onNodeWithText("Mobie").assertIsDisplayed()
-        composeRule.onNodeWithText("Search Hugging Face").assertIsDisplayed()
+        composeRule.onNodeWithText("Connect Hugging Face").assertIsDisplayed()
+        composeRule.onNodeWithText("Use public models without a token").performClick()
+        composeRule.onNodeWithText("Best models for this phone").assertIsDisplayed()
 
         composeRule.onNodeWithText("HF token").performClick()
         composeRule.onNodeWithText("Hugging Face token").assertIsDisplayed()

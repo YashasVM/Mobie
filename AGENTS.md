@@ -48,14 +48,16 @@ Every engine implements `RuntimeAdapter`:
 - release native memory deterministically in `unload`;
 - surface load/generation errors without crashing the process.
 
-Initial mappings:
+Runtime roadmap:
 
 | Artifact | Runtime | Rule |
 |---|---|---|
-| `.gguf` | llama.cpp | Accept only supported architectures and quantizations verified by the bundled build. |
-| `.litertlm` / supported `.task` | LiteRT-LM | Validate required metadata and accelerator/device support. |
+| `.litertlm` | LiteRT-LM | The only enabled v1 format. Use the pinned official Android SDK and validate device fit. |
+| `.gguf` | llama.cpp | Future only; do not expose until the native adapter and exact artifacts pass ARM64 tests. |
 
 ONNX and ExecuTorch must be added as new adapters; do not add format-specific branches to the UI. Native libraries must be pinned to a reviewed revision, built reproducibly for `arm64-v8a`, and accompanied by license notices.
+
+The v1 catalog must only return `.litertlm` artifacts published in the Hugging Face `litert-community` organization, with blob size metadata successfully resolved. Unknown-size, generic Transformers, `.task`, GGUF, embedding, and audio artifacts must not appear as runnable.
 
 ## Compatibility and model metadata
 

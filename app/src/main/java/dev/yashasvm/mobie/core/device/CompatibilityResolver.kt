@@ -9,15 +9,15 @@ import kotlin.math.max
 
 class CompatibilityResolver {
     fun resolve(artifact: ModelArtifact?, device: DeviceProfile): CompatibilityResult {
-        if (artifact == null || artifact.format == ModelFormat.UNKNOWN) {
+        if (artifact == null || artifact.format != ModelFormat.LITERT_LM) {
             return CompatibilityResult(
                 Compatibility.CONVERSION_REQUIRED,
-                "No supported GGUF or LiteRT-LM artifact was found.",
+                "Mobie v1 runs published LiteRT-LM artifacts only.",
                 0,
             )
         }
-        if ("arm64-v8a" !in device.supportedAbis) {
-            return CompatibilityResult(Compatibility.INCOMPATIBLE, "Mobie runtimes require a 64-bit ARM device.", 0)
+        if (device.supportedAbis.none { it == "arm64-v8a" || it == "x86_64" }) {
+            return CompatibilityResult(Compatibility.INCOMPATIBLE, "LiteRT-LM requires a supported 64-bit device.", 0)
         }
         if (artifact.sizeBytes <= 0) {
             return CompatibilityResult(
@@ -27,7 +27,7 @@ class CompatibilityResolver {
             )
         }
 
-        val estimatedRam = max((artifact.sizeBytes * 1.25).toLong(), artifact.sizeBytes + 512L * MIB)
+        val estimatedRam = max((artifact.sizeBytes * 1.4).toLong(), artifact.sizeBytes + 768L * MIB)
         if (artifact.sizeBytes > device.availableStorageBytes) {
             return CompatibilityResult(Compatibility.INCOMPATIBLE, "Not enough free storage.", estimatedRam)
         }
