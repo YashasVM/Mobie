@@ -2,6 +2,7 @@ package dev.yashasvm.mobie.core.runtime
 
 import android.app.ActivityManager
 import android.content.Context
+import android.os.SystemClock
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
@@ -110,6 +111,8 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
             } else {
                 Contents.of(Content.ImageFile(imagePath), Content.Text(prompt))
             }
+            val generationStartedAt = SystemClock.elapsedRealtime()
+            var firstTokenAt: Long? = null
             var emittedVisibleOutput = false
             var emittedReasoning = false
             activeConversation.sendMessageAsync(contents, maxOutputToken = config.maxNewTokens).collect { chunk ->
@@ -122,20 +125,25 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                     .joinToString("") { it.value }
                 val answer = visibleChannels.ifEmpty { if (reasoning.isEmpty()) chunk.toString() else "" }
                 if (reasoning.isNotEmpty()) {
+                    if (firstTokenAt == null) firstTokenAt = SystemClock.elapsedRealtime()
                     emittedReasoning = true
                     emit(InferenceEvent.Token(reasoning, thinking = true))
                 }
                 if (answer.isNotEmpty()) {
+                    if (firstTokenAt == null) firstTokenAt = SystemClock.elapsedRealtime()
                     emittedVisibleOutput = true
                     emit(InferenceEvent.Token(answer))
                 }
             }
+            val generationFinishedAt = SystemClock.elapsedRealtime()
             val benchmark = activeConversation.getBenchmarkInfo()
             emit(
                 InferenceEvent.Stats(
                     InferenceStats(
                         tokensPerSecond = benchmark.lastDecodeTokensPerSecond,
                         ramBytes = currentAppRamBytes(),
+                        timeToFirstTokenMs = firstTokenAt?.minus(generationStartedAt) ?: 0,
+                        totalGenerationMs = generationFinishedAt - generationStartedAt,
                     ),
                 ),
             )
