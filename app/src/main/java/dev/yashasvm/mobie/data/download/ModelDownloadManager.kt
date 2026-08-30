@@ -16,6 +16,9 @@ import java.util.UUID
 import java.io.File
 import java.util.Properties
 import java.util.concurrent.TimeUnit
+import java.io.FileInputStream
+import java.security.MessageDigest
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
@@ -29,18 +32,25 @@ data class DownloadProgress(
     val error: String? = null,
 )
 
+val DownloadProgress.isCancellable: Boolean
+    get() = state in setOf(WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED, WorkInfo.State.RUNNING)
+
 data class InstalledModelEntry(val model: AiModel, val localPath: String)
 
 class ModelDownloadManager(context: Context) {
     private val appContext = context.applicationContext
     private val workManager = WorkManager.getInstance(context)
 
-    fun completedFile(modelId: String, artifact: ModelArtifact): File? {
-        val file = File(
-            File(File(appContext.filesDir, "models"), DownloadFilePolicy.storageKey(modelId)),
-            DownloadFilePolicy.safeFileName(artifact.fileName),
-        )
-        return file.takeIf { it.isFile && (artifact.sizeBytes <= 0 || it.length() == artifact.sizeBytes) }
+    suspend fun completedFile(modelId: String, artifact: ModelArtifact): File? = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val directory = File(File(appContext.filesDir, "models"), DownloadFilePolicy.storageKey(modelId))
+        listOf(DownloadFilePolicy.storageFileName(artifact.fileName), DownloadFilePolicy.safeFileName(artifact.fileName))
+            .asSequence()
+            .map { File(directory, it) }
+            .firstOrNull { file ->
+                file.isFile &&
+                    (artifact.sizeBytes <= 0 || file.length() == artifact.sizeBytes) &&
+                    (artifact.sha256.isNullOrBlank() || sha256(file) == artifact.sha256.lowercase())
+            }
     }
 
     fun enqueue(modelId: String, artifact: ModelArtifact): UUID {
@@ -89,6 +99,13 @@ class ModelDownloadManager(context: Context) {
     fun observe(id: UUID): Flow<DownloadProgress> =
         workManager.getWorkInfoByIdFlow(id).filterNotNull().map { it.toProgress() }
 
+    /** Stops the persisted WorkManager request while retaining its .part file for a later resume. */
+    fun cancel(model: AiModel, artifact: ModelArtifact) = cancel(model.id, artifact)
+
+    fun cancel(modelId: String, artifact: ModelArtifact) {
+        workManager.cancelUniqueWork(workName(modelId, artifact))
+    }
+
     fun installedModels(): List<InstalledModelEntry> = File(appContext.filesDir, "models")
         .listFiles(File::isDirectory)
         .orEmpty()
@@ -98,11 +115,13 @@ class ModelDownloadManager(context: Context) {
             val properties = Properties().apply { metadata.inputStream().use(::load) }
             val file = File(directory, properties.getProperty("fileName") ?: return@mapNotNull null)
                 .takeIf(File::isFile) ?: return@mapNotNull null
+            val expectedSha = properties.getProperty("sha256")?.ifBlank { null }
+            if (expectedSha != null && sha256(file) != expectedSha.lowercase()) return@mapNotNull null
             val artifact = ModelArtifact(
                 fileName = file.name,
                 downloadUrl = "",
                 sizeBytes = file.length(),
-                sha256 = properties.getProperty("sha256")?.ifBlank { null },
+                sha256 = expectedSha,
                 format = ModelFormat.LITERT_LM,
                 quantization = properties.getProperty("quantization")?.ifBlank { null },
             )
@@ -122,6 +141,31 @@ class ModelDownloadManager(context: Context) {
             )
         }
         .sortedBy { it.model.title.lowercase() }
+
+    suspend fun deleteInstalled(model: AiModel): Boolean = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val artifact = model.bestArtifact ?: return@withContext false
+        cancel(model, artifact)
+        val directory = File(File(appContext.filesDir, "models"), DownloadFilePolicy.storageKey(model.id))
+        if (!directory.exists()) return@withContext true
+        val metadata = File(directory, DownloadFilePolicy.METADATA_FILE)
+        val storedId = metadata.takeIf(File::isFile)?.inputStream()?.use { input ->
+            Properties().apply { load(input) }.getProperty("modelId")
+        }
+        storedId == model.id && directory.deleteRecursively()
+    }
+
+    private fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        FileInputStream(file).use { input ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
 
     private fun WorkInfo.toProgress(): DownloadProgress {
         val data = if (state.isFinished) outputData else progress

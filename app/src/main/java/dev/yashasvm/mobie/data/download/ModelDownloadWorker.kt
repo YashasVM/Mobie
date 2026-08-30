@@ -40,23 +40,24 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
         val fileName = inputData.getString(KEY_FILE_NAME) ?: return@withContext invalidInput("Missing file name")
         val expectedSha = inputData.getString(KEY_SHA256)?.lowercase()
         val expectedSize = inputData.getLong(KEY_SIZE, 0)
-        setForeground(createForegroundInfo(fileName))
+        setForeground(createForegroundInfo(fileName, totalBytes = expectedSize))
 
         val modelDir = File(
             File(applicationContext.filesDir, "models"),
             DownloadFilePolicy.storageKey(modelId),
         ).apply { mkdirs() }
-        val destination = File(modelDir, DownloadFilePolicy.safeFileName(fileName))
-        val partial = File(destination.path + ".part")
+        val storageDestination = File(modelDir, DownloadFilePolicy.storageFileName(fileName))
+        val partial = File(storageDestination.path + ".part")
+
+        if (inputData.getBoolean(KEY_GATED, false) && HuggingFaceTokenStore(applicationContext).read().isNullOrBlank()) {
+            return@withContext Result.failure(dataOf("This gated model requires a Hugging Face token"))
+        }
 
         try {
-            if (
-                isComplete(destination, expectedSize, expectedSha) ||
-                (expectedSize <= 0 && expectedSha.isNullOrBlank() && destination.isFile && destination.length() > 0)
-            ) {
-                return@withContext success(destination)
+            if (isComplete(storageDestination, expectedSize, expectedSha)) {
+                return@withContext success(storageDestination)
             }
-            if (destination.exists()) destination.delete()
+            if (storageDestination.exists()) storageDestination.delete()
 
             var downloaded = partial.takeIf(File::exists)?.length() ?: 0
             if (expectedSize > 0 && downloaded > expectedSize) {
@@ -64,8 +65,8 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                 downloaded = 0
             }
             if (isComplete(partial, expectedSize, expectedSha)) {
-                finalizeFile(partial, destination)
-                return@withContext success(destination)
+                finalizeFile(partial, storageDestination)
+                return@withContext success(storageDestination)
             }
 
             val remaining = DownloadFilePolicy.remainingBytes(expectedSize, downloaded)
@@ -85,15 +86,9 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                     )
                     404 -> return@withContext Result.failure(dataOf("Model artifact was not found"))
                     416 -> {
-                        val serverSize = response.header("Content-Range")
-                            ?.substringAfter("*/", missingDelimiterValue = "")
-                            ?.toLongOrNull()
-                        if (
-                            isComplete(partial, expectedSize, expectedSha) ||
-                            (serverSize != null && partial.isFile && partial.length() == serverSize)
-                        ) {
-                            finalizeFile(partial, destination)
-                            return@withContext success(destination)
+                        if (isComplete(partial, expectedSize, expectedSha)) {
+                            finalizeFile(partial, storageDestination)
+                            return@withContext success(storageDestination)
                         }
                         partial.delete()
                         return@withContext Result.retry()
@@ -129,6 +124,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                         var current = startAt
                         var lastProgressAt = 0L
                         val startedAt = SystemClock.elapsedRealtime()
+                        updateForeground(fileName, current, total)
                         while (true) {
                             val read = input.read(buffer)
                             if (read < 0) break
@@ -137,7 +133,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                             val now = SystemClock.elapsedRealtime()
                             if (now - lastProgressAt >= PROGRESS_INTERVAL_MS) {
                                 val elapsedMs = (now - startedAt).coerceAtLeast(1)
-                                setProgress(progressData(current, total, ((current - startAt) * 1000L) / elapsedMs))
+                                updateForeground(fileName, current, total, ((current - startAt) * 1000L) / elapsedMs)
                                 lastProgressAt = now
                             }
                             if (isStopped) return@withContext Result.retry()
@@ -151,8 +147,8 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                 partial.delete()
                 return@withContext Result.failure(dataOf("Checksum validation failed"))
             }
-            finalizeFile(partial, destination)
-            success(destination)
+            finalizeFile(partial, storageDestination)
+            success(storageDestination)
         } catch (_: IOException) {
             Result.retry()
         } catch (error: Exception) {
@@ -196,20 +192,33 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
-    private fun createForegroundInfo(fileName: String): ForegroundInfo {
+    private suspend fun updateForeground(fileName: String, downloaded: Long, total: Long, speed: Long = 0) {
+        setProgress(progressData(downloaded, total, speed))
+        setForeground(createForegroundInfo(fileName, downloaded, total))
+    }
+
+    private fun createForegroundInfo(fileName: String, downloadedBytes: Long = 0, totalBytes: Long = 0): ForegroundInfo {
         val manager = applicationContext.getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             manager.createNotificationChannel(
                 NotificationChannel(CHANNEL_ID, "Model downloads", NotificationManager.IMPORTANCE_LOW),
             )
         }
+        val hasTotal = totalBytes > 0
+        val progress = if (hasTotal) {
+            (downloadedBytes.toDouble() / totalBytes * 100).toInt().coerceIn(0, 100)
+        } else {
+            0
+        }
+        val safeName = DownloadFilePolicy.safeFileName(fileName)
         val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle("Downloading model")
-            .setContentText(DownloadFilePolicy.safeFileName(fileName))
+            .setContentText(if (hasTotal) "$safeName · $progress%" else safeName)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+            .setProgress(100, progress, !hasTotal)
             .build()
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ForegroundInfo(notificationId(), notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)

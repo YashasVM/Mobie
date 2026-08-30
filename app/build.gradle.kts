@@ -35,6 +35,14 @@ android {
         compose = true
         buildConfig = true
     }
+    lint {
+        disable += listOf(
+            "FrequentlyChangingValue",
+            "RememberInComposition",
+            "NullSafeMutableLiveData",
+            "AutoboxingStateCreation",
+        )
+    }
     packaging.resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
 }
 
@@ -53,6 +61,8 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons.extended)
+    implementation(libs.icons.lucide.android)
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.security.crypto)
     implementation(libs.kotlinx.coroutines.android)

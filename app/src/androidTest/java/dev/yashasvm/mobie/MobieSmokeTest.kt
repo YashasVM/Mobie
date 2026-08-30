@@ -26,13 +26,13 @@ class MobieSmokeTest {
         }
         composeRule.onNodeWithText("Models for this phone").assertIsDisplayed()
 
-        composeRule.onNodeWithText("HF token").performClick()
-        composeRule.onNodeWithText("Hugging Face token").assertIsDisplayed()
+        composeRule.onNodeWithTag("bottom_nav_settings").performClick()
+        composeRule.onNodeWithText("Hugging Face access").assertIsDisplayed()
+        composeRule.onNodeWithText("Add token").performClick()
         composeRule.onNodeWithTag("hf_token_input").performTextInput("hf_test_only_not_a_real_token")
         composeRule.onNodeWithText("Save").performClick()
 
-        composeRule.onNodeWithText("HF token").performClick()
-        composeRule.onNodeWithText("A token is securely stored.", substring = true).assertIsDisplayed()
-        composeRule.onNodeWithText("Save").performClick()
+        composeRule.onNodeWithTag("bottom_nav_settings").performClick()
+        composeRule.onNodeWithText("A token is securely stored on this device.", substring = true).assertIsDisplayed()
     }
 }

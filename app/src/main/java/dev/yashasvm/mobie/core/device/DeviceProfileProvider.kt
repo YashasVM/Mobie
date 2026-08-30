@@ -17,6 +17,7 @@ class DeviceProfileProvider(private val context: Context) {
             availableStorageBytes = storage.availableBytes,
             supportedAbis = Build.SUPPORTED_ABIS.toList(),
             sdkInt = Build.VERSION.SDK_INT,
+            releaseVersion = Build.VERSION.RELEASE.orEmpty(),
         )
     }
 }

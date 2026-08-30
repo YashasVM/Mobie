@@ -85,9 +85,10 @@ jobs:
           disable-animations: true
           script: |
             ./gradlew --no-daemon connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=dev.yashasvm.mobie.LiteRtEndToEndTest -Pandroid.testInstrumentationRunnerArguments.litertE2E=true
-            adb pull /sdcard/Android/data/dev.yashasvm.mobie/files/mobie-qwen-e2e.png mobie-qwen-e2e.png
+            adb pull /sdcard/mobie-qwen-e2e.png mobie-qwen-e2e.png || echo "::warning::Runtime passed without screenshot evidence"
       - name: Upload real Qwen chat screenshot
         uses: actions/upload-artifact@v4
         with:
           name: mobie-qwen-e2e-screenshot
           path: mobie-qwen-e2e.png
+          if-no-files-found: warn

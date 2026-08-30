@@ -15,7 +15,7 @@ data class InferenceStats(
 )
 
 sealed interface InferenceEvent {
-    data class Token(val text: String) : InferenceEvent
+    data class Token(val text: String, val thinking: Boolean = false) : InferenceEvent
     data class Stats(val value: InferenceStats) : InferenceEvent
     data class Error(val message: String) : InferenceEvent
     data object Complete : InferenceEvent

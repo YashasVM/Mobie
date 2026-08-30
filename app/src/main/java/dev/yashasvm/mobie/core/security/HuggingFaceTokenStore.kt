@@ -23,6 +23,12 @@ class HuggingFaceTokenStore(context: Context) {
 
     fun hasCompletedOnboarding(): Boolean = preferences.getBoolean(KEY_ONBOARDED, false)
 
+    fun hasSeenWelcome(): Boolean = preferences.getBoolean(KEY_WELCOME_SEEN, false)
+
+    fun markWelcomeSeen() {
+        preferences.edit().putBoolean(KEY_WELCOME_SEEN, true).apply()
+    }
+
     fun completeOnboarding(token: String?) {
         preferences.edit().apply {
             if (token.isNullOrBlank()) remove(KEY) else putString(KEY, token.trim())
@@ -33,5 +39,6 @@ class HuggingFaceTokenStore(context: Context) {
     private companion object {
         const val KEY = "access_token"
         const val KEY_ONBOARDED = "onboarding_complete"
+        const val KEY_WELCOME_SEEN = "welcome_seen"
     }
 }
