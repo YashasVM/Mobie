@@ -5,17 +5,18 @@
 - Made device recommendations aware of Android's real low-memory state and LMK threshold instead of relying only on raw free RAM.
 - Reserved memory headroom before marking LiteRT-LM models compatible, reducing risky recommendations that can lead to OOMs or process kills.
 - Hardened resumable model downloads: strict `Content-Range` validation, server-total size checks, and retries for throttling/transient HTTP failures.
+- Added an Android integration test that deliberately drops a model transfer mid-stream, verifies WorkManager preserves the `.part` file, resumes with the exact HTTP `Range` offset, validates SHA-256, and produces the original bytes.
 - Enabled the existing Android CI pipeline on `agent-dev` so autonomous branch work is continuously verified without touching `main`.
 - Verified real Qwen3-0.6B INT4 local execution on Android: download/checksum → load → first generation → second generation on the same model → unload → reload → another generation.
 - Added TTFT and total-generation latency measurement to LiteRT inference stats and persist real E2E performance evidence alongside the screenshot artifact.
 
 ## In progress
-- Continue auditing intentionally interrupted live Hugging Face transfers and real-device performance constraints.
-- Use the new measured baseline to identify runtime changes that materially improve TTFT/tokens-per-second without increasing RAM or instability.
+- Continue auditing real-device performance constraints and safe accelerator/backend selection.
+- Use the measured baseline to identify runtime changes that materially improve TTFT/tokens-per-second without increasing RAM or instability.
 
 ## Tests performed
 - JVM unit tests, Android lint, and debug APK build passed on `agent-dev`.
-- Emulator UI smoke test passed.
+- Emulator smoke/integration suite passed, including a deterministic interrupted-transfer resume through the real download worker and app-private storage.
 - Real LiteRT-LM E2E passed on API 35 x86_64 using the published 347,251,840-byte Qwen3-0.6B INT4 no-think artifact, including repeated prompting and unload/reload generation.
 - Real E2E evidence artifact contains both screenshot and machine-readable runtime metrics.
 - Added unit coverage for memory-pressure compatibility decisions and download response/range handling.
@@ -28,10 +29,10 @@
 
 ## Known problems / regressions
 - GGUF remains intentionally unavailable; Mobie v1 currently relies on published LiteRT-LM artifacts.
-- Download resume correctness is unit-tested, but an intentionally interrupted live Hugging Face transfer has not yet been exercised end-to-end.
+- The complete Android resume path is now tested with a forced HTTP disconnect, but a deliberately interrupted live Hugging Face CDN transfer has not been run because it is nondeterministic and would duplicate the same recovery path without stable CI behavior.
 - Emulator validation proves CPU LiteRT-LM execution but not real ARM phone performance or accelerator behavior.
 
 ## Inspect before merging
 - Verify model recommendations on devices under real memory pressure and on low-RAM phones.
-- Review the stricter resumable-download handling around CDN `206`, `416`, and retryable HTTP responses.
+- Review the stricter resumable-download handling around CDN `206`, `416`, throttling/retry responses, and the forced-disconnect integration test.
 - Treat emulator performance figures as regression baselines only; collect comparable measurements on ARM hardware before making device-performance claims.
