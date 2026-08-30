@@ -18,6 +18,8 @@ class DeviceProfileProvider(private val context: Context) {
             supportedAbis = Build.SUPPORTED_ABIS.toList(),
             sdkInt = Build.VERSION.SDK_INT,
             releaseVersion = Build.VERSION.RELEASE.orEmpty(),
+            lowMemoryThresholdBytes = memoryInfo.threshold,
+            isLowMemory = memoryInfo.lowMemory,
         )
     }
 }
