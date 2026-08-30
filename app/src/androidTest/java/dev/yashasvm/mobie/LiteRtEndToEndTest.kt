@@ -12,6 +12,7 @@ import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
 import dev.yashasvm.mobie.core.runtime.GenerationConfig
 import dev.yashasvm.mobie.core.runtime.InferenceEvent
+import dev.yashasvm.mobie.core.runtime.InferenceStats
 import dev.yashasvm.mobie.core.runtime.LiteRtLmRuntimeAdapter
 import dev.yashasvm.mobie.data.download.ModelDownloadManager
 import dev.yashasvm.mobie.ui.ChatMessage
@@ -86,6 +87,15 @@ class LiteRtEndToEndTest {
         logStats("post-reload prompt", reloadEvents)
         runtime.unload()
 
+        persistMetrics(
+            instrumentation = instrumentation,
+            context = context,
+            artifact = artifact,
+            first = firstEvents.stats(),
+            followUp = followUpEvents.stats(),
+            reload = reloadEvents.stats(),
+        )
+
         val model = AiModel(
             id = "litert-community/Qwen3-0.6B-int4",
             title = "Qwen3 0.6B INT4 (no-think)",
@@ -93,7 +103,7 @@ class LiteRtEndToEndTest {
             description = "Qwen3 running locally with LiteRT-LM",
             artifacts = listOf(artifact),
         )
-        val stats = firstEvents.filterIsInstance<InferenceEvent.Stats>().last().value
+        val stats = firstEvents.stats()
         composeRule.setContent {
             MobieTheme {
                 ChatScreen(
@@ -113,11 +123,7 @@ class LiteRtEndToEndTest {
             val screenshot = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
             val screenshotFile = File(checkNotNull(context.getExternalFilesDir(null)), "mobie-qwen-e2e.png")
             FileOutputStream(screenshotFile).use { screenshot.compress(Bitmap.CompressFormat.PNG, 100, it) }
-            ParcelFileDescriptor.AutoCloseInputStream(
-                instrumentation.uiAutomation.executeShellCommand(
-                    "cp ${screenshotFile.absolutePath} /sdcard/mobie-qwen-e2e.png",
-                ),
-            ).use { it.readBytes() }
+            copyToSharedStorage(instrumentation, screenshotFile, "mobie-qwen-e2e.png")
         }.onFailure { Log.w(TAG, "Runtime passed, but screenshot capture failed", it) }
         Unit
     }
@@ -146,12 +152,52 @@ class LiteRtEndToEndTest {
     }
 
     private fun logStats(label: String, events: List<InferenceEvent>) {
-        val stats = events.filterIsInstance<InferenceEvent.Stats>().last().value
+        val stats = events.stats()
         Log.i(
             TAG,
             "$label metrics: ${stats.tokensPerSecond} tokens/s, TTFT=${stats.timeToFirstTokenMs}ms, total=${stats.totalGenerationMs}ms, RAM=${stats.ramBytes} bytes",
         )
     }
+
+    private fun persistMetrics(
+        instrumentation: androidx.test.platform.app.InstrumentationRegistry.Companion,
+        context: android.content.Context,
+        artifact: ModelArtifact,
+        first: InferenceStats,
+        followUp: InferenceStats,
+        reload: InferenceStats,
+    ) {
+        val metricsFile = File(checkNotNull(context.getExternalFilesDir(null)), "mobie-qwen-e2e-metrics.txt")
+        metricsFile.writeText(
+            buildString {
+                appendLine("model=litert-community/Qwen3-0.6B-int4")
+                appendLine("artifact=${artifact.fileName}")
+                appendLine("artifact_bytes=${artifact.sizeBytes}")
+                appendLine(metricsLine("first", first))
+                appendLine(metricsLine("second", followUp))
+                appendLine(metricsLine("reload", reload))
+            },
+        )
+        copyToSharedStorage(instrumentation, metricsFile, "mobie-qwen-e2e-metrics.txt")
+    }
+
+    private fun metricsLine(label: String, stats: InferenceStats): String =
+        "$label.tokens_per_second=${stats.tokensPerSecond};$label.ttft_ms=${stats.timeToFirstTokenMs};$label.total_ms=${stats.totalGenerationMs};$label.ram_bytes=${stats.ramBytes}"
+
+    private fun copyToSharedStorage(
+        instrumentation: androidx.test.platform.app.InstrumentationRegistry.Companion,
+        source: File,
+        destinationName: String,
+    ) {
+        ParcelFileDescriptor.AutoCloseInputStream(
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(
+                "cp ${source.absolutePath} /sdcard/$destinationName",
+            ),
+        ).use { it.readBytes() }
+    }
+
+    private fun List<InferenceEvent>.stats(): InferenceStats =
+        filterIsInstance<InferenceEvent.Stats>().last().value
 
     private fun List<InferenceEvent>.visibleOutput(): String =
         filterIsInstance<InferenceEvent.Token>()
