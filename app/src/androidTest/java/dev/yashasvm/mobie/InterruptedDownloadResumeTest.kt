@@ -88,6 +88,7 @@ class InterruptedDownloadResumeTest {
 
             downloaded.parentFile?.deleteRecursively()
         }
+        Unit
     }
 
     private fun readRequestHeaders(socket: Socket): List<String> {
