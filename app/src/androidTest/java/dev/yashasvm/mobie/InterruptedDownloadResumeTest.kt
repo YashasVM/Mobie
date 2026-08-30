@@ -7,6 +7,7 @@ import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
 import dev.yashasvm.mobie.data.download.ModelDownloadManager
 import java.io.BufferedReader
+import java.io.File
 import java.io.InputStreamReader
 import java.net.ServerSocket
 import java.net.Socket
@@ -17,6 +18,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -38,7 +40,7 @@ class InterruptedDownloadResumeTest {
                         val range = headers.firstOrNull { it.startsWith("Range:", ignoreCase = true) }
                             ?.substringAfter(':')?.trim()
                         if (attempt == 0) {
-                            assertEquals(null, range)
+                            assertNull(range)
                             writeResponseHeaders(socket, 200, payload.size, null)
                             socket.getOutputStream().apply {
                                 write(payload, 0, splitAt)
@@ -81,7 +83,7 @@ class InterruptedDownloadResumeTest {
             serving.join(5_000)
             assertTrue("Download failed: ${result.error}", result.state == WorkInfo.State.SUCCEEDED)
             assertEquals("bytes=$splitAt-", observedRange.get())
-            val downloaded = checkNotNull(result.localPath).let(::java.io.File)
+            val downloaded = File(checkNotNull(result.localPath))
             assertArrayEquals(payload, downloaded.readBytes())
 
             downloaded.parentFile?.deleteRecursively()
