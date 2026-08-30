@@ -56,6 +56,29 @@ class CompatibilityResolverTest {
     }
 
     @Test
+    fun `low ram devices use stricter total ram ceiling`() {
+        val lowRam = device.copy(
+            totalRamBytes = 4 * gib,
+            availableRamBytes = 4 * gib,
+            isLowRamDevice = true,
+        )
+        val result = resolver.resolve(artifact(size = 2 * gib), lowRam)
+        assertEquals(Compatibility.INCOMPATIBLE, result.status)
+        assertTrue(result.reason.contains("low-RAM device"))
+    }
+
+    @Test
+    fun `low ram devices reserve more current memory headroom`() {
+        val lowRam = device.copy(
+            availableRamBytes = 3 * gib,
+            isLowRamDevice = true,
+        )
+        val result = resolver.resolve(artifact(size = gib), lowRam)
+        assertEquals(Compatibility.WARNING, result.status)
+        assertTrue(result.reason.contains("extra Android memory headroom"))
+    }
+
+    @Test
     fun `model larger than safe RAM is rejected`() {
         val result = resolver.resolve(artifact(size = 7 * gib), device)
         assertEquals(Compatibility.INCOMPATIBLE, result.status)
