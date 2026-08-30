@@ -71,16 +71,19 @@ class LiteRtEndToEndTest {
         val output = firstEvents.visibleOutput()
         Log.i(TAG, "Prompt: $PROMPT")
         Log.i(TAG, "Qwen response: $output")
+        logStats("first prompt", firstEvents)
 
         val followUpEvents = generate(runtime, FOLLOW_UP_PROMPT, maxNewTokens = 64)
         assertSuccessfulGeneration("second prompt", followUpEvents)
         Log.i(TAG, "Follow-up response: ${followUpEvents.visibleOutput()}")
+        logStats("second prompt", followUpEvents)
 
         runtime.unload()
         runtime.load(path).getOrThrow()
         val reloadEvents = generate(runtime, RELOAD_PROMPT, maxNewTokens = 64)
         assertSuccessfulGeneration("post-reload prompt", reloadEvents)
         Log.i(TAG, "Reload response: ${reloadEvents.visibleOutput()}")
+        logStats("post-reload prompt", reloadEvents)
         runtime.unload()
 
         val model = AiModel(
@@ -132,7 +135,22 @@ class LiteRtEndToEndTest {
         val errors = events.filterIsInstance<InferenceEvent.Error>().joinToString { it.message }
         assertTrue("LiteRT-LM produced no output for $label. Runtime errors: $errors", output.isNotBlank())
         assertTrue("Generation did not complete for $label", events.any { it is InferenceEvent.Complete })
-        assertTrue("No measured runtime stats for $label", events.any { it is InferenceEvent.Stats })
+        val stats = events.filterIsInstance<InferenceEvent.Stats>().lastOrNull()?.value
+        assertTrue("No measured runtime stats for $label", stats != null)
+        stats ?: return
+        assertTrue("Generation duration was not measured for $label", stats.totalGenerationMs > 0)
+        assertTrue(
+            "Invalid TTFT for $label: ${stats.timeToFirstTokenMs}ms of ${stats.totalGenerationMs}ms",
+            stats.timeToFirstTokenMs in 0..stats.totalGenerationMs,
+        )
+    }
+
+    private fun logStats(label: String, events: List<InferenceEvent>) {
+        val stats = events.filterIsInstance<InferenceEvent.Stats>().last().value
+        Log.i(
+            TAG,
+            "$label metrics: ${stats.tokensPerSecond} tokens/s, TTFT=${stats.timeToFirstTokenMs}ms, total=${stats.totalGenerationMs}ms, RAM=${stats.ramBytes} bytes",
+        )
     }
 
     private fun List<InferenceEvent>.visibleOutput(): String =
