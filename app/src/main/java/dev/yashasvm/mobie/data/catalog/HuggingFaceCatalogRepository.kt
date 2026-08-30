@@ -26,6 +26,7 @@ class HuggingFaceCatalogRepository(
     private val tokenStore: HuggingFaceTokenStore,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
+    private val detailCache = ModelDetailCache<HfModel>()
 
     suspend fun featured(): Result<List<AiModel>> = fetchModels(
         "https://huggingface.co/api/models?author=litert-community&sort=downloads&direction=-1&limit=60&full=true",
@@ -48,7 +49,12 @@ class HuggingFaceCatalogRepository(
             val models = coroutineScope {
                 summaries.map { summary ->
                     async {
-                        limiter.withPermit { fetchDetails(summary.repoId()) ?: summary }
+                        if (summary.hasCompleteLiteRtArtifactMetadata()) {
+                            summary
+                        } else {
+                            detailCache.get(summary.repoId())
+                                ?: limiter.withPermit { fetchDetails(summary.repoId()) ?: summary }
+                        }
                     }
                 }.awaitAll()
             }
@@ -56,8 +62,8 @@ class HuggingFaceCatalogRepository(
                 model.artifacts.any { it.format == ModelFormat.LITERT_LM && it.sizeBytes > 0 } &&
                     model.type in setOf(ModelType.TEXT_GENERATION, ModelType.VISION)
             }
-            }
         }
+    }
 
     private fun fetchDetails(repoId: String): HfModel? {
         val url = "https://huggingface.co".toHttpUrl().newBuilder().apply {
@@ -66,7 +72,9 @@ class HuggingFaceCatalogRepository(
             repoId.split('/').forEach(::addPathSegment)
             addQueryParameter("blobs", "true")
         }.build()
-        return fetchBody(url.toString())?.let { runCatching { json.decodeFromString<HfModel>(it) }.getOrNull() }
+        return fetchBody(url.toString())
+            ?.let { runCatching { json.decodeFromString<HfModel>(it) }.getOrNull() }
+            ?.also { detailCache.put(repoId, it) }
     }
 
     private fun fetchBody(url: String): String? {
@@ -102,6 +110,14 @@ private data class HfModel(
     fun repoId(): String = modelId ?: id.orEmpty()
 
     fun hasLiteRtArtifact(): Boolean = siblings.any { it.rfilename.endsWith(".litertlm", ignoreCase = true) }
+
+    fun hasCompleteLiteRtArtifactMetadata(): Boolean {
+        val liteRtFiles = siblings.filter { it.rfilename.endsWith(".litertlm", ignoreCase = true) }
+        return liteRtFiles.isNotEmpty() && liteRtFiles.all { file ->
+            (file.size ?: file.lfs?.size) != null &&
+                (!file.lfs?.sha256.isNullOrBlank() || !file.lfs?.oid.isNullOrBlank())
+        }
+    }
 
     fun toDomain(): AiModel? {
         val repoId = modelId ?: id ?: return null
