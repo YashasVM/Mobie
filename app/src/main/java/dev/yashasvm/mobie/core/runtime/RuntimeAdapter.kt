@@ -12,6 +12,8 @@ data class RuntimeMessage(val fromUser: Boolean, val text: String)
 data class InferenceStats(
     val tokensPerSecond: Double,
     val ramBytes: Long,
+    val timeToFirstTokenMs: Long = 0,
+    val totalGenerationMs: Long = 0,
 )
 
 sealed interface InferenceEvent {
