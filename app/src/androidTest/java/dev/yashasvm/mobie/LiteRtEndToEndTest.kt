@@ -21,7 +21,7 @@ import dev.yashasvm.mobie.ui.RuntimeState
 import dev.yashasvm.mobie.ui.theme.MobieTheme
 import java.io.File
 import java.io.FileOutputStream
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertTrue
@@ -35,13 +35,15 @@ class LiteRtEndToEndTest {
     private companion object {
         const val TAG = "MobieRuntimeE2E"
         const val PROMPT = "Hey, Who are you and what is the time"
+        const val FOLLOW_UP_PROMPT = "Reply with one short sentence confirming you can answer a second prompt."
+        const val RELOAD_PROMPT = "Reply with one short sentence confirming the model was reloaded."
     }
 
     @get:Rule
     val composeRule = createComposeRule()
 
     @Test
-    fun downloadsLoadsAndGeneratesWithRealLiteRtModel() = runBlocking {
+    fun downloadsLoadsGeneratesRepeatedlyAndReloadsRealLiteRtModel() = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("litertE2E") == "true")
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
@@ -62,20 +64,22 @@ class LiteRtEndToEndTest {
 
         val runtime = LiteRtLmRuntimeAdapter(context)
         runtime.load(path).getOrThrow()
-        val events = mutableListOf<InferenceEvent>()
-        withTimeout(15 * 60 * 1000L) {
-            runtime.generate(PROMPT, config = GenerationConfig(maxNewTokens = 96))
-                .collect { events += it }
-        }
-        runtime.unload()
-
-        val output = events.filterIsInstance<InferenceEvent.Token>().joinToString("") { it.text }
-        val errors = events.filterIsInstance<InferenceEvent.Error>().joinToString { it.message }
+        val firstEvents = generate(runtime, PROMPT)
+        assertSuccessfulGeneration("first prompt", firstEvents)
+        val output = firstEvents.visibleOutput()
         Log.i(TAG, "Prompt: $PROMPT")
         Log.i(TAG, "Qwen response: $output")
-        assertTrue("LiteRT-LM produced no output. Runtime errors: $errors", output.isNotBlank())
-        assertTrue("Generation did not complete", events.any { it is InferenceEvent.Complete })
-        assertTrue("No measured runtime stats", events.any { it is InferenceEvent.Stats })
+
+        val followUpEvents = generate(runtime, FOLLOW_UP_PROMPT, maxNewTokens = 48)
+        assertSuccessfulGeneration("second prompt", followUpEvents)
+        Log.i(TAG, "Follow-up response: ${followUpEvents.visibleOutput()}")
+
+        runtime.unload()
+        runtime.load(path).getOrThrow()
+        val reloadEvents = generate(runtime, RELOAD_PROMPT, maxNewTokens = 48)
+        assertSuccessfulGeneration("post-reload prompt", reloadEvents)
+        Log.i(TAG, "Reload response: ${reloadEvents.visibleOutput()}")
+        runtime.unload()
 
         val model = AiModel(
             id = "litert-community/Qwen3-0.6B",
@@ -84,7 +88,7 @@ class LiteRtEndToEndTest {
             description = "Qwen3 running locally with LiteRT-LM",
             artifacts = listOf(artifact),
         )
-        val stats = events.filterIsInstance<InferenceEvent.Stats>().last().value
+        val stats = firstEvents.filterIsInstance<InferenceEvent.Stats>().last().value
         composeRule.setContent {
             MobieTheme {
                 ChatScreen(
@@ -112,4 +116,25 @@ class LiteRtEndToEndTest {
         }.onFailure { Log.w(TAG, "Runtime passed, but screenshot capture failed", it) }
         Unit
     }
+
+    private suspend fun generate(
+        runtime: LiteRtLmRuntimeAdapter,
+        prompt: String,
+        maxNewTokens: Int = 96,
+    ): List<InferenceEvent> = withTimeout(15 * 60 * 1000L) {
+        runtime.generate(prompt, config = GenerationConfig(maxNewTokens = maxNewTokens)).toList()
+    }
+
+    private fun assertSuccessfulGeneration(label: String, events: List<InferenceEvent>) {
+        val output = events.visibleOutput()
+        val errors = events.filterIsInstance<InferenceEvent.Error>().joinToString { it.message }
+        assertTrue("LiteRT-LM produced no output for $label. Runtime errors: $errors", output.isNotBlank())
+        assertTrue("Generation did not complete for $label", events.any { it is InferenceEvent.Complete })
+        assertTrue("No measured runtime stats for $label", events.any { it is InferenceEvent.Stats })
+    }
+
+    private fun List<InferenceEvent>.visibleOutput(): String =
+        filterIsInstance<InferenceEvent.Token>()
+            .filterNot { it.thinking }
+            .joinToString("") { it.text }
 }
