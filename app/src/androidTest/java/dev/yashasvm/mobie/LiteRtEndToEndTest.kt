@@ -35,9 +35,9 @@ import org.junit.runner.RunWith
 class LiteRtEndToEndTest {
     private companion object {
         const val TAG = "MobieRuntimeE2E"
-        const val PROMPT = "Hey, Who are you and what is the time"
-        const val FOLLOW_UP_PROMPT = "Reply with one short sentence confirming you can answer a second prompt."
-        const val RELOAD_PROMPT = "Reply with one short sentence confirming the model was reloaded."
+        const val PROMPT = "Hey, who are you? Reply briefly. /no_think"
+        const val FOLLOW_UP_PROMPT = "Reply with one short sentence confirming you can answer a second prompt. /no_think"
+        const val RELOAD_PROMPT = "Reply with one short sentence confirming the model was reloaded. /no_think"
     }
 
     @get:Rule
@@ -71,13 +71,13 @@ class LiteRtEndToEndTest {
         Log.i(TAG, "Prompt: $PROMPT")
         Log.i(TAG, "Qwen response: $output")
 
-        val followUpEvents = generate(runtime, FOLLOW_UP_PROMPT, maxNewTokens = 48)
+        val followUpEvents = generate(runtime, FOLLOW_UP_PROMPT, maxNewTokens = 64)
         assertSuccessfulGeneration("second prompt", followUpEvents)
         Log.i(TAG, "Follow-up response: ${followUpEvents.visibleOutput()}")
 
         runtime.unload()
         runtime.load(path).getOrThrow()
-        val reloadEvents = generate(runtime, RELOAD_PROMPT, maxNewTokens = 48)
+        val reloadEvents = generate(runtime, RELOAD_PROMPT, maxNewTokens = 64)
         assertSuccessfulGeneration("post-reload prompt", reloadEvents)
         Log.i(TAG, "Reload response: ${reloadEvents.visibleOutput()}")
         runtime.unload()
