@@ -14,6 +14,7 @@ import dev.yashasvm.mobie.core.runtime.InferenceStats
 import dev.yashasvm.mobie.core.runtime.RuntimeMessage
 import dev.yashasvm.mobie.data.download.DownloadProgress
 import dev.yashasvm.mobie.data.download.InstalledModelEntry
+import dev.yashasvm.mobie.data.history.ChatHistorySession
 import dev.yashasvm.mobie.data.history.HistoryMessage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -25,10 +26,17 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.File
 
 enum class RuntimeState { IDLE, LOADING, READY, GENERATING, ERROR }
 
-data class ChatMessage(val fromUser: Boolean, val text: String, val imagePath: String? = null)
+data class ChatMessage(
+    val fromUser: Boolean,
+    val text: String,
+    val imagePath: String? = null,
+    val thinking: String = "",
+    val rawText: String? = null,
+)
 
 data class MobieUiState(
     val models: List<AiModel> = emptyList(),
@@ -41,12 +49,15 @@ data class MobieUiState(
     val loading: Boolean = false,
     val error: String? = null,
     val tokenConfigured: Boolean = false,
+    val welcomeSeen: Boolean = false,
     val onboardingComplete: Boolean = false,
     val download: DownloadProgress? = null,
     val downloadedPath: String? = null,
     val chatting: Boolean = false,
     val runtimeState: RuntimeState = RuntimeState.IDLE,
     val messages: List<ChatMessage> = emptyList(),
+    val history: List<ChatHistorySession> = emptyList(),
+    val sessionId: String? = null,
     val stats: InferenceStats? = null,
 )
 
@@ -55,6 +66,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         MobieUiState(
             device = container.deviceProfile.current(),
             tokenConfigured = container.tokenStore.read() != null,
+            welcomeSeen = container.tokenStore.hasSeenWelcome(),
             onboardingComplete = container.tokenStore.hasCompletedOnboarding(),
         ),
     )
@@ -66,7 +78,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
 
     init {
         refreshInstalled()
-        if (mutableState.value.onboardingComplete) loadFeatured()
+        if (mutableState.value.welcomeSeen || mutableState.value.onboardingComplete) loadFeatured()
     }
 
     fun finishOnboarding(token: String?) {
@@ -74,6 +86,12 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         mutableState.update {
             it.copy(onboardingComplete = true, tokenConfigured = !token.isNullOrBlank(), error = null)
         }
+        loadFeatured()
+    }
+
+    fun finishWelcome() {
+        container.tokenStore.markWelcomeSeen()
+        mutableState.update { it.copy(welcomeSeen = true) }
         loadFeatured()
     }
 
@@ -131,9 +149,8 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         if (model == null) viewModelScope.launch { unloadRuntime() }
         val device = container.deviceProfile.current()
         val artifact = model?.bestArtifact
-        val downloaded = if (model != null && artifact != null) {
-            container.downloads.completedFile(model.id, artifact)?.absolutePath
-        } else null
+        val sessions = model?.let { container.chatHistory.sessions(it.id) }.orEmpty()
+        val currentSessionId = sessions.firstOrNull()?.id
         mutableState.update {
             it.copy(
                 selected = model,
@@ -142,16 +159,26 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 },
                 compatibility = artifact?.let { candidate -> container.compatibility.resolve(candidate, device) },
                 download = null,
-                downloadedPath = downloaded,
+                downloadedPath = null,
                 chatting = false,
                 runtimeState = RuntimeState.IDLE,
                 messages = model?.let(::readHistory).orEmpty(),
+                history = sessions,
+                sessionId = currentSessionId,
                 stats = null,
                 error = null,
                 device = device,
             )
         }
-        if (model != null && artifact != null && downloaded == null) observeDownload(model, artifact)
+        if (model != null && artifact != null) {
+            observeDownload(model, artifact)
+            viewModelScope.launch(Dispatchers.IO) {
+                val downloaded = container.downloads.completedFile(model.id, artifact)?.absolutePath
+                if (downloaded != null && state.value.selected?.id == model.id) {
+                    mutableState.update { it.copy(downloadedPath = downloaded) }
+                }
+            }
+        }
     }
 
     fun download(allowWarning: Boolean = false) {
@@ -160,6 +187,10 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val device = container.deviceProfile.current()
         val compatibility = container.compatibility.resolve(artifact, device)
         mutableState.update { it.copy(device = device, compatibility = compatibility, error = null) }
+        if (model.gated && !state.value.tokenConfigured) {
+            mutableState.update { it.copy(error = "This gated model requires a Hugging Face token.") }
+            return
+        }
         if (
             compatibility.status !in setOf(Compatibility.COMPATIBLE, Compatibility.WARNING) ||
             (compatibility.status == Compatibility.WARNING && !allowWarning)
@@ -167,32 +198,42 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
 
         downloadObserverJob?.cancel()
         container.downloads.enqueue(model, artifact)
-        downloadObserverJob = viewModelScope.launch {
-            container.downloads.observe(model.id, artifact).collect { progress ->
-                if (progress == null) return@collect
-                if (state.value.selected?.id != model.id) return@collect
-                mutableState.update { it.copy(download = progress) }
-                if (progress.state == WorkInfo.State.SUCCEEDED && progress.localPath != null) {
-                    mutableState.update { it.copy(downloadedPath = progress.localPath) }
-                    refreshInstalled()
-                }
-            }
-        }
+        observeDownload(model, artifact)
+    }
+
+    fun cancelDownload() {
+        val model = state.value.selected ?: return
+        val artifact = model.bestArtifact ?: return
+        container.downloads.cancel(model, artifact)
     }
 
     fun runInstalled() {
-        state.value.downloadedPath?.let(::openChat)
+        val path = state.value.downloadedPath
+        if (path != null && File(path).isFile) {
+            openChat(path)
+        } else {
+            mutableState.update {
+                it.copy(
+                    downloadedPath = null,
+                    download = null,
+                    error = "The local model file is missing. Download it again.",
+                )
+            }
+        }
     }
 
     private fun openChat(path: String) {
         val model = state.value.selected ?: return
         val history = readHistory(model)
+        val sessions = container.chatHistory.sessions(model.id)
         mutableState.update {
             it.copy(
                 chatting = true,
                 downloadedPath = path,
                 runtimeState = RuntimeState.LOADING,
                 messages = history,
+                history = sessions,
+                sessionId = sessions.firstOrNull()?.id,
                 error = null,
             )
         }
@@ -238,17 +279,26 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             adapter.generate(prompt.trim(), imagePath).collect { event ->
                 when (event) {
                     is InferenceEvent.Token -> mutableState.update { current ->
-                        current.copy(messages = current.messages.updateLastAssistant(event.text))
+                        current.copy(messages = current.messages.updateLastAssistant(event.text, event.thinking))
                     }
                     is InferenceEvent.Stats -> mutableState.update { it.copy(stats = event.value) }
-                    is InferenceEvent.Error -> mutableState.update {
-                        val messages = it.messages.removeBlankAssistant()
+                    is InferenceEvent.Error -> {
+                        val messages = state.value.messages.removeBlankAssistant()
                         persistHistory(model.id, messages)
-                        it.copy(runtimeState = RuntimeState.READY, messages = messages, error = event.message)
+                        mutableState.update {
+                            it.copy(
+                                runtimeState = RuntimeState.READY,
+                                messages = messages,
+                                history = container.chatHistory.sessions(model.id),
+                                error = event.message,
+                            )
+                        }
                     }
-                    InferenceEvent.Complete -> mutableState.update {
-                        persistHistory(model.id, it.messages)
-                        it.copy(runtimeState = RuntimeState.READY)
+                    InferenceEvent.Complete -> {
+                        persistHistory(model.id, state.value.messages)
+                        mutableState.update {
+                            it.copy(runtimeState = RuntimeState.READY, history = container.chatHistory.sessions(model.id))
+                        }
                     }
                 }
             }
@@ -269,11 +319,38 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val model = state.value.selected ?: return
         val path = state.value.downloadedPath ?: return
         inferenceJob?.cancel()
-        container.chatHistory.clear(model.id)
-        mutableState.update { it.copy(messages = emptyList(), stats = null, error = null) }
+        container.chatHistory.startNewSession(model.id)
+        mutableState.update {
+            it.copy(
+                messages = emptyList(),
+                history = container.chatHistory.sessions(model.id),
+                sessionId = container.chatHistory.sessions(model.id).firstOrNull()?.id,
+                stats = null,
+                error = null,
+            )
+        }
         viewModelScope.launch {
             unloadRuntime()
             openChat(path)
+        }
+    }
+
+    fun startInstalledChat(entry: InstalledModelEntry) {
+        select(entry.model)
+        container.chatHistory.startNewSession(entry.model.id)
+        openChat(entry.localPath)
+    }
+
+    fun deleteInstalled(entry: InstalledModelEntry) {
+        viewModelScope.launch {
+            val deleted = container.downloads.deleteInstalled(entry.model)
+            if (deleted) {
+                mutableState.update {
+                    it.copy(installedModels = it.installedModels.filterNot { installed -> installed.model.id == entry.model.id })
+                }
+            } else {
+                mutableState.update { it.copy(error = "${entry.model.title} could not be deleted.") }
+            }
         }
     }
 
@@ -289,6 +366,17 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         runtimeLifecycle.withLock { container.runtimes.all().forEach { it.unload() } }
     }
 
+    fun selectHistory(sessionId: String) {
+        val model = state.value.selected ?: return
+        val path = state.value.downloadedPath ?: return
+        container.chatHistory.activate(model.id, sessionId)
+        inferenceJob?.cancel()
+        viewModelScope.launch {
+            unloadRuntime()
+            openChat(path)
+        }
+    }
+
     fun saveToken(token: String) {
         container.tokenStore.save(token.ifBlank { null })
         mutableState.update { it.copy(tokenConfigured = token.isNotBlank()) }
@@ -299,10 +387,21 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         downloadObserverJob = viewModelScope.launch {
             container.downloads.observe(model.id, artifact).collect { progress ->
                 if (state.value.selected?.id != model.id || progress == null) return@collect
+                val completedPath = if (progress.state == WorkInfo.State.SUCCEEDED) {
+                    withContext(Dispatchers.IO) {
+                        container.downloads.completedFile(model.id, artifact)?.absolutePath
+                    }
+                } else {
+                    null
+                }
                 mutableState.update {
                     it.copy(
                         download = progress,
-                        downloadedPath = progress.localPath ?: it.downloadedPath,
+                        downloadedPath = when {
+                            completedPath != null -> completedPath
+                            progress.state == WorkInfo.State.SUCCEEDED -> null
+                            else -> it.downloadedPath
+                        },
                     )
                 }
                 if (progress.state == WorkInfo.State.SUCCEEDED) refreshInstalled()
@@ -318,11 +417,14 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     private fun readHistory(model: AiModel): List<ChatMessage> = container.chatHistory.read(model.id).map {
-        ChatMessage(it.fromUser, it.text, it.imagePath)
+        ChatMessage(it.fromUser, it.text, it.imagePath, it.thinking)
     }
 
     private fun persistHistory(modelId: String, messages: List<ChatMessage>) {
-        container.chatHistory.write(modelId, messages.map { HistoryMessage(it.fromUser, it.text, it.imagePath) })
+        container.chatHistory.write(
+            modelId,
+            messages.map { HistoryMessage(it.fromUser, it.text, it.imagePath, it.thinking) },
+        )
     }
 
     companion object {
@@ -334,11 +436,36 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     }
 }
 
-private fun List<ChatMessage>.updateLastAssistant(chunk: String): List<ChatMessage> {
+internal fun List<ChatMessage>.updateLastAssistant(chunk: String, thinkingChunk: Boolean = false): List<ChatMessage> {
     val index = indexOfLast { !it.fromUser }
     if (index < 0) return this
-    return toMutableList().apply { this[index] = this[index].copy(text = this[index].text + chunk) }
+    return toMutableList().apply {
+        val message = this[index]
+        if (thinkingChunk) {
+            this[index] = message.copy(thinking = message.thinking + chunk)
+            return@apply
+        }
+        val raw = (message.rawText ?: message.text) + chunk
+        val tag = REASONING_TAGS
+            .map { it to raw.indexOf("<$it>", ignoreCase = true) }
+            .filter { it.second >= 0 }
+            .minByOrNull { it.second }
+        val open = tag?.second ?: -1
+        val close = tag?.let { raw.indexOf("</${it.first}>", startIndex = open, ignoreCase = true) } ?: -1
+        val thinking = if (tag != null) {
+            raw.substring(open + tag.first.length + 2, if (close > open) close else raw.length).trim()
+        } else message.thinking
+        val answer = when {
+            open < 0 && REASONING_TAGS.any { "<$it>".startsWith(raw.trimStart(), ignoreCase = true) } -> ""
+            open < 0 -> raw
+            close < 0 -> raw.substring(0, open)
+            else -> (raw.substring(0, open) + raw.substring(close + tag!!.first.length + 3)).trim()
+        }
+        this[index] = message.copy(text = answer, thinking = thinking, rawText = raw)
+    }
 }
+
+private val REASONING_TAGS = listOf("think", "thinking", "analysis", "reasoning")
 
 private fun List<ChatMessage>.removeBlankAssistant(): List<ChatMessage> =
     if (lastOrNull()?.let { !it.fromUser && it.text.isBlank() } == true) dropLast(1) else this

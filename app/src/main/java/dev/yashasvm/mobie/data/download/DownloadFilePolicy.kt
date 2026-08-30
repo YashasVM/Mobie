@@ -15,6 +15,20 @@ internal object DownloadFilePolicy {
         .takeIf { it.isNotBlank() && it !in setOf(".", "..") }
         ?: "model.bin"
 
+    fun storageFileName(fileName: String): String {
+        val safe = safeFileName(fileName)
+        val hash = MessageDigest.getInstance("SHA-256")
+            .digest(fileName.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+            .take(12)
+        val extensionAt = safe.lastIndexOf('.')
+        return if (extensionAt > 0) {
+            "${safe.substring(0, extensionAt)}-$hash${safe.substring(extensionAt)}"
+        } else {
+            "$safe-$hash"
+        }
+    }
+
     fun remainingBytes(expectedSize: Long, partialSize: Long): Long =
         (expectedSize - partialSize).coerceAtLeast(0)
 }

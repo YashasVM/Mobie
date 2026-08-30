@@ -63,6 +63,7 @@ data class DeviceProfile(
     val availableStorageBytes: Long,
     val supportedAbis: List<String>,
     val sdkInt: Int,
+    val releaseVersion: String = "",
 )
 
 data class CompatibilityResult(

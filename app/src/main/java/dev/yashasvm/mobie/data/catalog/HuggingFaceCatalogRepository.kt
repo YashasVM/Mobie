@@ -39,29 +39,25 @@ class HuggingFaceCatalogRepository(
 
     private suspend fun fetchModels(url: String): Result<List<AiModel>> = withContext(Dispatchers.IO) {
         runCatching {
-            val request = Request.Builder().url(url).apply {
-                tokenStore.read()?.let { header("Authorization", "Bearer $it") }
-            }.build()
-            client.newCall(request).execute().use { response ->
-                check(response.isSuccessful) { "Hugging Face returned HTTP ${response.code}" }
-                val summaries = json.decodeFromString<List<HfModel>>(checkNotNull(response.body).string())
-                    .filter { it.hasLiteRtArtifact() }
-                    .take(30)
-                val limiter = Semaphore(6)
-                val models = coroutineScope {
-                    summaries.map { summary ->
-                        async {
-                            limiter.withPermit { fetchDetails(summary.repoId()) ?: summary }
-                        }
-                    }.awaitAll()
-                }
-                models.mapNotNull(HfModel::toDomain).filter { model ->
-                    model.artifacts.any { it.format == ModelFormat.LITERT_LM && it.sizeBytes > 0 } &&
-                        model.type in setOf(ModelType.TEXT_GENERATION, ModelType.VISION)
-                }
+            val summaries = json.decodeFromString<List<HfModel>>(
+                checkNotNull(fetchBody(url)) { "Hugging Face catalog request failed" },
+            )
+                .filter { it.repoId().substringBefore('/') == "litert-community" && it.hasLiteRtArtifact() }
+                .take(30)
+            val limiter = Semaphore(6)
+            val models = coroutineScope {
+                summaries.map { summary ->
+                    async {
+                        limiter.withPermit { fetchDetails(summary.repoId()) ?: summary }
+                    }
+                }.awaitAll()
+            }
+            models.mapNotNull(HfModel::toDomain).filter { model ->
+                model.artifacts.any { it.format == ModelFormat.LITERT_LM && it.sizeBytes > 0 } &&
+                    model.type in setOf(ModelType.TEXT_GENERATION, ModelType.VISION)
+            }
             }
         }
-    }
 
     private fun fetchDetails(repoId: String): HfModel? {
         val url = "https://huggingface.co".toHttpUrl().newBuilder().apply {
@@ -70,11 +66,24 @@ class HuggingFaceCatalogRepository(
             repoId.split('/').forEach(::addPathSegment)
             addQueryParameter("blobs", "true")
         }.build()
-        val request = Request.Builder().url(url).apply {
-            tokenStore.read()?.let { header("Authorization", "Bearer $it") }
+        return fetchBody(url.toString())?.let { runCatching { json.decodeFromString<HfModel>(it) }.getOrNull() }
+    }
+
+    private fun fetchBody(url: String): String? {
+        val token = tokenStore.read()
+        fun request(withToken: String?) = Request.Builder().url(url).apply {
+            withToken?.let { header("Authorization", "Bearer $it") }
         }.build()
-        return client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) null else response.body?.string()?.let(json::decodeFromString)
+        fun responseBody(request: Request): String? = client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) null else response.body?.string()
+        }
+        val first = client.newCall(request(token)).execute()
+        if (first.code == 401 && !token.isNullOrBlank()) {
+            first.close()
+            return responseBody(request(null))
+        }
+        return first.use { response ->
+            if (!response.isSuccessful) null else response.body?.string()
         }
     }
 }
@@ -106,12 +115,22 @@ private data class HfModel(
                 fileName = file.rfilename,
                 downloadUrl = artifactUrl(repoId, file.rfilename),
                 sizeBytes = size,
-                sha256 = file.lfs?.oid?.removePrefix("sha256:"),
+                sha256 = file.lfs?.sha256 ?: file.lfs?.oid?.removePrefix("sha256:"),
                 format = format,
                 quantization = quantizationFrom(file.rfilename),
             )
         }
-        val type = when (pipeline_tag) {
+        val pipeline = pipeline_tag ?: tags.firstOrNull { it in setOf(
+            "text-generation",
+            "text2text-generation",
+            "image-text-to-text",
+            "image-classification",
+            "feature-extraction",
+            "sentence-similarity",
+            "automatic-speech-recognition",
+            "text-to-speech",
+        ) }
+        val type = when (pipeline) {
             "text-generation", "text2text-generation" -> ModelType.TEXT_GENERATION
             "feature-extraction", "sentence-similarity" -> ModelType.EMBEDDING
             "image-text-to-text", "image-classification" -> ModelType.VISION
@@ -151,4 +170,8 @@ private data class HfSibling(
 )
 
 @Serializable
-private data class HfLfs(val oid: String? = null, val size: Long? = null)
+private data class HfLfs(
+    val oid: String? = null,
+    val sha256: String? = null,
+    val size: Long? = null,
+)

@@ -112,8 +112,15 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
             }
             activeConversation.sendMessageAsync(contents, maxOutputToken = config.maxNewTokens).collect { chunk ->
                 currentCoroutineContext().ensureActive()
-                val text = chunk.toString().ifEmpty { chunk.channels.values.joinToString("") }
-                if (text.isNotEmpty()) emit(InferenceEvent.Token(text))
+                val reasoning = chunk.channels.entries
+                    .filter { (name, _) -> name.lowercase() in REASONING_CHANNELS }
+                    .joinToString("") { it.value }
+                val visibleChannels = chunk.channels.entries
+                    .filterNot { (name, _) -> name.lowercase() in REASONING_CHANNELS }
+                    .joinToString("") { it.value }
+                val answer = visibleChannels.ifEmpty { if (reasoning.isEmpty()) chunk.toString() else "" }
+                if (reasoning.isNotEmpty()) emit(InferenceEvent.Token(reasoning, thinking = true))
+                if (answer.isNotEmpty()) emit(InferenceEvent.Token(answer))
             }
             val benchmark = activeConversation.getBenchmarkInfo()
             emit(
@@ -153,5 +160,11 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
             .firstOrNull()?.totalPss?.toLong()?.times(1024L) ?: 0L
     }
 
-    private companion object { const val DEFAULT_MAX_OUTPUT_TOKENS = 256 }
+    private companion object {
+        const val DEFAULT_MAX_OUTPUT_TOKENS = 256
+        val REASONING_CHANNELS = setOf(
+            "analysis", "thinking", "reasoning", "reasoning_content", "thought", "thoughts",
+            "deliberation", "scratchpad", "chain_of_thought", "chain-of-thought", "cot",
+        )
+    }
 }
