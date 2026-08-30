@@ -65,17 +65,17 @@ class HuggingFaceCatalogRepository(
         }
     }
 
-    private fun fetchDetails(repoId: String): HfModel? {
+    private fun fetchDetails(repoId: String): HfModel? = runCatching {
         val url = "https://huggingface.co".toHttpUrl().newBuilder().apply {
             addPathSegment("api")
             addPathSegment("models")
             repoId.split('/').forEach(::addPathSegment)
             addQueryParameter("blobs", "true")
         }.build()
-        return fetchBody(url.toString())
-            ?.let { runCatching { json.decodeFromString<HfModel>(it) }.getOrNull() }
+        fetchBody(url.toString())
+            ?.let { json.decodeFromString<HfModel>(it) }
             ?.also { detailCache.put(repoId, it) }
-    }
+    }.getOrNull()
 
     private fun fetchBody(url: String): String? {
         val token = tokenStore.read()
