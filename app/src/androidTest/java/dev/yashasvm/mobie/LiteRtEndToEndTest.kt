@@ -35,9 +35,9 @@ import org.junit.runner.RunWith
 class LiteRtEndToEndTest {
     private companion object {
         const val TAG = "MobieRuntimeE2E"
-        const val PROMPT = "Hey, who are you? Reply briefly. /no_think"
-        const val FOLLOW_UP_PROMPT = "Reply with one short sentence confirming you can answer a second prompt. /no_think"
-        const val RELOAD_PROMPT = "Reply with one short sentence confirming the model was reloaded. /no_think"
+        const val PROMPT = "Hey, who are you? Reply briefly."
+        const val FOLLOW_UP_PROMPT = "Reply with one short sentence confirming you can answer a second prompt."
+        const val RELOAD_PROMPT = "Reply with one short sentence confirming the model was reloaded."
     }
 
     @get:Rule
@@ -49,14 +49,15 @@ class LiteRtEndToEndTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         val artifact = ModelArtifact(
-            fileName = "Qwen3-0.6B_dynamic_wi4b32_afp32.litertlm",
-            downloadUrl = "https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B_dynamic_wi4b32_afp32.litertlm",
-            sizeBytes = 344_437_808L,
-            sha256 = "e3e290109da4388d65a17510a0c66af91c8039f52d2c465868dbc43c09a776cf",
+            fileName = "qwen3_0.6b_nothink_q4_block32_ekv1280.litertlm",
+            downloadUrl = "https://huggingface.co/litert-community/Qwen3-0.6B-int4/resolve/main/qwen3_0.6b_nothink_q4_block32_ekv1280.litertlm",
+            sizeBytes = 347_251_840L,
+            sha256 = "2df6821ec12702dafd33915e7a1a1adc7c4b053f3672fd9555dfaf3a114c4139",
             format = ModelFormat.LITERT_LM,
+            quantization = "INT4",
         )
         val downloads = ModelDownloadManager(context)
-        val requestId = downloads.enqueue("litert-community/Qwen3-0.6B", artifact)
+        val requestId = downloads.enqueue("litert-community/Qwen3-0.6B-int4", artifact)
         val completed = withTimeout(20 * 60 * 1000L) {
             downloads.observe(requestId).first { it.state.isFinished }
         }
@@ -83,8 +84,8 @@ class LiteRtEndToEndTest {
         runtime.unload()
 
         val model = AiModel(
-            id = "litert-community/Qwen3-0.6B",
-            title = "Qwen3 0.6B",
+            id = "litert-community/Qwen3-0.6B-int4",
+            title = "Qwen3 0.6B INT4 (no-think)",
             author = "litert-community",
             description = "Qwen3 running locally with LiteRT-LM",
             artifacts = listOf(artifact),
