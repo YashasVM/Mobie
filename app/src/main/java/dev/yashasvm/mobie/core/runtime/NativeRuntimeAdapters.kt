@@ -59,39 +59,39 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         generation.withLock {
             lifecycle.withLock {
                 runCatching {
-                closeRuntime()
-                ExperimentalFlags.enableBenchmark = true
-                val createdEngine = Engine(
-                    EngineConfig(
-                        modelPath = modelPath,
-                        backend = Backend.CPU(),
-                        visionBackend = if (vision) Backend.CPU() else null,
-                        cacheDir = appContext.cacheDir.absolutePath,
-                    ),
-                )
-                try {
-                    createdEngine.initialize()
-                    engine = createdEngine
-                    // ponytail: cap restored context; add token-aware trimming when LiteRT exposes cheap counts pre-load.
-                    val restored = history.takeLast(20).filter { it.text.isNotBlank() }.map {
-                        if (it.fromUser) Message.user(it.text) else Message.model(it.text)
-                    }
-                    conversation = createdEngine.createConversation(
-                        ConversationConfig(
-                            initialMessages = restored,
-                            samplerConfig = SamplerConfig(
-                                topK = 40,
-                                topP = 0.95,
-                                temperature = 0.7,
-                                seed = 0,
-                            ),
-                            maxOutputToken = DEFAULT_MAX_OUTPUT_TOKENS,
+                    closeRuntime()
+                    ExperimentalFlags.enableBenchmark = true
+                    val createdEngine = Engine(
+                        EngineConfig(
+                            modelPath = modelPath,
+                            backend = Backend.CPU(),
+                            visionBackend = if (vision) Backend.CPU() else null,
+                            cacheDir = appContext.cacheDir.absolutePath,
                         ),
                     )
-                } catch (error: Throwable) {
-                    createdEngine.close()
-                    throw error
-                }
+                    try {
+                        createdEngine.initialize()
+                        engine = createdEngine
+                        // ponytail: cap restored context; add token-aware trimming when LiteRT exposes cheap counts pre-load.
+                        val restored = history.takeLast(20).filter { it.text.isNotBlank() }.map {
+                            if (it.fromUser) Message.user(it.text) else Message.model(it.text)
+                        }
+                        conversation = createdEngine.createConversation(
+                            ConversationConfig(
+                                initialMessages = restored,
+                                samplerConfig = SamplerConfig(
+                                    topK = 40,
+                                    topP = 0.95,
+                                    temperature = 0.7,
+                                    seed = 0,
+                                ),
+                                maxOutputToken = DEFAULT_MAX_OUTPUT_TOKENS,
+                            ),
+                        )
+                    } catch (error: Throwable) {
+                        createdEngine.close()
+                        throw error
+                    }
                 }
             }
         }
@@ -110,6 +110,8 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
             } else {
                 Contents.of(Content.ImageFile(imagePath), Content.Text(prompt))
             }
+            var emittedVisibleOutput = false
+            var emittedReasoning = false
             activeConversation.sendMessageAsync(contents, maxOutputToken = config.maxNewTokens).collect { chunk ->
                 currentCoroutineContext().ensureActive()
                 val reasoning = chunk.channels.entries
@@ -119,8 +121,14 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                     .filterNot { (name, _) -> name.lowercase() in REASONING_CHANNELS }
                     .joinToString("") { it.value }
                 val answer = visibleChannels.ifEmpty { if (reasoning.isEmpty()) chunk.toString() else "" }
-                if (reasoning.isNotEmpty()) emit(InferenceEvent.Token(reasoning, thinking = true))
-                if (answer.isNotEmpty()) emit(InferenceEvent.Token(answer))
+                if (reasoning.isNotEmpty()) {
+                    emittedReasoning = true
+                    emit(InferenceEvent.Token(reasoning, thinking = true))
+                }
+                if (answer.isNotEmpty()) {
+                    emittedVisibleOutput = true
+                    emit(InferenceEvent.Token(answer))
+                }
             }
             val benchmark = activeConversation.getBenchmarkInfo()
             emit(
@@ -131,6 +139,15 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                     ),
                 ),
             )
+            if (!emittedVisibleOutput) {
+                val message = if (emittedReasoning) {
+                    "The model used its output budget for reasoning before producing a final answer. Retry with a larger output limit or disable thinking for this prompt."
+                } else {
+                    "The model completed without producing a response."
+                }
+                emit(InferenceEvent.Error(message))
+                return@withLock
+            }
             emit(InferenceEvent.Complete)
         }
     }.catch { error ->
