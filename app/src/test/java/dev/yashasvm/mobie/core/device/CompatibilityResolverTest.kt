@@ -70,7 +70,7 @@ class CompatibilityResolverTest {
     @Test
     fun `low ram devices reserve more current memory headroom`() {
         val lowRam = device.copy(
-            availableRamBytes = 3 * gib,
+            availableRamBytes = 5 * gib / 2,
             isLowRamDevice = true,
         )
         val result = resolver.resolve(artifact(size = gib), lowRam)
