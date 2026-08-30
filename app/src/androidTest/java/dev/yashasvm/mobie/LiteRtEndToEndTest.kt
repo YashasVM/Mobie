@@ -21,6 +21,7 @@ import dev.yashasvm.mobie.ui.RuntimeState
 import dev.yashasvm.mobie.ui.theme.MobieTheme
 import java.io.File
 import java.io.FileOutputStream
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
