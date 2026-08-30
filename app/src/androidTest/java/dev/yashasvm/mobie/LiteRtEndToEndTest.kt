@@ -1,6 +1,7 @@
 package dev.yashasvm.mobie
 
 import android.graphics.Bitmap
+import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.captureToImage
@@ -105,5 +106,11 @@ class LiteRtEndToEndTest {
         val screenshotFile = File(checkNotNull(context.getExternalFilesDir(null)), "mobie-qwen-e2e.png")
         FileOutputStream(screenshotFile).use { screenshot.compress(Bitmap.CompressFormat.PNG, 100, it) }
         assertTrue("Runtime screenshot was not saved", screenshotFile.length() > 0)
+        ParcelFileDescriptor.AutoCloseInputStream(
+            InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(
+                "cp ${screenshotFile.absolutePath} /sdcard/mobie-qwen-e2e.png",
+            ),
+        ).use { it.readBytes() }
+        Unit
     }
 }
