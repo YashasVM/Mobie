@@ -1,5 +1,7 @@
 package dev.yashasvm.mobie
 
+import android.app.Instrumentation
+import android.content.Context
 import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
 import android.util.Log
@@ -160,8 +162,8 @@ class LiteRtEndToEndTest {
     }
 
     private fun persistMetrics(
-        instrumentation: androidx.test.platform.app.InstrumentationRegistry.Companion,
-        context: android.content.Context,
+        instrumentation: Instrumentation,
+        context: Context,
         artifact: ModelArtifact,
         first: InferenceStats,
         followUp: InferenceStats,
@@ -185,14 +187,12 @@ class LiteRtEndToEndTest {
         "$label.tokens_per_second=${stats.tokensPerSecond};$label.ttft_ms=${stats.timeToFirstTokenMs};$label.total_ms=${stats.totalGenerationMs};$label.ram_bytes=${stats.ramBytes}"
 
     private fun copyToSharedStorage(
-        instrumentation: androidx.test.platform.app.InstrumentationRegistry.Companion,
+        instrumentation: Instrumentation,
         source: File,
         destinationName: String,
     ) {
         ParcelFileDescriptor.AutoCloseInputStream(
-            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(
-                "cp ${source.absolutePath} /sdcard/$destinationName",
-            ),
+            instrumentation.uiAutomation.executeShellCommand("cp ${source.absolutePath} /sdcard/$destinationName"),
         ).use { it.readBytes() }
     }
 
