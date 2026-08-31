@@ -13,6 +13,7 @@ data class ModelArtifact(
     val format: ModelFormat,
     val quantization: String? = null,
     val executionTarget: ArtifactExecutionTarget = inferArtifactExecutionTarget(fileName),
+    val contextWindowTokens: Int? = inferArtifactContextWindow(fileName),
 ) {
     val runtimeLabel: String
         get() = when (format) {
@@ -80,6 +81,13 @@ internal fun inferArtifactQuantization(fileName: String): String? {
         ?.groupValues
         ?.getOrNull(1)
     return weightIntBits?.let { "INT$it" }
+}
+
+internal fun inferArtifactContextWindow(fileName: String): Int? {
+    val normalized = fileName.lowercase()
+    val match = Regex("(?:^|[._-])(?:e?kv|ctx|context)[_-]?(\\d{3,6})(?:[._-]|$)").find(normalized)
+        ?: return null
+    return match.groupValues.getOrNull(1)?.toIntOrNull()?.takeIf { it in 128..131_072 }
 }
 
 internal fun inferArtifactExecutionTarget(fileName: String): ArtifactExecutionTarget {
