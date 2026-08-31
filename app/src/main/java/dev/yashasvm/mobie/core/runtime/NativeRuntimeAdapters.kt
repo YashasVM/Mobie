@@ -128,11 +128,25 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                 Contents.of(Content.ImageFile(imagePath), Content.Text(prompt))
             }
             val generationStartedAt = SystemClock.elapsedRealtime()
+            var lastMemoryCheckAt = generationStartedAt
             var firstTokenAt: Long? = null
             var emittedVisibleOutput = false
             var emittedReasoning = false
             activeConversation.sendMessageAsync(contents, maxOutputToken = config.maxNewTokens).collect { chunk ->
                 currentCoroutineContext().ensureActive()
+                val now = SystemClock.elapsedRealtime()
+                if (RuntimeLoadMemoryPolicy.shouldRecheckGenerationMemory(lastMemoryCheckAt, now)) {
+                    lastMemoryCheckAt = now
+                    try {
+                        ensureGenerationMemoryHeadroom()
+                    } catch (error: IllegalStateException) {
+                        // Decode may begin with healthy headroom and become unsafe as context/KV grows
+                        // or another app consumes RAM. Stop native generation before surfacing the
+                        // pressure error instead of allowing the process to drift toward LMK/OOM.
+                        activeConversation.cancelProcess()
+                        throw error
+                    }
+                }
                 val reasoning = chunk.channels.entries
                     .filter { (name, _) -> name.lowercase() in REASONING_CHANNELS }
                     .joinToString("") { it.value }
