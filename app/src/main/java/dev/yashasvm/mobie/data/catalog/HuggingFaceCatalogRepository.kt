@@ -4,6 +4,7 @@ import dev.yashasvm.mobie.core.model.AiModel
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
 import dev.yashasvm.mobie.core.model.ModelType
+import dev.yashasvm.mobie.core.model.inferArtifactQuantization
 import dev.yashasvm.mobie.core.security.HuggingFaceTokenStore
 import java.net.URLEncoder
 import kotlinx.coroutines.Dispatchers
@@ -133,7 +134,7 @@ private data class HfModel(
                 sizeBytes = size,
                 sha256 = file.lfs?.sha256 ?: file.lfs?.oid?.removePrefix("sha256:"),
                 format = format,
-                quantization = quantizationFrom(file.rfilename),
+                quantization = inferArtifactQuantization(file.rfilename),
             )
         }
         val pipeline = pipeline_tag ?: tags.firstOrNull { it in setOf(
@@ -165,9 +166,6 @@ private data class HfModel(
             artifacts = artifacts,
         )
     }
-
-    private fun quantizationFrom(name: String): String? =
-        Regex("(?i)(Q[2-8](?:_[A-Z0-9]+)?)").find(name)?.value?.uppercase()
 
     private fun artifactUrl(repoId: String, fileName: String): String =
         "https://huggingface.co".toHttpUrl().newBuilder().apply {

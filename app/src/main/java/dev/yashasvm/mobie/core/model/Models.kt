@@ -43,18 +43,38 @@ data class AiModel(
             ),
         )
 
-    private fun quantizationRank(quantization: String?): Int = when (quantization?.uppercase()) {
-        null -> 20
-        "Q4_K_M" -> 0
-        "Q4_K_S" -> 1
-        "Q5_K_M" -> 2
-        "Q5_K_S" -> 3
-        "Q4_0" -> 4
-        "Q5_0" -> 5
-        "Q6_K" -> 6
-        "Q8_0" -> 7
-        else -> 10
+    private fun quantizationRank(quantization: String?): Int {
+        val normalized = quantization?.uppercase() ?: return 20
+        return when {
+            normalized == "Q4_K_M" || normalized == "INT4" -> 0
+            normalized == "Q4_K_S" -> 1
+            normalized.startsWith("Q4_") || normalized == "Q4" -> 2
+            normalized == "Q5_K_M" -> 3
+            normalized == "Q5_K_S" -> 4
+            normalized == "Q5_0" || normalized.startsWith("Q5_") -> 5
+            normalized == "Q4_0" -> 6
+            normalized == "Q6_K" || normalized.startsWith("Q6_") -> 7
+            normalized == "Q8_0" || normalized.startsWith("Q8_") || normalized == "INT8" -> 8
+            else -> 10
+        }
     }
+}
+
+internal fun inferArtifactQuantization(fileName: String): String? {
+    val ggufStyle = Regex("(?i)(Q[2-8](?:_[A-Z0-9]+)?)").find(fileName)?.value?.uppercase()
+    if (ggufStyle != null) return ggufStyle
+
+    val intBits = Regex("(?i)(?:^|[^A-Z0-9])(?:MIXED[_-]?)?INT([248])(?:[^A-Z0-9]|$)")
+        .find(fileName)
+        ?.groupValues
+        ?.getOrNull(1)
+    if (intBits != null) return "INT$intBits"
+
+    val weightIntBits = Regex("(?i)(?:^|[^A-Z0-9])WI([248])(?:B[0-9]+)?(?:[^A-Z0-9]|$)")
+        .find(fileName)
+        ?.groupValues
+        ?.getOrNull(1)
+    return weightIntBits?.let { "INT$it" }
 }
 
 data class DeviceProfile(
