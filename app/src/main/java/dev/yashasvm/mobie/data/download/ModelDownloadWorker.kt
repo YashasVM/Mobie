@@ -24,11 +24,18 @@ import java.security.MessageDigest
 import java.util.Properties
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
 class ModelDownloadWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     private val client = OkHttpClient()
+    @Volatile private var activeCall: Call? = null
+
+    override fun onStopped() {
+        activeCall?.cancel()
+        super.onStopped()
+    }
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         if (runAttemptCount >= MAX_ATTEMPTS) {
@@ -80,80 +87,86 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
             }.build()
 
             var transferTotal = expectedSize
-            client.newCall(request).execute().use { response ->
-                when (response.code) {
-                    401, 403 -> return@withContext Result.failure(
-                        dataOf("Access denied. Check the model terms and Hugging Face token."),
-                    )
-                    404 -> return@withContext Result.failure(dataOf("Model artifact was not found"))
-                    416 -> {
-                        if (isComplete(partial, expectedSize, expectedSha)) {
-                            finalizeFile(partial, storageDestination)
-                            return@withContext success(storageDestination)
+            val call = client.newCall(request)
+            activeCall = call
+            try {
+                call.execute().use { response ->
+                    when (response.code) {
+                        401, 403 -> return@withContext Result.failure(
+                            dataOf("Access denied. Check the model terms and Hugging Face token."),
+                        )
+                        404 -> return@withContext Result.failure(dataOf("Model artifact was not found"))
+                        416 -> {
+                            if (isComplete(partial, expectedSize, expectedSha)) {
+                                finalizeFile(partial, storageDestination)
+                                return@withContext success(storageDestination)
+                            }
+                            partial.delete()
+                            return@withContext Result.retry()
                         }
+                    }
+                    if (DownloadResponsePolicy.isRetryableHttp(response.code)) return@withContext Result.retry()
+                    if (!response.isSuccessful) {
+                        return@withContext Result.failure(dataOf("Download failed with HTTP ${response.code}"))
+                    }
+
+                    val isPartialResponse = response.code == 206
+                    if (isPartialResponse && !DownloadResponsePolicy.isValidResumeResponse(
+                            contentRangeHeader = response.header("Content-Range"),
+                            expectedStart = downloaded,
+                            expectedTotalBytes = expectedSize,
+                        )
+                    ) {
                         partial.delete()
                         return@withContext Result.retry()
                     }
-                }
-                if (DownloadResponsePolicy.isRetryableHttp(response.code)) return@withContext Result.retry()
-                if (!response.isSuccessful) {
-                    return@withContext Result.failure(dataOf("Download failed with HTTP ${response.code}"))
-                }
 
-                val isPartialResponse = response.code == 206
-                if (isPartialResponse && !DownloadResponsePolicy.isValidResumeResponse(
-                        contentRangeHeader = response.header("Content-Range"),
-                        expectedStart = downloaded,
+                    val append = downloaded > 0 && isPartialResponse
+                    if (!append && partial.exists()) {
+                        partial.delete()
+                        downloaded = 0
+                    }
+
+                    val body = response.body ?: return@withContext Result.retry()
+                    val startAt = if (append) downloaded else 0
+                    transferTotal = DownloadResponsePolicy.resolvedTotalBytes(
                         expectedTotalBytes = expectedSize,
+                        contentRangeHeader = response.header("Content-Range"),
+                        bodyLength = body.contentLength(),
+                        startAt = startAt,
                     )
-                ) {
-                    partial.delete()
-                    return@withContext Result.retry()
-                }
 
-                val append = downloaded > 0 && isPartialResponse
-                if (!append && partial.exists()) {
-                    partial.delete()
-                    downloaded = 0
-                }
-
-                val body = response.body ?: return@withContext Result.retry()
-                val startAt = if (append) downloaded else 0
-                transferTotal = DownloadResponsePolicy.resolvedTotalBytes(
-                    expectedTotalBytes = expectedSize,
-                    contentRangeHeader = response.header("Content-Range"),
-                    bodyLength = body.contentLength(),
-                    startAt = startAt,
-                )
-
-                RandomAccessFile(partial, "rw").use { output ->
-                    output.seek(startAt)
-                    body.byteStream().use { input ->
-                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                        var current = startAt
-                        var lastProgressAt = 0L
-                        val startedAt = SystemClock.elapsedRealtime()
-                        updateForeground(fileName, current, transferTotal)
-                        while (true) {
-                            val read = input.read(buffer)
-                            if (read < 0) break
-                            output.write(buffer, 0, read)
-                            current += read
-                            val now = SystemClock.elapsedRealtime()
-                            if (now - lastProgressAt >= PROGRESS_INTERVAL_MS) {
-                                val elapsedMs = (now - startedAt).coerceAtLeast(1)
-                                updateForeground(
-                                    fileName,
-                                    current,
-                                    transferTotal,
-                                    ((current - startAt) * 1000L) / elapsedMs,
-                                )
-                                lastProgressAt = now
+                    RandomAccessFile(partial, "rw").use { output ->
+                        output.seek(startAt)
+                        body.byteStream().use { input ->
+                            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                            var current = startAt
+                            var lastProgressAt = 0L
+                            val startedAt = SystemClock.elapsedRealtime()
+                            updateForeground(fileName, current, transferTotal)
+                            while (true) {
+                                val read = input.read(buffer)
+                                if (read < 0) break
+                                output.write(buffer, 0, read)
+                                current += read
+                                val now = SystemClock.elapsedRealtime()
+                                if (now - lastProgressAt >= PROGRESS_INTERVAL_MS) {
+                                    val elapsedMs = (now - startedAt).coerceAtLeast(1)
+                                    updateForeground(
+                                        fileName,
+                                        current,
+                                        transferTotal,
+                                        ((current - startAt) * 1000L) / elapsedMs,
+                                    )
+                                    lastProgressAt = now
+                                }
+                                if (isStopped) return@withContext Result.retry()
                             }
-                            if (isStopped) return@withContext Result.retry()
                         }
                     }
                 }
+            } finally {
+                if (activeCall === call) activeCall = null
             }
 
             if (transferTotal > 0 && partial.length() != transferTotal) return@withContext Result.retry()
