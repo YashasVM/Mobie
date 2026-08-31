@@ -15,6 +15,7 @@ import com.google.ai.edge.litertlm.ExperimentalFlags
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.SamplerConfig
 import dev.yashasvm.mobie.core.model.ModelFormat
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -82,7 +83,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                         engine = null
                         throw error
                     }
-                }
+                }.onFailure(::rethrowCancellation)
             }
         }
     }
@@ -98,7 +99,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                         conversation?.close()
                         conversation = null
                         conversation = activeEngine.createConversation(conversationConfig(history))
-                    }
+                    }.onFailure(::rethrowCancellation)
                 }
             }
         }
@@ -164,6 +165,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
             emit(InferenceEvent.Complete)
         }
     }.catch { error ->
+        rethrowCancellation(error)
         emit(InferenceEvent.Error(error.message ?: "Inference failed"))
     }.flowOn(Dispatchers.Default)
 
@@ -204,6 +206,10 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         val manager = appContext.getSystemService(ActivityManager::class.java)
         return manager.getProcessMemoryInfo(intArrayOf(android.os.Process.myPid()))
             .firstOrNull()?.totalPss?.toLong()?.times(1024L) ?: 0L
+    }
+
+    private fun rethrowCancellation(error: Throwable) {
+        if (error is CancellationException) throw error
     }
 
     private companion object {
