@@ -5,13 +5,17 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.work.WorkInfo
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
+import dev.yashasvm.mobie.data.download.DownloadFilePolicy
 import dev.yashasvm.mobie.data.download.ModelDownloadManager
 import java.io.BufferedReader
 import java.io.File
+import java.io.IOException
 import java.io.InputStreamReader
 import java.net.ServerSocket
 import java.net.Socket
 import java.security.MessageDigest
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -87,6 +91,73 @@ class InterruptedDownloadResumeTest {
             assertArrayEquals(payload, downloaded.readBytes())
 
             downloaded.parentFile?.deleteRecursively()
+        }
+        Unit
+    }
+
+    @Test
+    fun cancellingDownloadClosesActiveHttpTransferAndKeepsPartial() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val payloadSize = 8 * 1024 * 1024
+        val modelId = "mobie-test/user-cancel"
+        val fileName = "cancel-test.litertlm"
+        val disconnected = CountDownLatch(1)
+
+        val modelDir = File(File(context.filesDir, "models"), DownloadFilePolicy.storageKey(modelId))
+        modelDir.deleteRecursively()
+
+        ServerSocket(0).use { server ->
+            val serving = Thread {
+                server.accept().use { socket ->
+                    readRequestHeaders(socket)
+                    writeResponseHeaders(socket, 200, payloadSize, null)
+                    val chunk = ByteArray(16 * 1024) { 0x5a.toByte() }
+                    try {
+                        var written = 0
+                        while (written < payloadSize) {
+                            socket.getOutputStream().write(chunk)
+                            socket.getOutputStream().flush()
+                            written += chunk.size
+                            Thread.sleep(10)
+                        }
+                    } catch (_: IOException) {
+                        disconnected.countDown()
+                    } catch (_: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                    }
+                }
+            }.apply { start() }
+
+            val artifact = ModelArtifact(
+                fileName = fileName,
+                downloadUrl = "http://127.0.0.1:${server.localPort}/$fileName",
+                sizeBytes = payloadSize.toLong(),
+                format = ModelFormat.LITERT_LM,
+            )
+            val downloads = ModelDownloadManager(context)
+            val requestId = downloads.enqueue(modelId, artifact)
+            withTimeout(30_000L) {
+                downloads.observe(requestId).first {
+                    it.state == WorkInfo.State.RUNNING && it.downloadedBytes > 0
+                }
+            }
+
+            downloads.cancel(modelId, artifact)
+            val cancelled = withTimeout(15_000L) {
+                downloads.observe(requestId).first { it.state.isFinished }
+            }
+            assertEquals(WorkInfo.State.CANCELLED, cancelled.state)
+            assertTrue("Cancelling WorkManager did not close the active HTTP call", disconnected.await(5, TimeUnit.SECONDS))
+
+            val partial = File(
+                modelDir,
+                DownloadFilePolicy.storageFileName(fileName) + ".part",
+            )
+            assertTrue("Cancellation should retain downloaded bytes for resume", partial.length() > 0)
+            assertTrue("A cancelled partial must be smaller than the complete model", partial.length() < payloadSize)
+
+            serving.join(5_000)
+            modelDir.deleteRecursively()
         }
         Unit
     }
