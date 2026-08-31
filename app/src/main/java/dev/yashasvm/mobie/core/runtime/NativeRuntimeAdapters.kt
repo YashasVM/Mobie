@@ -55,6 +55,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     private val generation = Mutex()
     private var engine: Engine? = null
     private var conversation: Conversation? = null
+    private var visionReady = false
 
     override suspend fun load(
         modelPath: String,
@@ -68,21 +69,15 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                     ensureLoadMemoryHeadroom(modelPath)
                     closeRuntime()
                     ExperimentalFlags.enableBenchmark = true
-                    val createdEngine = Engine(
-                        EngineConfig(
-                            modelPath = modelPath,
-                            backend = Backend.CPU(),
-                            visionBackend = if (vision) Backend.CPU() else null,
-                            cacheDir = appContext.cacheDir.absolutePath,
-                        ),
-                    )
+                    val loadedEngine = initializeEngineWithVisionFallback(modelPath, vision)
                     try {
-                        createdEngine.initialize()
-                        engine = createdEngine
-                        conversation = createdEngine.createConversation(conversationConfig(history))
+                        engine = loadedEngine.engine
+                        visionReady = loadedEngine.visionReady
+                        conversation = loadedEngine.engine.createConversation(conversationConfig(history))
                     } catch (error: Throwable) {
-                        createdEngine.close()
+                        loadedEngine.engine.close()
                         engine = null
+                        visionReady = false
                         throw error
                     }
                 }.onFailure(::rethrowCancellation)
@@ -117,10 +112,16 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
             ensureGenerationMemoryHeadroom()
             val activeConversation = conversation
                 ?: throw IllegalStateException("Load a model before starting a conversation")
+            if (imagePath != null && !visionReady) {
+                throw IllegalStateException(
+                    "Vision initialization failed on this device. The model is still available for text-only chat.",
+                )
+            }
             val contents = if (imagePath == null) {
                 Contents.of(prompt)
             } else {
-                Contents.of(Content.ImageFile(imagePath), Content.Text(prompt))
+                // LiteRT-LM's multimodal guidance expects text before media content.
+                Contents.of(Content.Text(prompt), Content.ImageFile(imagePath))
             }
             val generationStartedAt = SystemClock.elapsedRealtime()
             var lastMemoryCheckAt = generationStartedAt
@@ -198,6 +199,42 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         generation.withLock { lifecycle.withLock { closeRuntime() } }
     }
 
+    private fun initializeEngineWithVisionFallback(modelPath: String, vision: Boolean): LoadedEngine {
+        if (!vision) return LoadedEngine(initializeEngine(modelPath, visionBackend = null), visionReady = false)
+
+        return try {
+            LoadedEngine(initializeEngine(modelPath, visionBackend = Backend.CPU()), visionReady = true)
+        } catch (multimodalError: Throwable) {
+            rethrowCancellation(multimodalError)
+            try {
+                LoadedEngine(initializeEngine(modelPath, visionBackend = null), visionReady = false)
+            } catch (textOnlyError: Throwable) {
+                rethrowCancellation(textOnlyError)
+                textOnlyError.addSuppressed(multimodalError)
+                throw textOnlyError
+            }
+        }
+    }
+
+    private fun initializeEngine(modelPath: String, visionBackend: Backend?): Engine {
+        val createdEngine = Engine(
+            EngineConfig(
+                modelPath = modelPath,
+                backend = Backend.CPU(),
+                visionBackend = visionBackend,
+                cacheDir = appContext.cacheDir.absolutePath,
+            ),
+        )
+        try {
+            createdEngine.initialize()
+            return createdEngine
+        } catch (error: Throwable) {
+            // Engine.close() requires successful initialization, so only close initialized engines.
+            if (createdEngine.isInitialized()) createdEngine.close()
+            throw error
+        }
+    }
+
     private fun conversationConfig(history: List<RuntimeMessage>): ConversationConfig {
         val restored = ConversationHistoryPolicy.select(history).map {
             if (it.fromUser) Message.user(it.text) else Message.model(it.text)
@@ -240,6 +277,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         conversation = null
         engine?.close()
         engine = null
+        visionReady = false
     }
 
     private fun currentAppRamBytes(): Long {
@@ -251,6 +289,11 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     private fun rethrowCancellation(error: Throwable) {
         if (error is CancellationException) throw error
     }
+
+    private data class LoadedEngine(
+        val engine: Engine,
+        val visionReady: Boolean,
+    )
 
     private companion object {
         const val DEFAULT_MAX_OUTPUT_TOKENS = 256
