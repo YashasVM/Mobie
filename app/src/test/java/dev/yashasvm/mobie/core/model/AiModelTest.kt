@@ -1,6 +1,7 @@
 package dev.yashasvm.mobie.core.model
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class AiModelTest {
@@ -43,6 +44,24 @@ class AiModelTest {
         val int4 = liteRtArtifact("model_mixed_int4.litertlm", 400, "INT4")
 
         assertEquals(int4, modelWith(int8, int4).bestArtifact)
+    }
+
+    @Test
+    fun `hardware targeted LiteRT artifact is not selected by generic runtime`() {
+        val npu = liteRtArtifact("Qwen3-0.6B.mediatek.mt6993.litertlm", 250, "INT4")
+        val generic = liteRtArtifact("Qwen3-0.6B.litertlm", 300, "INT8")
+
+        assertEquals(ArtifactExecutionTarget.HARDWARE_SPECIFIC, npu.executionTarget)
+        assertEquals(ArtifactExecutionTarget.GENERIC, generic.executionTarget)
+        assertEquals(generic, modelWith(npu, generic).bestArtifact)
+    }
+
+    @Test
+    fun `hardware only LiteRT model has no runnable generic artifact`() {
+        val npu = liteRtArtifact("model.qualcomm.sm8750.npu.litertlm", 250, "INT4")
+
+        assertEquals(ArtifactExecutionTarget.HARDWARE_SPECIFIC, npu.executionTarget)
+        assertNull(modelWith(npu).bestArtifact)
     }
 
     private fun modelWith(vararg artifacts: ModelArtifact) = AiModel(
