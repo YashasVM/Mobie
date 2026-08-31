@@ -1,5 +1,7 @@
 package dev.yashasvm.mobie.core.model
 
+import kotlin.math.max
+
 enum class ModelFormat { GGUF, LITERT_LM, UNKNOWN }
 enum class ModelType { TEXT_GENERATION, EMBEDDING, VISION, AUDIO, UNKNOWN }
 enum class Compatibility { COMPATIBLE, WARNING, INCOMPATIBLE, CONVERSION_REQUIRED }
@@ -43,6 +45,8 @@ data class AiModel(
             .minWithOrNull(
                 compareBy<ModelArtifact>(
                     { if (it.format == ModelFormat.LITERT_LM) 0 else 1 },
+                    { if (estimateLiteRtRuntimeMemory(it) != null) 0 else 1 },
+                    { estimateLiteRtRuntimeMemory(it)?.estimatedRamBytes ?: Long.MAX_VALUE },
                     { quantizationRank(it.quantization) },
                     { if (it.sizeBytes > 0) 0 else 1 },
                     { it.sizeBytes.takeIf { size -> size > 0 } ?: Long.MAX_VALUE },
@@ -64,6 +68,29 @@ data class AiModel(
             else -> 10
         }
     }
+}
+
+internal data class LiteRtRuntimeMemoryEstimate(
+    val estimatedRamBytes: Long,
+    val runtimeOverheadBytes: Long,
+    val kvCacheBytes: Long,
+    val contextWindowTokens: Int,
+)
+
+internal fun estimateLiteRtRuntimeMemory(artifact: ModelArtifact): LiteRtRuntimeMemoryEstimate? {
+    if (artifact.format != ModelFormat.LITERT_LM || artifact.sizeBytes <= 0) return null
+    val contextWindow = artifact.contextWindowTokens ?: DEFAULT_CONTEXT_TOKENS
+    val kvCache = max(
+        MIN_KV_CACHE_BYTES,
+        DEFAULT_KV_CACHE_BYTES * contextWindow / DEFAULT_CONTEXT_TOKENS,
+    )
+    val runtimeOverhead = max((artifact.sizeBytes * 0.4).toLong(), 512L * MIB)
+    return LiteRtRuntimeMemoryEstimate(
+        estimatedRamBytes = artifact.sizeBytes + runtimeOverhead + kvCache,
+        runtimeOverheadBytes = runtimeOverhead,
+        kvCacheBytes = kvCache,
+        contextWindowTokens = contextWindow,
+    )
 }
 
 internal fun inferArtifactQuantization(fileName: String): String? {
@@ -158,3 +185,8 @@ data class CompatibilityResult(
 )
 
 enum class ConversionStatus { REQUESTED, REVIEWING, CONVERTING, TESTING, READY, UNSUPPORTED }
+
+private const val MIB = 1024L * 1024L
+private const val DEFAULT_CONTEXT_TOKENS = 4_096
+private const val DEFAULT_KV_CACHE_BYTES = 256L * MIB
+private const val MIN_KV_CACHE_BYTES = 64L * MIB
