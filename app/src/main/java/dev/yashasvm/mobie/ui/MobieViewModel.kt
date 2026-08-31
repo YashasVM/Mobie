@@ -239,26 +239,39 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         }
         inferenceJob?.cancel()
         inferenceJob = viewModelScope.launch {
-            val adapter = container.runtimes.adapterFor(model.bestArtifact?.format ?: return@launch)
-            if (adapter == null) {
-                mutableState.update { it.copy(runtimeState = RuntimeState.ERROR, error = "No runtime for this model") }
-                return@launch
-            }
-            runtimeLifecycle.withLock {
-                adapter.load(
-                    path,
-                    model.supportsVision,
-                    history.map { RuntimeMessage(it.fromUser, it.text) },
-                )
-            }.fold(
-                onSuccess = { mutableState.update { it.copy(runtimeState = RuntimeState.READY) } },
-                onFailure = { error ->
-                    mutableState.update {
-                        it.copy(runtimeState = RuntimeState.ERROR, error = error.message ?: "Model failed to load")
-                    }
-                },
-            )
+            loadRuntimeConversation(model, path, history, preferReset = false)
         }
+    }
+
+    private suspend fun loadRuntimeConversation(
+        model: AiModel,
+        path: String,
+        history: List<ChatMessage>,
+        preferReset: Boolean,
+    ) {
+        val adapter = container.runtimes.adapterFor(model.bestArtifact?.format ?: return)
+        if (adapter == null) {
+            mutableState.update { it.copy(runtimeState = RuntimeState.ERROR, error = "No runtime for this model") }
+            return
+        }
+        val restored = history.map { RuntimeMessage(it.fromUser, it.text) }
+        val result = runtimeLifecycle.withLock {
+            if (preferReset) {
+                adapter.resetConversation(restored).recoverCatching {
+                    adapter.load(path, model.supportsVision, restored).getOrThrow()
+                }
+            } else {
+                adapter.load(path, model.supportsVision, restored)
+            }
+        }
+        result.fold(
+            onSuccess = { mutableState.update { it.copy(runtimeState = RuntimeState.READY) } },
+            onFailure = { error ->
+                mutableState.update {
+                    it.copy(runtimeState = RuntimeState.ERROR, error = error.message ?: "Model failed to load")
+                }
+            },
+        )
     }
 
     fun sendMessage(prompt: String, imagePath: String? = null) {
@@ -318,6 +331,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     fun newChat() {
         val model = state.value.selected ?: return
         val path = state.value.downloadedPath ?: return
+        val canReuseLoadedModel = state.value.runtimeState == RuntimeState.READY
         inferenceJob?.cancel()
         container.chatHistory.startNewSession(model.id)
         mutableState.update {
@@ -325,13 +339,13 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 messages = emptyList(),
                 history = container.chatHistory.sessions(model.id),
                 sessionId = container.chatHistory.sessions(model.id).firstOrNull()?.id,
+                runtimeState = RuntimeState.LOADING,
                 stats = null,
                 error = null,
             )
         }
-        viewModelScope.launch {
-            unloadRuntime()
-            openChat(path)
+        inferenceJob = viewModelScope.launch {
+            loadRuntimeConversation(model, path, emptyList(), preferReset = canReuseLoadedModel)
         }
     }
 
@@ -369,11 +383,22 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     fun selectHistory(sessionId: String) {
         val model = state.value.selected ?: return
         val path = state.value.downloadedPath ?: return
+        val canReuseLoadedModel = state.value.runtimeState == RuntimeState.READY
         container.chatHistory.activate(model.id, sessionId)
+        val history = readHistory(model)
         inferenceJob?.cancel()
-        viewModelScope.launch {
-            unloadRuntime()
-            openChat(path)
+        mutableState.update {
+            it.copy(
+                messages = history,
+                history = container.chatHistory.sessions(model.id),
+                sessionId = sessionId,
+                runtimeState = RuntimeState.LOADING,
+                stats = null,
+                error = null,
+            )
+        }
+        inferenceJob = viewModelScope.launch {
+            loadRuntimeConversation(model, path, history, preferReset = canReuseLoadedModel)
         }
     }
 
