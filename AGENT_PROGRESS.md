@@ -17,20 +17,21 @@
 - Preserved coroutine cancellation through LiteRT load/reset/generation so user/system cancellation is no longer converted into a false inference failure; the exact branch tip passed Android CI.
 - Made conversation-only reset transactional so a failed replacement conversation does not destroy the still-usable current conversation; the corrected implementation passed full Android CI.
 - Re-check live Android RAM/LMK state immediately before LiteRT engine initialization and reject unsafe loads before tearing down an already-resident runtime; the exact branch tip passed full Android CI.
+- Prevent new LiteRT decodes from starting while Android reports active low-memory/LMK pressure; the exact branch tip passed full Android CI.
 
 ## In progress
-- Prevent a new LiteRT decode from starting while Android reports active low-memory/LMK pressure, reducing OOM risk from additional context/KV growth; exact-tip Android CI validation is pending.
+- Re-check Android low-memory state during active LiteRT generation at a bounded 500 ms cadence and cancel native decode if LMK pressure appears after generation has started; exact-tip Android CI validation is pending.
 - Continue auditing real-device performance constraints and safe accelerator/backend selection.
 - Use the measured CPU baseline to identify runtime changes that materially improve TTFT/tokens-per-second without increasing RAM or instability.
 
 ## Tests performed
-- Latest pre-generation-guard `agent-dev` tip passed JVM unit tests, Android lint, debug APK build, emulator smoke/integration tests, explicit active-download cancellation/socket-close validation, interrupted-transfer resume, bounded restored-history tests, cancellation-safe runtime handling, transactional conversation reset, load-time memory admission, and real LiteRT-LM Qwen E2E.
+- Latest pre-mid-generation-guard `agent-dev` tip passed JVM unit tests, Android lint, debug APK build, emulator smoke/integration tests, explicit active-download cancellation/socket-close validation, interrupted-transfer resume, bounded restored-history tests, cancellation-safe runtime handling, transactional conversation reset, load-time memory admission, pre-generation memory admission, and real LiteRT-LM Qwen E2E.
 - Focused JVM coverage verifies restored-history message limits, character budget, blank entries, oversized history entries, and user-led turn boundaries; the exact bounded-history branch tip passed full Android CI.
 - Real Qwen E2E verifies repeated prompts, conversation-only reset with restored history, successful generation after reset, full unload/reload, successful generation after reload, and records both reset and reload setup wall time.
 - Active-download cancellation initially failed to compile because `CoroutineWorker.onStopped()` is final in the current WorkManager API; the implementation was corrected to use the existing coroutine-aware OkHttp bridge so WorkManager cancellation propagates directly to `Call.cancel()`.
 - Low-RAM recommendation boundary fix is fully re-validated after the earlier test-expectation error.
 - Added JVM coverage for catalog metadata-cache TTL/LRU behavior and for cancellation propagating to the active catalog OkHttp call.
-- Added focused JVM coverage for LiteRT load-memory admission and decode admission: active Android low-memory state, insufficient current load headroom, healthy small-model load, decode blocked under low-memory pressure, and decode allowed when Android is healthy.
+- Added focused JVM coverage for LiteRT load-memory admission and decode admission: active Android low-memory state, insufficient current load headroom, healthy small-model load, decode blocked under low-memory pressure, decode allowed when Android is healthy, and the 500 ms mid-generation memory-check cadence.
 
 ## Benchmarks
 - CPU emulator baseline, Qwen3-0.6B INT4: first prompt 8.56 tokens/s, 1.536 s TTFT, 3.661 s total generation, ~1.02 GiB app RAM.
@@ -56,4 +57,4 @@
 - Review conversation reuse/fallback behavior when switching histories and creating chats, especially around cancellation, failed conversation replacement, and restored context; verify the ~379x setup-time reduction on representative physical phones.
 - Verify long-history switching preserves useful recent context without context-limit failures or excessive prefill on real models.
 - Review catalog caching/failure fallback and cancellation behavior for freshness, API traffic, and mobile-network efficiency.
-- Verify both load-time and pre-generation memory guards on real low-RAM phones under deliberate memory pressure; unsafe work should be rejected before native initialization/decode without destroying an already-resident runtime.
+- Verify load-time, pre-generation, and mid-generation memory guards on real low-RAM phones under deliberate memory pressure; unsafe work should be rejected or cancelled before native memory growth reaches LMK/OOM territory without destroying an already-resident runtime.
