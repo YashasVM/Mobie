@@ -96,9 +96,12 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                     runCatching {
                         val activeEngine = engine
                             ?: throw IllegalStateException("Load a model before resetting the conversation")
-                        conversation?.close()
-                        conversation = null
-                        conversation = activeEngine.createConversation(conversationConfig(history))
+                        // Build the replacement first so a failed history restore does not destroy the
+                        // currently usable conversation and force an otherwise unnecessary model reload.
+                        val replacement = activeEngine.createConversation(conversationConfig(history))
+                        val previous = conversation
+                        conversation = replacement
+                        previous?.close()
                     }.onFailure(::rethrowCancellation)
                 }
             }
