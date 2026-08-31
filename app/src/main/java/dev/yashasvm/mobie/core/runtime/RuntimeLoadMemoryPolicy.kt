@@ -49,5 +49,10 @@ internal object RuntimeLoadMemoryPolicy {
             null
         }
 
+    /** Avoid querying ActivityManager for every streamed token while still reacting quickly to LMK pressure. */
+    fun shouldRecheckGenerationMemory(lastCheckAtMs: Long, nowMs: Long): Boolean =
+        nowMs - lastCheckAtMs >= GENERATION_MEMORY_RECHECK_MS
+
+    private const val GENERATION_MEMORY_RECHECK_MS = 500L
     private const val MIB = 1024L * 1024L
 }
