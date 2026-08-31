@@ -173,13 +173,16 @@ class LiteRtEndToEndTest {
             "Invalid TTFT for $label: ${stats.timeToFirstTokenMs}ms of ${stats.totalGenerationMs}ms",
             stats.timeToFirstTokenMs in 0..stats.totalGenerationMs,
         )
+        assertTrue("LiteRT reported no prefill tokens for $label", stats.prefillTokenCount > 0)
+        assertTrue("LiteRT reported invalid prefill throughput for $label", stats.prefillTokensPerSecond > 0.0)
+        assertTrue("LiteRT reported no decode tokens for $label", stats.decodeTokenCount > 0)
     }
 
     private fun logStats(label: String, events: List<InferenceEvent>) {
         val stats = events.stats()
         Log.i(
             TAG,
-            "$label metrics: ${stats.tokensPerSecond} tokens/s, TTFT=${stats.timeToFirstTokenMs}ms, total=${stats.totalGenerationMs}ms, RAM=${stats.ramBytes} bytes",
+            "$label metrics: decode=${stats.tokensPerSecond} tokens/s (${stats.decodeTokenCount} tokens), prefill=${stats.prefillTokensPerSecond} tokens/s (${stats.prefillTokenCount} tokens), TTFT=${stats.timeToFirstTokenMs}ms, total=${stats.totalGenerationMs}ms, RAM=${stats.ramBytes} bytes",
         )
     }
 
@@ -212,7 +215,7 @@ class LiteRtEndToEndTest {
     }
 
     private fun metricsLine(label: String, stats: InferenceStats): String =
-        "$label.tokens_per_second=${stats.tokensPerSecond};$label.ttft_ms=${stats.timeToFirstTokenMs};$label.total_ms=${stats.totalGenerationMs};$label.ram_bytes=${stats.ramBytes}"
+        "$label.decode_tokens_per_second=${stats.tokensPerSecond};$label.decode_token_count=${stats.decodeTokenCount};$label.prefill_tokens_per_second=${stats.prefillTokensPerSecond};$label.prefill_token_count=${stats.prefillTokenCount};$label.ttft_ms=${stats.timeToFirstTokenMs};$label.total_ms=${stats.totalGenerationMs};$label.ram_bytes=${stats.ramBytes}"
 
     private fun elapsedMs(startedNs: Long): Double =
         (SystemClock.elapsedRealtimeNanos() - startedNs) / 1_000_000.0

@@ -65,9 +65,6 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         generation.withLock {
             lifecycle.withLock {
                 runCatching {
-                    // Re-check live Android memory immediately before native initialization. This is
-                    // intentionally before closeRuntime() so a rejected load does not destroy an
-                    // already-usable resident model.
                     ensureLoadMemoryHeadroom(modelPath)
                     closeRuntime()
                     ExperimentalFlags.enableBenchmark = true
@@ -101,8 +98,6 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                     runCatching {
                         val activeEngine = engine
                             ?: throw IllegalStateException("Load a model before resetting the conversation")
-                        // Build the replacement first so a failed history restore does not destroy the
-                        // currently usable conversation and force an otherwise unnecessary model reload.
                         val replacement = activeEngine.createConversation(conversationConfig(history))
                         val previous = conversation
                         conversation = replacement
@@ -140,9 +135,6 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                     try {
                         ensureGenerationMemoryHeadroom()
                     } catch (error: IllegalStateException) {
-                        // Decode may begin with healthy headroom and become unsafe as context/KV grows
-                        // or another app consumes RAM. Stop native generation before surfacing the
-                        // pressure error instead of allowing the process to drift toward LMK/OOM.
                         activeConversation.cancelProcess()
                         throw error
                     }
@@ -174,6 +166,9 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                         ramBytes = currentAppRamBytes(),
                         timeToFirstTokenMs = firstTokenAt?.minus(generationStartedAt) ?: 0,
                         totalGenerationMs = generationFinishedAt - generationStartedAt,
+                        prefillTokensPerSecond = benchmark.lastPrefillTokensPerSecond,
+                        prefillTokenCount = benchmark.lastPrefillTokenCount,
+                        decodeTokenCount = benchmark.lastDecodeTokenCount,
                     ),
                 ),
             )

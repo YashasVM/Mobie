@@ -14,6 +14,9 @@ data class InferenceStats(
     val ramBytes: Long,
     val timeToFirstTokenMs: Long = 0,
     val totalGenerationMs: Long = 0,
+    val prefillTokensPerSecond: Double = 0.0,
+    val prefillTokenCount: Int = 0,
+    val decodeTokenCount: Int = 0,
 )
 
 sealed interface InferenceEvent {
