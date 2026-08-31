@@ -21,11 +21,12 @@
 - Re-check Android low-memory state during active LiteRT generation at a bounded 500 ms cadence and cancel native decode if LMK pressure appears after generation has started; the exact branch tip passed full Android CI.
 
 ## In progress
+- Harden LiteRT multimodal loading: try the requested CPU vision executor first, fall back to a text-only CPU engine when vision initialization is unavailable, reject image sends clearly in fallback mode, and pass multimodal content in LiteRT-LM's documented text-before-media order. Android CI validation is pending.
 - Continue auditing real-device performance constraints and safe accelerator/backend selection.
 - Use the measured CPU prefill/decode baseline to identify runtime changes that materially improve TTFT/tokens-per-second without increasing RAM or instability.
 
 ## Tests performed
-- Latest `agent-dev` runtime tip passed JVM unit tests, Android lint, debug APK build, emulator smoke/integration tests, explicit active-download cancellation/socket-close validation, interrupted-transfer resume, bounded restored-history tests, cancellation-safe runtime handling, transactional conversation reset, load-time memory admission, pre-generation memory admission, mid-generation memory-pressure handling, and real LiteRT-LM Qwen E2E.
+- Latest validated `agent-dev` runtime tip passed JVM unit tests, Android lint, debug APK build, emulator smoke/integration tests, explicit active-download cancellation/socket-close validation, interrupted-transfer resume, bounded restored-history tests, cancellation-safe runtime handling, transactional conversation reset, load-time memory admission, pre-generation memory admission, mid-generation memory-pressure handling, and real LiteRT-LM Qwen E2E.
 - Focused JVM coverage verifies restored-history message limits, character budget, blank entries, oversized history entries, and user-led turn boundaries; the exact bounded-history branch tip passed full Android CI.
 - Real Qwen E2E verifies repeated prompts, conversation-only reset with restored history, successful generation after reset, full unload/reload, successful generation after reload, and records reset/reload wall time plus native prefill/decode benchmark metrics.
 - Active-download cancellation initially failed to compile because `CoroutineWorker.onStopped()` is final in the current WorkManager API; the implementation was corrected to use the existing coroutine-aware OkHttp bridge so WorkManager cancellation propagates directly to `Call.cancel()`.
@@ -49,6 +50,7 @@
 - LiteRT-LM currently does not expose a public API for reading a `.litertlm` package's maximum context capacity before engine creation, so Mobie should not hardcode larger KV-cache/context settings from model-name guesses.
 - The complete resume path is deterministically tested with a forced HTTP disconnect; a live Hugging Face CDN interruption is intentionally not used as a flaky CI dependency.
 - Restored-context sizing still uses a conservative character budget because LiteRT-LM does not expose a cheap pre-conversation token-count API; the full transcript remains stored and visible in the UI.
+- Text-only fallback for a failed vision executor preserves local chat availability but cannot make vision work on an unsupported/incompatible device; representative physical-device multimodal validation is still required.
 
 ## Inspect before merging
 - Verify model recommendations on real low-RAM phones and devices under memory pressure.
@@ -59,3 +61,4 @@
 - Verify long-history switching preserves useful recent context without context-limit failures or excessive prefill on real models.
 - Review catalog caching/failure fallback and cancellation behavior for freshness, API traffic, and mobile-network efficiency.
 - Verify load-time, pre-generation, and mid-generation memory guards on real low-RAM phones under deliberate memory pressure; unsafe work should be rejected or cancelled before native memory growth reaches LMK/OOM territory without destroying an already-resident runtime.
+- Verify a real vision-capable `.litertlm` model on representative phones: multimodal engine initialization, text-before-image inference, and text-only fallback behavior when the vision executor cannot initialize.
