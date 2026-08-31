@@ -3,6 +3,7 @@ package dev.yashasvm.mobie.core.model
 enum class ModelFormat { GGUF, LITERT_LM, UNKNOWN }
 enum class ModelType { TEXT_GENERATION, EMBEDDING, VISION, AUDIO, UNKNOWN }
 enum class Compatibility { COMPATIBLE, WARNING, INCOMPATIBLE, CONVERSION_REQUIRED }
+enum class ArtifactExecutionTarget { GENERIC, HARDWARE_SPECIFIC }
 
 data class ModelArtifact(
     val fileName: String,
@@ -11,6 +12,7 @@ data class ModelArtifact(
     val sha256: String? = null,
     val format: ModelFormat,
     val quantization: String? = null,
+    val executionTarget: ArtifactExecutionTarget = inferArtifactExecutionTarget(fileName),
 ) {
     val runtimeLabel: String
         get() = when (format) {
@@ -34,14 +36,17 @@ data class AiModel(
     val supportsVision: Boolean get() = type == ModelType.VISION
 
     val bestArtifact: ModelArtifact?
-        get() = artifacts.minWithOrNull(
-            compareBy<ModelArtifact>(
-                { if (it.format == ModelFormat.LITERT_LM) 0 else 1 },
-                { quantizationRank(it.quantization) },
-                { if (it.sizeBytes > 0) 0 else 1 },
-                { it.sizeBytes.takeIf { size -> size > 0 } ?: Long.MAX_VALUE },
-            ),
-        )
+        get() = artifacts
+            .asSequence()
+            .filter { it.executionTarget == ArtifactExecutionTarget.GENERIC }
+            .minWithOrNull(
+                compareBy<ModelArtifact>(
+                    { if (it.format == ModelFormat.LITERT_LM) 0 else 1 },
+                    { quantizationRank(it.quantization) },
+                    { if (it.sizeBytes > 0) 0 else 1 },
+                    { it.sizeBytes.takeIf { size -> size > 0 } ?: Long.MAX_VALUE },
+                ),
+            )
 
     private fun quantizationRank(quantization: String?): Int {
         val normalized = quantization?.uppercase() ?: return 20
@@ -75,6 +80,19 @@ internal fun inferArtifactQuantization(fileName: String): String? {
         ?.groupValues
         ?.getOrNull(1)
     return weightIntBits?.let { "INT$it" }
+}
+
+internal fun inferArtifactExecutionTarget(fileName: String): ArtifactExecutionTarget {
+    val normalized = fileName.lowercase()
+    val hardwareSpecific =
+        Regex("(?:^|[._-])mediatek(?:[._-]|$)").containsMatchIn(normalized) ||
+            Regex("(?:^|[._-])qualcomm(?:[._-]|$)").containsMatchIn(normalized) ||
+            Regex("(?:^|[._-])npu(?:[._-]|$)").containsMatchIn(normalized)
+    return if (hardwareSpecific) {
+        ArtifactExecutionTarget.HARDWARE_SPECIFIC
+    } else {
+        ArtifactExecutionTarget.GENERIC
+    }
 }
 
 data class DeviceProfile(
