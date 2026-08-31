@@ -36,6 +36,9 @@ class GgufRuntimeAdapter : RuntimeAdapter {
     override suspend fun load(modelPath: String, vision: Boolean, history: List<RuntimeMessage>) = Result.failure<Unit>(
         IllegalStateException("llama.cpp native library is not bundled in this MVP build"),
     )
+    override suspend fun resetConversation(history: List<RuntimeMessage>) = Result.failure<Unit>(
+        IllegalStateException("GGUF runtime is not installed"),
+    )
     override fun generate(prompt: String, imagePath: String?, config: GenerationConfig): Flow<InferenceEvent> =
         flowOf(InferenceEvent.Error("GGUF runtime is not installed"))
     override suspend fun cancel() = Unit
@@ -73,30 +76,32 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                     try {
                         createdEngine.initialize()
                         engine = createdEngine
-                        // ponytail: cap restored context; add token-aware trimming when LiteRT exposes cheap counts pre-load.
-                        val restored = history.takeLast(20).filter { it.text.isNotBlank() }.map {
-                            if (it.fromUser) Message.user(it.text) else Message.model(it.text)
-                        }
-                        conversation = createdEngine.createConversation(
-                            ConversationConfig(
-                                initialMessages = restored,
-                                samplerConfig = SamplerConfig(
-                                    topK = 40,
-                                    topP = 0.95,
-                                    temperature = 0.7,
-                                    seed = 0,
-                                ),
-                                maxOutputToken = DEFAULT_MAX_OUTPUT_TOKENS,
-                            ),
-                        )
+                        conversation = createdEngine.createConversation(conversationConfig(history))
                     } catch (error: Throwable) {
                         createdEngine.close()
+                        engine = null
                         throw error
                     }
                 }
             }
         }
     }
+
+    override suspend fun resetConversation(history: List<RuntimeMessage>): Result<Unit> =
+        withContext(Dispatchers.Default) {
+            cancel()
+            generation.withLock {
+                lifecycle.withLock {
+                    runCatching {
+                        val activeEngine = engine
+                            ?: throw IllegalStateException("Load a model before resetting the conversation")
+                        conversation?.close()
+                        conversation = null
+                        conversation = activeEngine.createConversation(conversationConfig(history))
+                    }
+                }
+            }
+        }
 
     override fun generate(
         prompt: String,
@@ -170,6 +175,23 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     override suspend fun unload() = withContext(Dispatchers.Default) {
         cancel()
         generation.withLock { lifecycle.withLock { closeRuntime() } }
+    }
+
+    private fun conversationConfig(history: List<RuntimeMessage>): ConversationConfig {
+        // Cap restored context until LiteRT exposes a cheap pre-load token-count API.
+        val restored = history.takeLast(20).filter { it.text.isNotBlank() }.map {
+            if (it.fromUser) Message.user(it.text) else Message.model(it.text)
+        }
+        return ConversationConfig(
+            initialMessages = restored,
+            samplerConfig = SamplerConfig(
+                topK = 40,
+                topP = 0.95,
+                temperature = 0.7,
+                seed = 0,
+            ),
+            maxOutputToken = DEFAULT_MAX_OUTPUT_TOKENS,
+        )
     }
 
     private fun closeRuntime() {
