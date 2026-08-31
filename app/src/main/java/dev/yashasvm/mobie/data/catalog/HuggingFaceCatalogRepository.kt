@@ -65,7 +65,7 @@ class HuggingFaceCatalogRepository(
         }
     }
 
-    private fun fetchDetails(repoId: String): HfModel? = runCatching {
+    private suspend fun fetchDetails(repoId: String): HfModel? = runCatching {
         val url = "https://huggingface.co".toHttpUrl().newBuilder().apply {
             addPathSegment("api")
             addPathSegment("models")
@@ -77,15 +77,15 @@ class HuggingFaceCatalogRepository(
             ?.also { detailCache.put(repoId, it) }
     }.getOrNull()
 
-    private fun fetchBody(url: String): String? {
+    private suspend fun fetchBody(url: String): String? {
         val token = tokenStore.read()
         fun request(withToken: String?) = Request.Builder().url(url).apply {
             withToken?.let { header("Authorization", "Bearer $it") }
         }.build()
-        fun responseBody(request: Request): String? = client.newCall(request).execute().use { response ->
+        suspend fun responseBody(request: Request): String? = client.newCall(request).awaitResponse().use { response ->
             if (!response.isSuccessful) null else response.body?.string()
         }
-        val first = client.newCall(request(token)).execute()
+        val first = client.newCall(request(token)).awaitResponse()
         if (first.code == 401 && !token.isNullOrBlank()) {
             first.close()
             return responseBody(request(null))
