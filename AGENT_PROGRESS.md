@@ -10,20 +10,18 @@
 - Reduced Hugging Face catalog request fan-out with a bounded 10-minute/64-entry detail cache; complete file metadata from the initial response now skips the extra detail request entirely.
 - Made catalog loading tolerant of individual model-detail request failures so one transient metadata failure no longer aborts the whole model list.
 - Made Hugging Face catalog HTTP calls coroutine-cancellable so obsolete searches cancel their underlying OkHttp calls instead of continuing to consume network/battery in the background.
-- Made user-cancelled WorkManager model downloads immediately cancel the active OkHttp call instead of allowing a blocked/read-in-progress transfer to continue until timeout; partial bytes are retained for resume.
+- Made user-cancelled WorkManager model downloads cancel the underlying OkHttp call through coroutine cancellation while retaining partial bytes for resume; the deterministic Android cancellation test is fully green.
 
 ## In progress
-- Validate the new active-download cancellation path through the full Android CI pipeline, including the deterministic localhost cancellation test.
 - Replace unnecessary full model unload/reload cycles when starting a new chat or switching history with safe conversation-only reset/reuse if LiteRT lifecycle testing supports it.
 - Continue auditing real-device performance constraints and safe accelerator/backend selection.
 - Use the measured CPU baseline to identify runtime changes that materially improve TTFT/tokens-per-second without increasing RAM or instability.
 
 ## Tests performed
-- Cancellable catalog networking is fully validated: JVM unit tests, Android lint, debug APK build, emulator smoke/integration tests, interrupted-transfer resume, and real LiteRT-LM Qwen E2E all passed on the previous branch tip.
+- Latest `agent-dev` tip passed JVM unit tests, Android lint, debug APK build, emulator smoke/integration tests, explicit active-download cancellation/socket-close validation, interrupted-transfer resume, and real LiteRT-LM Qwen E2E.
+- Active-download cancellation initially failed to compile because `CoroutineWorker.onStopped()` is final in the current WorkManager API; the implementation was corrected to use the existing coroutine-aware OkHttp bridge so WorkManager cancellation propagates directly to `Call.cancel()`.
 - Low-RAM recommendation boundary fix is fully re-validated after the earlier test-expectation error.
 - Added JVM coverage for catalog metadata-cache TTL/LRU behavior and for cancellation propagating to the active catalog OkHttp call.
-- Added an Android integration test that starts a slow model transfer, cancels it through `ModelDownloadManager`, requires WorkManager to reach `CANCELLED`, verifies the server observes the socket closing promptly, and checks that a resumable `.part` file remains.
-- Full CI for the newest model-download cancellation change is currently pending; no pass claim is made yet.
 
 ## Benchmarks
 - CPU emulator baseline, Qwen3-0.6B INT4: first prompt 8.56 tokens/s, 1.536 s TTFT, 3.661 s total generation, ~1.02 GiB app RAM.
