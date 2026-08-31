@@ -5,6 +5,7 @@ import dev.yashasvm.mobie.core.model.CompatibilityResult
 import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
+import dev.yashasvm.mobie.core.model.estimateLiteRtRuntimeMemory
 import kotlin.math.max
 
 class CompatibilityResolver {
@@ -27,13 +28,8 @@ class CompatibilityResolver {
             )
         }
 
-        val contextWindow = artifact.contextWindowTokens ?: DEFAULT_CONTEXT_TOKENS
-        val kvCache = max(
-            MIN_KV_CACHE_BYTES,
-            DEFAULT_KV_CACHE_BYTES * contextWindow / DEFAULT_CONTEXT_TOKENS,
-        )
-        val runtimeOverhead = max((artifact.sizeBytes * 0.4).toLong(), 512L * MIB)
-        val estimatedRam = artifact.sizeBytes + runtimeOverhead + kvCache
+        val memoryEstimate = requireNotNull(estimateLiteRtRuntimeMemory(artifact))
+        val estimatedRam = memoryEstimate.estimatedRamBytes
         val requiredStorage = artifact.sizeBytes + max(artifact.sizeBytes / 20, 64L * MIB)
         val memoryReserve = max(device.lowMemoryThresholdBytes, device.totalRamBytes / 20)
         val availableFraction = if (device.isLowRamDevice) 0.75 else 0.85
@@ -44,9 +40,9 @@ class CompatibilityResolver {
             reason = reason,
             estimatedRamBytes = estimatedRam,
             modelWeightsBytes = artifact.sizeBytes,
-            runtimeOverheadBytes = runtimeOverhead,
-            kvCacheBytes = kvCache,
-            contextWindowTokens = contextWindow,
+            runtimeOverheadBytes = memoryEstimate.runtimeOverheadBytes,
+            kvCacheBytes = memoryEstimate.kvCacheBytes,
+            contextWindowTokens = memoryEstimate.contextWindowTokens,
             requiredStorageBytes = requiredStorage,
         )
         if (requiredStorage > device.availableStorageBytes) {
@@ -79,8 +75,5 @@ class CompatibilityResolver {
 
     private companion object {
         const val MIB = 1024L * 1024L
-        const val DEFAULT_CONTEXT_TOKENS = 4_096
-        const val DEFAULT_KV_CACHE_BYTES = 256L * MIB
-        const val MIN_KV_CACHE_BYTES = 64L * MIB
     }
 }
