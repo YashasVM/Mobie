@@ -78,6 +78,7 @@ class LocalPersistenceTest {
         assertEquals("INT4", artifact.quantization)
         assertEquals(artifactFile.absolutePath, manager.completedFile(modelId, artifact)?.absolutePath)
         directory.deleteRecursively()
+        Unit
     }
 
     @Test
