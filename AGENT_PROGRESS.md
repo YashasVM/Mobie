@@ -9,19 +9,20 @@
 - Added measured TTFT, total generation latency, tokens/sec, and app RAM reporting for real LiteRT-LM runs.
 - New Chat and history switching now reuse the initialized LiteRT engine by replacing only the conversation; if reuse is unavailable, Mobie safely falls back to a full model load.
 - Measured conversation-only reset against full LiteRT unload/reload: on the CI CPU emulator, reset took 3.98 ms versus 1509.73 ms for full unload/reload (~379x less setup wall time). Treat this as an emulator regression baseline, not a physical-device performance claim.
+- Bound LiteRT conversation restoration by both message count and payload size, prevent restoration from starting on an orphan assistant message, and fully validated the change in Android CI.
 - Reduced Hugging Face catalog request fan-out with a bounded 10-minute/64-entry detail cache; complete file metadata from the initial response now skips the extra detail request entirely.
 - Made catalog loading tolerant of individual model-detail request failures so one transient metadata failure no longer aborts the whole model list.
 - Made Hugging Face catalog HTTP calls coroutine-cancellable so obsolete searches cancel their underlying OkHttp calls instead of continuing to consume network/battery in the background.
 - Made user-cancelled WorkManager model downloads cancel the underlying OkHttp call through coroutine cancellation while retaining partial bytes for resume; the deterministic Android cancellation test is fully green.
 
 ## In progress
-- Bound LiteRT conversation restoration by both message count and payload size, and prevent restoration from starting on an orphan assistant message; full Android validation is pending.
+- Preserve coroutine cancellation through LiteRT load/reset/generation so user cancellation is not converted into a false inference failure; Android CI validation is pending.
 - Continue auditing real-device performance constraints and safe accelerator/backend selection.
 - Use the measured CPU baseline to identify runtime changes that materially improve TTFT/tokens-per-second without increasing RAM or instability.
 
 ## Tests performed
-- Previous `agent-dev` tip passed JVM unit tests, Android lint, debug APK build, emulator smoke/integration tests, explicit active-download cancellation/socket-close validation, interrupted-transfer resume, and real LiteRT-LM Qwen E2E.
-- Added focused JVM coverage for restored-history message limits, character budget, blank entries, oversized history entries, and user-led turn boundaries; the full CI run containing these tests is pending.
+- Latest pre-cancellation `agent-dev` tip passed JVM unit tests, Android lint, debug APK build, emulator smoke/integration tests, explicit active-download cancellation/socket-close validation, interrupted-transfer resume, bounded restored-history tests, and real LiteRT-LM Qwen E2E.
+- Focused JVM coverage verifies restored-history message limits, character budget, blank entries, oversized history entries, and user-led turn boundaries; the exact bounded-history branch tip passed full Android CI.
 - Real Qwen E2E verifies repeated prompts, conversation-only reset with restored history, successful generation after reset, full unload/reload, successful generation after reload, and records both reset and reload setup wall time.
 - Active-download cancellation initially failed to compile because `CoroutineWorker.onStopped()` is final in the current WorkManager API; the implementation was corrected to use the existing coroutine-aware OkHttp bridge so WorkManager cancellation propagates directly to `Call.cancel()`.
 - Low-RAM recommendation boundary fix is fully re-validated after the earlier test-expectation error.
@@ -39,6 +40,7 @@
 - GGUF remains intentionally unavailable; Mobie v1 currently relies on published LiteRT-LM artifacts.
 - Emulator validation proves CPU LiteRT-LM execution but not real ARM phone performance or accelerator behavior.
 - GPU/NPU selection remains disabled until physical-device evidence shows it is safe and beneficial.
+- LiteRT-LM currently does not expose a public API for reading a `.litertlm` package's maximum context capacity before engine creation, so Mobie should not hardcode larger KV-cache/context settings from model-name guesses.
 - The complete resume path is deterministically tested with a forced HTTP disconnect; a live Hugging Face CDN interruption is intentionally not used as a flaky CI dependency.
 - Restored-context sizing still uses a conservative character budget because LiteRT-LM does not expose a cheap pre-conversation token-count API; the full transcript remains stored and visible in the UI.
 
