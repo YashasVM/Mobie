@@ -47,6 +47,16 @@ class RuntimeLoadMemoryPolicyTest {
         )
     }
 
+    @Test
+    fun blocksGenerationWhenAndroidReportsLowMemory() {
+        assertNotNull(RuntimeLoadMemoryPolicy.generationBlockReason(isLowMemory = true))
+    }
+
+    @Test
+    fun allowsGenerationWhenAndroidIsNotUnderLowMemoryPressure() {
+        assertNull(RuntimeLoadMemoryPolicy.generationBlockReason(isLowMemory = false))
+    }
+
     private companion object {
         const val MIB = 1024L * 1024L
         const val GIB = 1024L * MIB
