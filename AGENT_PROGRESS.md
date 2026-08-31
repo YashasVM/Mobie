@@ -15,19 +15,21 @@
 - Made Hugging Face catalog HTTP calls coroutine-cancellable so obsolete searches cancel their underlying OkHttp calls instead of continuing to consume network/battery in the background.
 - Made user-cancelled WorkManager model downloads cancel the underlying OkHttp call through coroutine cancellation while retaining partial bytes for resume; the deterministic Android cancellation test is fully green.
 - Preserved coroutine cancellation through LiteRT load/reset/generation so user/system cancellation is no longer converted into a false inference failure; the exact branch tip passed Android CI.
+- Made conversation-only reset transactional so a failed replacement conversation does not destroy the still-usable current conversation; the corrected implementation passed full Android CI.
 
 ## In progress
-- Make conversation-only reset transactional so a failed replacement conversation does not destroy the still-usable current conversation and force a full model reload; Android CI validation is pending.
+- Re-check live Android RAM/LMK state immediately before LiteRT engine initialization and reject unsafe loads before tearing down an already-resident runtime; Android CI validation is pending.
 - Continue auditing real-device performance constraints and safe accelerator/backend selection.
 - Use the measured CPU baseline to identify runtime changes that materially improve TTFT/tokens-per-second without increasing RAM or instability.
 
 ## Tests performed
-- Latest pre-transactional-reset `agent-dev` tip passed JVM unit tests, Android lint, debug APK build, emulator smoke/integration tests, explicit active-download cancellation/socket-close validation, interrupted-transfer resume, bounded restored-history tests, cancellation-safe runtime handling, and real LiteRT-LM Qwen E2E.
+- Latest pre-memory-guard `agent-dev` tip passed JVM unit tests, Android lint, debug APK build, emulator smoke/integration tests, explicit active-download cancellation/socket-close validation, interrupted-transfer resume, bounded restored-history tests, cancellation-safe runtime handling, transactional conversation reset, and real LiteRT-LM Qwen E2E.
 - Focused JVM coverage verifies restored-history message limits, character budget, blank entries, oversized history entries, and user-led turn boundaries; the exact bounded-history branch tip passed full Android CI.
 - Real Qwen E2E verifies repeated prompts, conversation-only reset with restored history, successful generation after reset, full unload/reload, successful generation after reload, and records both reset and reload setup wall time.
 - Active-download cancellation initially failed to compile because `CoroutineWorker.onStopped()` is final in the current WorkManager API; the implementation was corrected to use the existing coroutine-aware OkHttp bridge so WorkManager cancellation propagates directly to `Call.cancel()`.
 - Low-RAM recommendation boundary fix is fully re-validated after the earlier test-expectation error.
 - Added JVM coverage for catalog metadata-cache TTL/LRU behavior and for cancellation propagating to the active catalog OkHttp call.
+- Added focused JVM coverage for the new LiteRT load-memory policy: active Android low-memory state, insufficient current RAM headroom, and a healthy small-model case.
 
 ## Benchmarks
 - CPU emulator baseline, Qwen3-0.6B INT4: first prompt 8.56 tokens/s, 1.536 s TTFT, 3.661 s total generation, ~1.02 GiB app RAM.
@@ -53,3 +55,4 @@
 - Review conversation reuse/fallback behavior when switching histories and creating chats, especially around cancellation, failed conversation replacement, and restored context; verify the ~379x setup-time reduction on representative physical phones.
 - Verify long-history switching preserves useful recent context without context-limit failures or excessive prefill on real models.
 - Review catalog caching/failure fallback and cancellation behavior for freshness, API traffic, and mobile-network efficiency.
+- Verify the load-time memory guard on real low-RAM phones and under deliberate memory pressure; it should fail before LiteRT initialization and preserve an already-resident runtime when a new load is unsafe.
