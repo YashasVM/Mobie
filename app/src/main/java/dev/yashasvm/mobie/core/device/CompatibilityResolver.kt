@@ -27,8 +27,11 @@ class CompatibilityResolver {
             )
         }
 
-        // Conservative fixed KV allowance until published LiteRT metadata exposes architecture dimensions.
-        val kvCache = 256L * MIB
+        val contextWindow = artifact.contextWindowTokens ?: DEFAULT_CONTEXT_TOKENS
+        val kvCache = max(
+            MIN_KV_CACHE_BYTES,
+            DEFAULT_KV_CACHE_BYTES * contextWindow / DEFAULT_CONTEXT_TOKENS,
+        )
         val runtimeOverhead = max((artifact.sizeBytes * 0.4).toLong(), 512L * MIB)
         val estimatedRam = artifact.sizeBytes + runtimeOverhead + kvCache
         val requiredStorage = artifact.sizeBytes + max(artifact.sizeBytes / 20, 64L * MIB)
@@ -43,7 +46,7 @@ class CompatibilityResolver {
             modelWeightsBytes = artifact.sizeBytes,
             runtimeOverheadBytes = runtimeOverhead,
             kvCacheBytes = kvCache,
-            contextWindowTokens = 4_096,
+            contextWindowTokens = contextWindow,
             requiredStorageBytes = requiredStorage,
         )
         if (requiredStorage > device.availableStorageBytes) {
@@ -74,5 +77,10 @@ class CompatibilityResolver {
         return result(Compatibility.COMPATIBLE, "Expected to fit this device with Android memory headroom reserved.")
     }
 
-    private companion object { const val MIB = 1024L * 1024L }
+    private companion object {
+        const val MIB = 1024L * 1024L
+        const val DEFAULT_CONTEXT_TOKENS = 4_096
+        const val DEFAULT_KV_CACHE_BYTES = 256L * MIB
+        const val MIN_KV_CACHE_BYTES = 64L * MIB
+    }
 }
