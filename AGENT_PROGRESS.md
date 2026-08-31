@@ -15,12 +15,14 @@
 - Made user-cancelled WorkManager model downloads cancel the underlying OkHttp call through coroutine cancellation while retaining partial bytes for resume; the deterministic Android cancellation test is fully green.
 
 ## In progress
+- Bound LiteRT conversation restoration by both message count and payload size, and prevent restoration from starting on an orphan assistant message; full Android validation is pending.
 - Continue auditing real-device performance constraints and safe accelerator/backend selection.
 - Use the measured CPU baseline to identify runtime changes that materially improve TTFT/tokens-per-second without increasing RAM or instability.
 
 ## Tests performed
-- Latest `agent-dev` tip passed JVM unit tests, Android lint, debug APK build, emulator smoke/integration tests, explicit active-download cancellation/socket-close validation, interrupted-transfer resume, and real LiteRT-LM Qwen E2E.
-- Real Qwen E2E now verifies repeated prompts, conversation-only reset with restored history, successful generation after reset, full unload/reload, successful generation after reload, and records both reset and reload setup wall time.
+- Previous `agent-dev` tip passed JVM unit tests, Android lint, debug APK build, emulator smoke/integration tests, explicit active-download cancellation/socket-close validation, interrupted-transfer resume, and real LiteRT-LM Qwen E2E.
+- Added focused JVM coverage for restored-history message limits, character budget, blank entries, oversized history entries, and user-led turn boundaries; the full CI run containing these tests is pending.
+- Real Qwen E2E verifies repeated prompts, conversation-only reset with restored history, successful generation after reset, full unload/reload, successful generation after reload, and records both reset and reload setup wall time.
 - Active-download cancellation initially failed to compile because `CoroutineWorker.onStopped()` is final in the current WorkManager API; the implementation was corrected to use the existing coroutine-aware OkHttp bridge so WorkManager cancellation propagates directly to `Call.cancel()`.
 - Low-RAM recommendation boundary fix is fully re-validated after the earlier test-expectation error.
 - Added JVM coverage for catalog metadata-cache TTL/LRU behavior and for cancellation propagating to the active catalog OkHttp call.
@@ -38,6 +40,7 @@
 - Emulator validation proves CPU LiteRT-LM execution but not real ARM phone performance or accelerator behavior.
 - GPU/NPU selection remains disabled until physical-device evidence shows it is safe and beneficial.
 - The complete resume path is deterministically tested with a forced HTTP disconnect; a live Hugging Face CDN interruption is intentionally not used as a flaky CI dependency.
+- Restored-context sizing still uses a conservative character budget because LiteRT-LM does not expose a cheap pre-conversation token-count API; the full transcript remains stored and visible in the UI.
 
 ## Inspect before merging
 - Verify model recommendations on real low-RAM phones and devices under memory pressure.
@@ -45,4 +48,5 @@
 - Review resumable-download handling around `206`, `416`, throttling/retry responses, forced disconnects, and explicit user cancellation.
 - Treat emulator performance figures as regression baselines only; collect comparable ARM-device measurements before making performance claims.
 - Review conversation reuse/fallback behavior when switching histories and creating chats, especially around cancellation and restored context; verify the ~379x setup-time reduction on representative physical phones.
+- Verify long-history switching preserves useful recent context without context-limit failures or excessive prefill on real models.
 - Review catalog caching/failure fallback and cancellation behavior for freshness, API traffic, and mobile-network efficiency.
