@@ -15,6 +15,7 @@ import com.google.ai.edge.litertlm.ExperimentalFlags
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.SamplerConfig
 import dev.yashasvm.mobie.core.model.ModelFormat
+import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -64,6 +65,10 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         generation.withLock {
             lifecycle.withLock {
                 runCatching {
+                    // Re-check live Android memory immediately before native initialization. This is
+                    // intentionally before closeRuntime() so a rejected load does not destroy an
+                    // already-usable resident model.
+                    ensureLoadMemoryHeadroom(modelPath)
                     closeRuntime()
                     ExperimentalFlags.enableBenchmark = true
                     val createdEngine = Engine(
@@ -197,6 +202,20 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
             ),
             maxOutputToken = DEFAULT_MAX_OUTPUT_TOKENS,
         )
+    }
+
+    private fun ensureLoadMemoryHeadroom(modelPath: String) {
+        val manager = appContext.getSystemService(ActivityManager::class.java)
+        val memory = ActivityManager.MemoryInfo().also(manager::getMemoryInfo)
+        val reason = RuntimeLoadMemoryPolicy.blockReason(
+            modelWeightsBytes = File(modelPath).length(),
+            totalRamBytes = memory.totalMem,
+            availableRamBytes = memory.availMem,
+            lowMemoryThresholdBytes = memory.threshold,
+            isLowMemory = memory.lowMemory,
+            isLowRamDevice = manager.isLowRamDevice,
+        )
+        if (reason != null) throw IllegalStateException(reason)
     }
 
     private fun closeRuntime() {
