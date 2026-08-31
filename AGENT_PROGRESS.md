@@ -19,18 +19,20 @@
 - Re-check live Android RAM/LMK state immediately before LiteRT engine initialization and reject unsafe loads before tearing down an already-resident runtime; the exact branch tip passed full Android CI.
 - Prevent new LiteRT decodes from starting while Android reports active low-memory/LMK pressure; the exact branch tip passed full Android CI.
 - Re-check Android low-memory state during active LiteRT generation at a bounded 500 ms cadence and cancel native decode if LMK pressure appears after generation has started; the exact branch tip passed full Android CI.
+- Hardened LiteRT multimodal loading with CPU vision initialization, safe text-only fallback, explicit image rejection in fallback mode, and documented text-before-media request ordering. The exact merged tree passed full Android CI; physical-device vision validation remains outstanding.
 
 ## In progress
-- Harden LiteRT multimodal loading: try the requested CPU vision executor first, fall back to a text-only CPU engine when vision initialization is unavailable, reject image sends clearly in fallback mode, and pass multimodal content in LiteRT-LM's documented text-before-media order. Android CI validation is pending.
+- Recognize current LiteRT Community quantization naming (`q4_block32`, `mixed_int4`, `dynamic_wi4b32`, `channelwise_int8`) so artifact recommendations use real quantization metadata instead of treating common LiteRT variants as unknown. Exact-tip Android CI is pending.
+- Make artifact selection backend/SoC-target-aware so vendor-specific NPU bundles are never recommended to Mobie's CPU path merely because they are small.
 - Continue auditing real-device performance constraints and safe accelerator/backend selection.
 - Use the measured CPU prefill/decode baseline to identify runtime changes that materially improve TTFT/tokens-per-second without increasing RAM or instability.
 
 ## Tests performed
-- Latest validated `agent-dev` runtime tip passed JVM unit tests, Android lint, debug APK build, emulator smoke/integration tests, explicit active-download cancellation/socket-close validation, interrupted-transfer resume, bounded restored-history tests, cancellation-safe runtime handling, transactional conversation reset, load-time memory admission, pre-generation memory admission, mid-generation memory-pressure handling, and real LiteRT-LM Qwen E2E.
+- Post-merge `main` passed the full Android CI pipeline on the exact merged tree, including JVM tests, lint/debug APK build, emulator smoke/integration, and real LiteRT-LM Qwen E2E.
+- Latest validated runtime tree passed explicit active-download cancellation/socket-close validation, interrupted-transfer resume, bounded restored-history tests, cancellation-safe runtime handling, transactional conversation reset, load-time memory admission, pre-generation memory admission, mid-generation memory-pressure handling, and real LiteRT-LM Qwen E2E.
 - Focused JVM coverage verifies restored-history message limits, character budget, blank entries, oversized history entries, and user-led turn boundaries; the exact bounded-history branch tip passed full Android CI.
 - Real Qwen E2E verifies repeated prompts, conversation-only reset with restored history, successful generation after reset, full unload/reload, successful generation after reload, and records reset/reload wall time plus native prefill/decode benchmark metrics.
-- Active-download cancellation initially failed to compile because `CoroutineWorker.onStopped()` is final in the current WorkManager API; the implementation was corrected to use the existing coroutine-aware OkHttp bridge so WorkManager cancellation propagates directly to `Call.cancel()`.
-- Low-RAM recommendation boundary fix is fully re-validated after the earlier test-expectation error.
+- Added focused JVM cases for current LiteRT quantization filename patterns and INT4-vs-INT8 recommendation ordering; exact-tip CI is pending.
 - Added JVM coverage for catalog metadata-cache TTL/LRU behavior and for cancellation propagating to the active catalog OkHttp call.
 - Added focused JVM coverage for LiteRT load-memory admission and decode admission: active Android low-memory state, insufficient current load headroom, healthy small-model load, decode blocked under low-memory pressure, decode allowed when Android is healthy, and the 500 ms mid-generation memory-check cadence.
 
@@ -47,6 +49,7 @@
 - GGUF remains intentionally unavailable; Mobie v1 currently relies on published LiteRT-LM artifacts.
 - Emulator validation proves CPU LiteRT-LM execution but not real ARM phone performance or accelerator behavior.
 - GPU/NPU selection remains disabled until physical-device evidence shows it is safe and beneficial.
+- Hardware-targeted LiteRT bundles (for example SoC/NPU-specific artifacts) are not yet represented explicitly in the artifact model; Mobie must not infer CPU compatibility from file size or quantization alone.
 - LiteRT-LM currently does not expose a public API for reading a `.litertlm` package's maximum context capacity before engine creation, so Mobie should not hardcode larger KV-cache/context settings from model-name guesses.
 - The complete resume path is deterministically tested with a forced HTTP disconnect; a live Hugging Face CDN interruption is intentionally not used as a flaky CI dependency.
 - Restored-context sizing still uses a conservative character budget because LiteRT-LM does not expose a cheap pre-conversation token-count API; the full transcript remains stored and visible in the UI.
@@ -55,6 +58,7 @@
 ## Inspect before merging
 - Verify model recommendations on real low-RAM phones and devices under memory pressure.
 - Review captured SoC/performance-class data before using it for accelerator claims; detection is evidence input, not proof a backend works.
+- Review LiteRT artifact ranking against current community repositories, especially generic CPU-capable bundles versus SoC/NPU-specific files.
 - Review resumable-download handling around `206`, `416`, throttling/retry responses, forced disconnects, and explicit user cancellation.
 - Treat emulator performance figures as regression baselines only; collect comparable ARM-device measurements before making performance claims.
 - Review conversation reuse/fallback behavior when switching histories and creating chats, especially around cancellation, failed conversation replacement, and restored context; verify the setup-time reduction on representative physical phones.
