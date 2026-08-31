@@ -1,6 +1,7 @@
 package dev.yashasvm.mobie.data.catalog
 
 import dev.yashasvm.mobie.core.model.AiModel
+import dev.yashasvm.mobie.core.model.ArtifactExecutionTarget
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
 import dev.yashasvm.mobie.core.model.ModelType
@@ -60,8 +61,11 @@ class HuggingFaceCatalogRepository(
                 }.awaitAll()
             }
             models.mapNotNull(HfModel::toDomain).filter { model ->
-                model.artifacts.any { it.format == ModelFormat.LITERT_LM && it.sizeBytes > 0 } &&
-                    model.type in setOf(ModelType.TEXT_GENERATION, ModelType.VISION)
+                model.artifacts.any {
+                    it.format == ModelFormat.LITERT_LM &&
+                        it.sizeBytes > 0 &&
+                        it.executionTarget == ArtifactExecutionTarget.GENERIC
+                } && model.type in setOf(ModelType.TEXT_GENERATION, ModelType.VISION)
             }
         }
     }
