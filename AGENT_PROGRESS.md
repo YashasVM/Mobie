@@ -18,14 +18,14 @@
 - Made conversation-only reset transactional so a failed replacement conversation does not destroy the still-usable current conversation; the corrected implementation passed full Android CI.
 - Re-check live Android RAM/LMK state immediately before LiteRT engine initialization and reject unsafe loads before tearing down an already-resident runtime; the exact branch tip passed full Android CI.
 - Prevent new LiteRT decodes from starting while Android reports active low-memory/LMK pressure; the exact branch tip passed full Android CI.
+- Re-check Android low-memory state during active LiteRT generation at a bounded 500 ms cadence and cancel native decode if LMK pressure appears after generation has started; the exact branch tip passed full Android CI.
 
 ## In progress
-- Re-check Android low-memory state during active LiteRT generation at a bounded 500 ms cadence and cancel native decode if LMK pressure appears after generation has started; exact-tip Android CI validation is pending.
 - Continue auditing real-device performance constraints and safe accelerator/backend selection.
 - Use the measured CPU baseline to identify runtime changes that materially improve TTFT/tokens-per-second without increasing RAM or instability.
 
 ## Tests performed
-- Latest pre-mid-generation-guard `agent-dev` tip passed JVM unit tests, Android lint, debug APK build, emulator smoke/integration tests, explicit active-download cancellation/socket-close validation, interrupted-transfer resume, bounded restored-history tests, cancellation-safe runtime handling, transactional conversation reset, load-time memory admission, pre-generation memory admission, and real LiteRT-LM Qwen E2E.
+- Latest `agent-dev` tip passed JVM unit tests, Android lint, debug APK build, emulator smoke/integration tests, explicit active-download cancellation/socket-close validation, interrupted-transfer resume, bounded restored-history tests, cancellation-safe runtime handling, transactional conversation reset, load-time memory admission, pre-generation memory admission, mid-generation memory-pressure handling, and real LiteRT-LM Qwen E2E.
 - Focused JVM coverage verifies restored-history message limits, character budget, blank entries, oversized history entries, and user-led turn boundaries; the exact bounded-history branch tip passed full Android CI.
 - Real Qwen E2E verifies repeated prompts, conversation-only reset with restored history, successful generation after reset, full unload/reload, successful generation after reload, and records both reset and reload setup wall time.
 - Active-download cancellation initially failed to compile because `CoroutineWorker.onStopped()` is final in the current WorkManager API; the implementation was corrected to use the existing coroutine-aware OkHttp bridge so WorkManager cancellation propagates directly to `Call.cancel()`.
