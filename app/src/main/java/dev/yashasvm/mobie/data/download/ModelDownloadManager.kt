@@ -113,12 +113,13 @@ class ModelDownloadManager(context: Context) {
             val metadata = File(directory, DownloadFilePolicy.METADATA_FILE).takeIf(File::isFile)
                 ?: return@mapNotNull null
             val properties = Properties().apply { metadata.inputStream().use(::load) }
-            val file = File(directory, properties.getProperty("fileName") ?: return@mapNotNull null)
-                .takeIf(File::isFile) ?: return@mapNotNull null
+            val storedFileName = properties.getProperty("fileName") ?: return@mapNotNull null
+            val file = File(directory, storedFileName).takeIf(File::isFile) ?: return@mapNotNull null
             val expectedSha = properties.getProperty("sha256")?.ifBlank { null }
             if (expectedSha != null && sha256(file) != expectedSha.lowercase()) return@mapNotNull null
+            val sourceFileName = properties.getProperty("sourceFileName")?.ifBlank { null } ?: storedFileName
             val artifact = ModelArtifact(
-                fileName = file.name,
+                fileName = sourceFileName,
                 downloadUrl = "",
                 sizeBytes = file.length(),
                 sha256 = expectedSha,

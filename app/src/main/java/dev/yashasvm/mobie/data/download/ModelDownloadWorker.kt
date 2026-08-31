@@ -273,6 +273,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
             setProperty("license", inputData.getString(KEY_LICENSE).orEmpty())
             setProperty("gated", inputData.getBoolean(KEY_GATED, false).toString())
             setProperty("fileName", destination.name)
+            setProperty("sourceFileName", inputData.getString(KEY_FILE_NAME).orEmpty())
             setProperty("sha256", inputData.getString(KEY_SHA256).orEmpty())
             setProperty("quantization", inputData.getString(KEY_QUANTIZATION).orEmpty())
         }

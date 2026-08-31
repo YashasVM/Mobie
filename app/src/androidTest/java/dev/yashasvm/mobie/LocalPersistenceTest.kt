@@ -48,6 +48,39 @@ class LocalPersistenceTest {
     }
 
     @Test
+    fun installedModelPreservesSourceArtifactIdentity() = kotlinx.coroutines.runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val modelId = "test/artifact-identity"
+        val sourceFileName = "Qwen3-0.6B-int4-ekv2048.litertlm"
+        val directory = File(File(context.filesDir, "models"), DownloadFilePolicy.storageKey(modelId))
+        directory.deleteRecursively()
+        directory.mkdirs()
+        val artifactFile = File(directory, DownloadFilePolicy.storageFileName(sourceFileName)).apply {
+            writeBytes(byteArrayOf(1, 2, 3, 4))
+        }
+        Properties().apply {
+            setProperty("modelId", modelId)
+            setProperty("title", "Artifact identity")
+            setProperty("author", "test")
+            setProperty("type", "TEXT_GENERATION")
+            setProperty("fileName", artifactFile.name)
+            setProperty("sourceFileName", sourceFileName)
+            setProperty("quantization", "INT4")
+        }.also { properties ->
+            File(directory, DownloadFilePolicy.METADATA_FILE).outputStream().use { properties.store(it, null) }
+        }
+
+        val manager = ModelDownloadManager(context)
+        val entry = manager.installedModels().single { it.model.id == modelId }
+        val artifact = entry.model.artifacts.single()
+        assertEquals(sourceFileName, artifact.fileName)
+        assertEquals(2_048, artifact.contextWindowTokens)
+        assertEquals("INT4", artifact.quantization)
+        assertEquals(artifactFile.absolutePath, manager.completedFile(modelId, artifact)?.absolutePath)
+        directory.deleteRecursively()
+    }
+
+    @Test
     fun installedModelCanBeDeleted() = kotlinx.coroutines.runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val modelId = "test/deletable-model"
