@@ -119,6 +119,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         config: GenerationConfig,
     ): Flow<InferenceEvent> = flow {
         generation.withLock {
+            ensureGenerationMemoryHeadroom()
             val activeConversation = conversation
                 ?: throw IllegalStateException("Load a model before starting a conversation")
             val contents = if (imagePath == null) {
@@ -215,6 +216,13 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
             isLowMemory = memory.lowMemory,
             isLowRamDevice = manager.isLowRamDevice,
         )
+        if (reason != null) throw IllegalStateException(reason)
+    }
+
+    private fun ensureGenerationMemoryHeadroom() {
+        val manager = appContext.getSystemService(ActivityManager::class.java)
+        val memory = ActivityManager.MemoryInfo().also(manager::getMemoryInfo)
+        val reason = RuntimeLoadMemoryPolicy.generationBlockReason(memory.lowMemory)
         if (reason != null) throw IllegalStateException(reason)
     }
 
