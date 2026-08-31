@@ -9,22 +9,13 @@ class AiModelTest {
     fun `recommended GGUF prefers mobile quality over smallest file`() {
         val smallest = artifact("model-q2.gguf", 1_000, "Q2_K")
         val recommended = artifact("model-q4-k-m.gguf", 2_000, "Q4_K_M")
-
-        val model = modelWith(smallest, recommended)
-
-        assertEquals(recommended, model.bestArtifact)
+        assertEquals(recommended, modelWith(smallest, recommended).bestArtifact)
     }
 
     @Test
     fun `published LiteRT artifact is preferred for mobile`() {
         val gguf = artifact("model-q4-k-m.gguf", 2_000, "Q4_K_M")
-        val liteRt = ModelArtifact(
-            fileName = "model.litertlm",
-            downloadUrl = "https://example.invalid/model.litertlm",
-            sizeBytes = 2_500,
-            format = ModelFormat.LITERT_LM,
-        )
-
+        val liteRt = ModelArtifact("model.litertlm", "https://example.invalid/model.litertlm", 2_500, format = ModelFormat.LITERT_LM)
         assertEquals(liteRt, modelWith(gguf, liteRt).bestArtifact)
         assertEquals("LiteRT-LM", liteRt.runtimeLabel)
         assertEquals("llama.cpp", gguf.runtimeLabel)
@@ -39,10 +30,17 @@ class AiModelTest {
     }
 
     @Test
+    fun `LiteRT context naming is recognized`() {
+        assertEquals(1_280, inferArtifactContextWindow("qwen3_0.6b_q4_block32_ekv1280.litertlm"))
+        assertEquals(2_048, inferArtifactContextWindow("qwen3_5_q8_ekv2048.litertlm"))
+        assertEquals(4_096, inferArtifactContextWindow("model_ctx4096.litertlm"))
+        assertNull(inferArtifactContextWindow("model.litertlm"))
+    }
+
+    @Test
     fun `LiteRT INT4 is preferred over INT8 before file size`() {
         val int8 = liteRtArtifact("model_int8.litertlm", 300, "INT8")
         val int4 = liteRtArtifact("model_mixed_int4.litertlm", 400, "INT4")
-
         assertEquals(int4, modelWith(int8, int4).bestArtifact)
     }
 
@@ -50,7 +48,6 @@ class AiModelTest {
     fun `hardware targeted LiteRT artifact is not selected by generic runtime`() {
         val npu = liteRtArtifact("Qwen3-0.6B.mediatek.mt6993.litertlm", 250, "INT4")
         val generic = liteRtArtifact("Qwen3-0.6B.litertlm", 300, "INT8")
-
         assertEquals(ArtifactExecutionTarget.HARDWARE_SPECIFIC, npu.executionTarget)
         assertEquals(ArtifactExecutionTarget.GENERIC, generic.executionTarget)
         assertEquals(generic, modelWith(npu, generic).bestArtifact)
@@ -59,32 +56,13 @@ class AiModelTest {
     @Test
     fun `hardware only LiteRT model has no runnable generic artifact`() {
         val npu = liteRtArtifact("model.qualcomm.sm8750.npu.litertlm", 250, "INT4")
-
         assertEquals(ArtifactExecutionTarget.HARDWARE_SPECIFIC, npu.executionTarget)
         assertNull(modelWith(npu).bestArtifact)
     }
 
-    private fun modelWith(vararg artifacts: ModelArtifact) = AiModel(
-        id = "example/model",
-        title = "model",
-        author = "example",
-        description = "test",
-        artifacts = artifacts.toList(),
-    )
+    private fun modelWith(vararg artifacts: ModelArtifact) = AiModel("example/model", "model", "example", "test", artifacts = artifacts.toList())
 
-    private fun artifact(name: String, size: Long, quantization: String) = ModelArtifact(
-        fileName = name,
-        downloadUrl = "https://example.invalid/$name",
-        sizeBytes = size,
-        format = ModelFormat.GGUF,
-        quantization = quantization,
-    )
+    private fun artifact(name: String, size: Long, quantization: String) = ModelArtifact(name, "https://example.invalid/$name", size, format = ModelFormat.GGUF, quantization = quantization)
 
-    private fun liteRtArtifact(name: String, size: Long, quantization: String) = ModelArtifact(
-        fileName = name,
-        downloadUrl = "https://example.invalid/$name",
-        sizeBytes = size,
-        format = ModelFormat.LITERT_LM,
-        quantization = quantization,
-    )
+    private fun liteRtArtifact(name: String, size: Long, quantization: String) = ModelArtifact(name, "https://example.invalid/$name", size, format = ModelFormat.LITERT_LM, quantization = quantization)
 }
