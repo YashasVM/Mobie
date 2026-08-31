@@ -102,6 +102,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                         val previous = conversation
                         conversation = replacement
                         previous?.close()
+                        Unit
                     }.onFailure(::rethrowCancellation)
                 }
             }
