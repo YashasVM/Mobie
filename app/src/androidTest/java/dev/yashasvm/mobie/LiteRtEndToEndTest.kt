@@ -4,6 +4,7 @@ import android.app.Instrumentation
 import android.content.Context
 import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
+import android.os.SystemClock
 import android.util.Log
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -83,23 +84,28 @@ class LiteRtEndToEndTest {
         Log.i(TAG, "Follow-up response: ${followUpEvents.visibleOutput()}")
         logStats("second prompt", followUpEvents)
 
+        val resetStartedNs = SystemClock.elapsedRealtimeNanos()
         runtime.resetConversation(
             listOf(
                 RuntimeMessage(fromUser = true, text = "The conversation was reset without unloading model weights."),
                 RuntimeMessage(fromUser = false, text = "Understood."),
             ),
         ).getOrThrow()
+        val resetSetupMs = elapsedMs(resetStartedNs)
         val resetEvents = generate(runtime, RESET_PROMPT, maxNewTokens = 64)
         assertSuccessfulGeneration("post-reset prompt", resetEvents)
         Log.i(TAG, "Reset response: ${resetEvents.visibleOutput()}")
         logStats("post-reset prompt", resetEvents)
 
+        val reloadStartedNs = SystemClock.elapsedRealtimeNanos()
         runtime.unload()
         runtime.load(path).getOrThrow()
+        val fullReloadSetupMs = elapsedMs(reloadStartedNs)
         val reloadEvents = generate(runtime, RELOAD_PROMPT, maxNewTokens = 64)
         assertSuccessfulGeneration("post-reload prompt", reloadEvents)
         Log.i(TAG, "Reload response: ${reloadEvents.visibleOutput()}")
         logStats("post-reload prompt", reloadEvents)
+        Log.i(TAG, "Conversation setup: reset=${resetSetupMs}ms, unload+reload=${fullReloadSetupMs}ms")
         runtime.unload()
 
         persistMetrics(
@@ -110,6 +116,8 @@ class LiteRtEndToEndTest {
             followUp = followUpEvents.stats(),
             reset = resetEvents.stats(),
             reload = reloadEvents.stats(),
+            resetSetupMs = resetSetupMs,
+            fullReloadSetupMs = fullReloadSetupMs,
         )
 
         val model = AiModel(
@@ -183,6 +191,8 @@ class LiteRtEndToEndTest {
         followUp: InferenceStats,
         reset: InferenceStats,
         reload: InferenceStats,
+        resetSetupMs: Double,
+        fullReloadSetupMs: Double,
     ) {
         val metricsFile = File(checkNotNull(context.getExternalFilesDir(null)), "mobie-qwen-e2e-metrics.txt")
         metricsFile.writeText(
@@ -190,6 +200,8 @@ class LiteRtEndToEndTest {
                 appendLine("model=litert-community/Qwen3-0.6B-int4")
                 appendLine("artifact=${artifact.fileName}")
                 appendLine("artifact_bytes=${artifact.sizeBytes}")
+                appendLine("conversation_reset_ms=$resetSetupMs")
+                appendLine("full_unload_reload_ms=$fullReloadSetupMs")
                 appendLine(metricsLine("first", first))
                 appendLine(metricsLine("second", followUp))
                 appendLine(metricsLine("reset", reset))
@@ -201,6 +213,9 @@ class LiteRtEndToEndTest {
 
     private fun metricsLine(label: String, stats: InferenceStats): String =
         "$label.tokens_per_second=${stats.tokensPerSecond};$label.ttft_ms=${stats.timeToFirstTokenMs};$label.total_ms=${stats.totalGenerationMs};$label.ram_bytes=${stats.ramBytes}"
+
+    private fun elapsedMs(startedNs: Long): Double =
+        (SystemClock.elapsedRealtimeNanos() - startedNs) / 1_000_000.0
 
     private fun copyToSharedStorage(
         instrumentation: Instrumentation,
