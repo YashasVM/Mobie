@@ -1,7 +1,9 @@
 package dev.yashasvm.mobie.core.runtime
 
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RuntimeLoadMemoryPolicyTest {
@@ -55,6 +57,13 @@ class RuntimeLoadMemoryPolicyTest {
     @Test
     fun allowsGenerationWhenAndroidIsNotUnderLowMemoryPressure() {
         assertNull(RuntimeLoadMemoryPolicy.generationBlockReason(isLowMemory = false))
+    }
+
+    @Test
+    fun throttlesGenerationMemoryChecksToTwicePerSecond() {
+        assertFalse(RuntimeLoadMemoryPolicy.shouldRecheckGenerationMemory(lastCheckAtMs = 1_000, nowMs = 1_499))
+        assertTrue(RuntimeLoadMemoryPolicy.shouldRecheckGenerationMemory(lastCheckAtMs = 1_000, nowMs = 1_500))
+        assertTrue(RuntimeLoadMemoryPolicy.shouldRecheckGenerationMemory(lastCheckAtMs = 1_000, nowMs = 2_000))
     }
 
     private companion object {
