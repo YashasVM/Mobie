@@ -257,9 +257,8 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val restored = history.map { RuntimeMessage(it.fromUser, it.text) }
         val result = runtimeLifecycle.withLock {
             if (preferReset) {
-                adapter.resetConversation(restored).recoverCatching {
-                    adapter.load(path, model.supportsVision, restored).getOrThrow()
-                }
+                val reset = adapter.resetConversation(restored)
+                if (reset.isSuccess) reset else adapter.load(path, model.supportsVision, restored)
             } else {
                 adapter.load(path, model.supportsVision, restored)
             }
