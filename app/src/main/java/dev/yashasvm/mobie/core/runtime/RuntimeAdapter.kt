@@ -30,6 +30,7 @@ interface RuntimeAdapter {
         vision: Boolean = false,
         history: List<RuntimeMessage> = emptyList(),
     ): Result<Unit>
+    suspend fun resetConversation(history: List<RuntimeMessage> = emptyList()): Result<Unit>
     fun generate(
         prompt: String,
         imagePath: String? = null,
