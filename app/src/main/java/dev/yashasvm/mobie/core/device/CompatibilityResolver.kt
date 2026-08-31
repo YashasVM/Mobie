@@ -27,11 +27,15 @@ class CompatibilityResolver {
             )
         }
 
-        // ponytail: conservative fixed KV allowance until published LiteRT metadata exposes architecture dimensions.
+        // Conservative fixed KV allowance until published LiteRT metadata exposes architecture dimensions.
         val kvCache = 256L * MIB
         val runtimeOverhead = max((artifact.sizeBytes * 0.4).toLong(), 512L * MIB)
         val estimatedRam = artifact.sizeBytes + runtimeOverhead + kvCache
         val requiredStorage = artifact.sizeBytes + max(artifact.sizeBytes / 20, 64L * MIB)
+        val memoryReserve = max(device.lowMemoryThresholdBytes, device.totalRamBytes / 20)
+        val availableFraction = if (device.isLowRamDevice) 0.75 else 0.85
+        val totalFraction = if (device.isLowRamDevice) 0.70 else 0.80
+        val safeAvailableRam = ((device.availableRamBytes - memoryReserve).coerceAtLeast(0) * availableFraction).toLong()
         fun result(status: Compatibility, reason: String) = CompatibilityResult(
             status = status,
             reason = reason,
@@ -45,13 +49,29 @@ class CompatibilityResolver {
         if (requiredStorage > device.availableStorageBytes) {
             return result(Compatibility.INCOMPATIBLE, "Not enough free storage, including download headroom.")
         }
-        if (estimatedRam > device.totalRamBytes * 0.8) {
-            return result(Compatibility.INCOMPATIBLE, "The model is too large for this device's RAM.")
+        if (estimatedRam > device.totalRamBytes * totalFraction) {
+            val reason = if (device.isLowRamDevice) {
+                "Android classifies this as a low-RAM device; the model leaves too little memory for a stable local runtime."
+            } else {
+                "The model is too large for this device's RAM."
+            }
+            return result(Compatibility.INCOMPATIBLE, reason)
         }
-        if (estimatedRam > device.availableRamBytes * 0.8) {
-            return result(Compatibility.WARNING, "It should fit after memory is freed. Close other apps before loading it.")
+        if (device.isLowMemory) {
+            return result(
+                Compatibility.WARNING,
+                "Android reports active memory pressure. Free memory before loading this model.",
+            )
         }
-        return result(Compatibility.COMPATIBLE, "Expected to fit this device. Exact performance still depends on the model.")
+        if (estimatedRam > safeAvailableRam) {
+            val reason = if (device.isLowRamDevice) {
+                "The model may fit, but this low-RAM device needs extra Android memory headroom. Close other apps first."
+            } else {
+                "The model may fit, but current free RAM is too close to Android's low-memory limit. Close other apps first."
+            }
+            return result(Compatibility.WARNING, reason)
+        }
+        return result(Compatibility.COMPATIBLE, "Expected to fit this device with Android memory headroom reserved.")
     }
 
     private companion object { const val MIB = 1024L * 1024L }

@@ -12,6 +12,11 @@ data class RuntimeMessage(val fromUser: Boolean, val text: String)
 data class InferenceStats(
     val tokensPerSecond: Double,
     val ramBytes: Long,
+    val timeToFirstTokenMs: Long = 0,
+    val totalGenerationMs: Long = 0,
+    val prefillTokensPerSecond: Double = 0.0,
+    val prefillTokenCount: Int = 0,
+    val decodeTokenCount: Int = 0,
 )
 
 sealed interface InferenceEvent {
@@ -28,6 +33,7 @@ interface RuntimeAdapter {
         vision: Boolean = false,
         history: List<RuntimeMessage> = emptyList(),
     ): Result<Unit>
+    suspend fun resetConversation(history: List<RuntimeMessage> = emptyList()): Result<Unit>
     fun generate(
         prompt: String,
         imagePath: String? = null,

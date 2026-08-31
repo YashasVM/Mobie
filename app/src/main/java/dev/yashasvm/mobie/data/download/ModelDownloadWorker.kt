@@ -13,6 +13,7 @@ import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import dev.yashasvm.mobie.R
 import dev.yashasvm.mobie.core.security.HuggingFaceTokenStore
+import dev.yashasvm.mobie.data.catalog.awaitResponse
 import java.io.File
 import java.io.FileInputStream
 import java.io.IOException
@@ -22,6 +23,7 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.Properties
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -79,7 +81,8 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                 HuggingFaceTokenStore(applicationContext).read()?.let { header("Authorization", "Bearer $it") }
             }.build()
 
-            client.newCall(request).execute().use { response ->
+            var transferTotal = expectedSize
+            client.newCall(request).awaitResponse().use { response ->
                 when (response.code) {
                     401, 403 -> return@withContext Result.failure(
                         dataOf("Access denied. Check the model terms and Hugging Face token."),
@@ -94,28 +97,36 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                         return@withContext Result.retry()
                     }
                 }
-                if (response.code >= 500) return@withContext Result.retry()
+                if (DownloadResponsePolicy.isRetryableHttp(response.code)) return@withContext Result.retry()
                 if (!response.isSuccessful) {
                     return@withContext Result.failure(dataOf("Download failed with HTTP ${response.code}"))
                 }
 
-                val append = downloaded > 0 && response.code == 206
-                if (append) {
-                    val contentRange = response.header("Content-Range")
-                    if (contentRange?.startsWith("bytes $downloaded-") != true) {
-                        partial.delete()
-                        return@withContext Result.retry()
-                    }
-                } else if (partial.exists()) {
+                val isPartialResponse = response.code == 206
+                if (isPartialResponse && !DownloadResponsePolicy.isValidResumeResponse(
+                        contentRangeHeader = response.header("Content-Range"),
+                        expectedStart = downloaded,
+                        expectedTotalBytes = expectedSize,
+                    )
+                ) {
+                    partial.delete()
+                    return@withContext Result.retry()
+                }
+
+                val append = downloaded > 0 && isPartialResponse
+                if (!append && partial.exists()) {
                     partial.delete()
                     downloaded = 0
                 }
 
                 val body = response.body ?: return@withContext Result.retry()
                 val startAt = if (append) downloaded else 0
-                val total = expectedSize.takeIf { it > 0 }
-                    ?: body.contentLength().takeIf { it >= 0 }?.plus(startAt)
-                    ?: 0
+                transferTotal = DownloadResponsePolicy.resolvedTotalBytes(
+                    expectedTotalBytes = expectedSize,
+                    contentRangeHeader = response.header("Content-Range"),
+                    bodyLength = body.contentLength(),
+                    startAt = startAt,
+                )
 
                 RandomAccessFile(partial, "rw").use { output ->
                     output.seek(startAt)
@@ -124,7 +135,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                         var current = startAt
                         var lastProgressAt = 0L
                         val startedAt = SystemClock.elapsedRealtime()
-                        updateForeground(fileName, current, total)
+                        updateForeground(fileName, current, transferTotal)
                         while (true) {
                             val read = input.read(buffer)
                             if (read < 0) break
@@ -133,22 +144,28 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                             val now = SystemClock.elapsedRealtime()
                             if (now - lastProgressAt >= PROGRESS_INTERVAL_MS) {
                                 val elapsedMs = (now - startedAt).coerceAtLeast(1)
-                                updateForeground(fileName, current, total, ((current - startAt) * 1000L) / elapsedMs)
+                                updateForeground(
+                                    fileName,
+                                    current,
+                                    transferTotal,
+                                    ((current - startAt) * 1000L) / elapsedMs,
+                                )
                                 lastProgressAt = now
                             }
-                            if (isStopped) return@withContext Result.retry()
                         }
                     }
                 }
             }
 
-            if (expectedSize > 0 && partial.length() != expectedSize) return@withContext Result.retry()
+            if (transferTotal > 0 && partial.length() != transferTotal) return@withContext Result.retry()
             if (!expectedSha.isNullOrBlank() && sha256(partial) != expectedSha) {
                 partial.delete()
                 return@withContext Result.failure(dataOf("Checksum validation failed"))
             }
             finalizeFile(partial, storageDestination)
             success(storageDestination)
+        } catch (error: CancellationException) {
+            throw error
         } catch (_: IOException) {
             Result.retry()
         } catch (error: Exception) {

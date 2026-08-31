@@ -17,6 +17,7 @@ class CompatibilityResolverTest {
         availableStorageBytes = 20 * gib,
         supportedAbis = listOf("arm64-v8a"),
         sdkInt = 35,
+        lowMemoryThresholdBytes = gib / 2,
     )
 
     @Test
@@ -31,9 +32,50 @@ class CompatibilityResolverTest {
     }
 
     @Test
-    fun `model that can fit total ram but not current ram warns`() {
+    fun `model that can fit total ram but not safe current ram warns`() {
         val constrained = device.copy(availableRamBytes = 2 * gib)
         assertEquals(Compatibility.WARNING, resolver.resolve(artifact(size = gib), constrained).status)
+    }
+
+    @Test
+    fun `android low memory state warns even when raw available ram looks sufficient`() {
+        val pressured = device.copy(availableRamBytes = 6 * gib, isLowMemory = true)
+        val result = resolver.resolve(artifact(size = gib), pressured)
+        assertEquals(Compatibility.WARNING, result.status)
+        assertTrue(result.reason.contains("active memory pressure"))
+    }
+
+    @Test
+    fun `android low memory threshold is reserved from recommendation headroom`() {
+        val thresholdConstrained = device.copy(
+            availableRamBytes = 3 * gib,
+            lowMemoryThresholdBytes = 2 * gib,
+        )
+        val result = resolver.resolve(artifact(size = gib), thresholdConstrained)
+        assertEquals(Compatibility.WARNING, result.status)
+    }
+
+    @Test
+    fun `low ram devices use stricter total ram ceiling`() {
+        val lowRam = device.copy(
+            totalRamBytes = 4 * gib,
+            availableRamBytes = 4 * gib,
+            isLowRamDevice = true,
+        )
+        val result = resolver.resolve(artifact(size = 2 * gib), lowRam)
+        assertEquals(Compatibility.INCOMPATIBLE, result.status)
+        assertTrue(result.reason.contains("low-RAM device"))
+    }
+
+    @Test
+    fun `low ram devices reserve more current memory headroom`() {
+        val lowRam = device.copy(
+            availableRamBytes = 5 * gib / 2,
+            isLowRamDevice = true,
+        )
+        val result = resolver.resolve(artifact(size = gib), lowRam)
+        assertEquals(Compatibility.WARNING, result.status)
+        assertTrue(result.reason.contains("extra Android memory headroom"))
     }
 
     @Test

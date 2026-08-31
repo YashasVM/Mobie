@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Debug-only: permits deterministic localhost HTTP integration tests without weakening release traffic policy. -->
+    <application android:usesCleartextTraffic="true" />
+</manifest>

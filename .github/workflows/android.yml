@@ -2,7 +2,7 @@ name: Android CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, agent-dev]
   pull_request:
 
 permissions:
@@ -86,9 +86,12 @@ jobs:
           script: |
             ./gradlew --no-daemon connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=dev.yashasvm.mobie.LiteRtEndToEndTest -Pandroid.testInstrumentationRunnerArguments.litertE2E=true
             adb pull /sdcard/mobie-qwen-e2e.png mobie-qwen-e2e.png || echo "::warning::Runtime passed without screenshot evidence"
-      - name: Upload real Qwen chat screenshot
+            adb pull /sdcard/mobie-qwen-e2e-metrics.txt mobie-qwen-e2e-metrics.txt || echo "::warning::Runtime passed without metrics evidence"
+      - name: Upload real Qwen E2E evidence
         uses: actions/upload-artifact@v4
         with:
-          name: mobie-qwen-e2e-screenshot
-          path: mobie-qwen-e2e.png
+          name: mobie-qwen-e2e-evidence
+          path: |
+            mobie-qwen-e2e.png
+            mobie-qwen-e2e-metrics.txt
           if-no-files-found: warn

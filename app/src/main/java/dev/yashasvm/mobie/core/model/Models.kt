@@ -64,6 +64,14 @@ data class DeviceProfile(
     val supportedAbis: List<String>,
     val sdkInt: Int,
     val releaseVersion: String = "",
+    val lowMemoryThresholdBytes: Long = 0,
+    val isLowMemory: Boolean = false,
+    val isLowRamDevice: Boolean = false,
+    val manufacturer: String = "",
+    val model: String = "",
+    val socManufacturer: String = "",
+    val socModel: String = "",
+    val mediaPerformanceClass: Int = 0,
 )
 
 data class CompatibilityResult(
