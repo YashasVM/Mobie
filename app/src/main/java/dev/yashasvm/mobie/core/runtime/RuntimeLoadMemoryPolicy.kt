@@ -37,5 +37,17 @@ internal object RuntimeLoadMemoryPolicy {
         return null
     }
 
+    /**
+     * A loaded model can still be killed by Android if a new decode starts while the system is
+     * already under LMK pressure. Do not add guessed free-RAM thresholds here: MemoryInfo.lowMemory
+     * is Android's own threshold signal and is safer than blocking healthy devices heuristically.
+     */
+    fun generationBlockReason(isLowMemory: Boolean): String? =
+        if (isLowMemory) {
+            "Android reports active memory pressure. Close other apps before starting generation."
+        } else {
+            null
+        }
+
     private const val MIB = 1024L * 1024L
 }
