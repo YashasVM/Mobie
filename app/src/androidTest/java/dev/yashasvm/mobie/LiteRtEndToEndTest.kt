@@ -16,6 +16,7 @@ import dev.yashasvm.mobie.core.runtime.GenerationConfig
 import dev.yashasvm.mobie.core.runtime.InferenceEvent
 import dev.yashasvm.mobie.core.runtime.InferenceStats
 import dev.yashasvm.mobie.core.runtime.LiteRtLmRuntimeAdapter
+import dev.yashasvm.mobie.core.runtime.RuntimeMessage
 import dev.yashasvm.mobie.data.download.ModelDownloadManager
 import dev.yashasvm.mobie.ui.ChatMessage
 import dev.yashasvm.mobie.ui.ChatScreen
@@ -40,6 +41,7 @@ class LiteRtEndToEndTest {
         const val TAG = "MobieRuntimeE2E"
         const val PROMPT = "Hey, who are you? Reply briefly."
         const val FOLLOW_UP_PROMPT = "Reply with one short sentence confirming you can answer a second prompt."
+        const val RESET_PROMPT = "Reply with one short sentence confirming a fresh conversation works."
         const val RELOAD_PROMPT = "Reply with one short sentence confirming the model was reloaded."
     }
 
@@ -47,7 +49,7 @@ class LiteRtEndToEndTest {
     val composeRule = createComposeRule()
 
     @Test
-    fun downloadsLoadsGeneratesRepeatedlyAndReloadsRealLiteRtModel() = runBlocking {
+    fun downloadsLoadsGeneratesResetsConversationAndReloadsRealLiteRtModel() = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("litertE2E") == "true")
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
@@ -81,6 +83,17 @@ class LiteRtEndToEndTest {
         Log.i(TAG, "Follow-up response: ${followUpEvents.visibleOutput()}")
         logStats("second prompt", followUpEvents)
 
+        runtime.resetConversation(
+            listOf(
+                RuntimeMessage(fromUser = true, text = "The conversation was reset without unloading model weights."),
+                RuntimeMessage(fromUser = false, text = "Understood."),
+            ),
+        ).getOrThrow()
+        val resetEvents = generate(runtime, RESET_PROMPT, maxNewTokens = 64)
+        assertSuccessfulGeneration("post-reset prompt", resetEvents)
+        Log.i(TAG, "Reset response: ${resetEvents.visibleOutput()}")
+        logStats("post-reset prompt", resetEvents)
+
         runtime.unload()
         runtime.load(path).getOrThrow()
         val reloadEvents = generate(runtime, RELOAD_PROMPT, maxNewTokens = 64)
@@ -95,6 +108,7 @@ class LiteRtEndToEndTest {
             artifact = artifact,
             first = firstEvents.stats(),
             followUp = followUpEvents.stats(),
+            reset = resetEvents.stats(),
             reload = reloadEvents.stats(),
         )
 
@@ -167,6 +181,7 @@ class LiteRtEndToEndTest {
         artifact: ModelArtifact,
         first: InferenceStats,
         followUp: InferenceStats,
+        reset: InferenceStats,
         reload: InferenceStats,
     ) {
         val metricsFile = File(checkNotNull(context.getExternalFilesDir(null)), "mobie-qwen-e2e-metrics.txt")
@@ -177,6 +192,7 @@ class LiteRtEndToEndTest {
                 appendLine("artifact_bytes=${artifact.sizeBytes}")
                 appendLine(metricsLine("first", first))
                 appendLine(metricsLine("second", followUp))
+                appendLine(metricsLine("reset", reset))
                 appendLine(metricsLine("reload", reload))
             },
         )
