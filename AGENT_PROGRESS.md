@@ -9,22 +9,24 @@
 - Added measured TTFT, total generation latency, tokens/sec, and app RAM reporting for real LiteRT-LM runs.
 - Reduced Hugging Face catalog request fan-out with a bounded 10-minute/64-entry detail cache; complete file metadata from the initial response now skips the extra detail request entirely.
 - Made catalog loading tolerant of individual model-detail request failures so one transient metadata failure no longer aborts the whole model list.
+- Made Hugging Face catalog HTTP calls coroutine-cancellable so obsolete searches cancel their underlying OkHttp calls instead of continuing to consume network/battery in the background.
 
 ## In progress
+- Re-validate the new cancellable catalog networking through the full Android CI pipeline.
 - Continue auditing real-device performance constraints and safe accelerator/backend selection.
 - Use the measured CPU baseline to identify runtime changes that materially improve TTFT/tokens-per-second without increasing RAM or instability.
-- Improve Hugging Face auth/network behavior where it removes real latency or failure modes.
 
 ## Tests performed
-- Latest branch code passed JVM unit tests, Android lint, debug APK build, emulator smoke/integration tests, interrupted-transfer resume, and real LiteRT-LM Qwen E2E.
+- Previous branch tip passed JVM unit tests, Android lint, debug APK build, emulator smoke/integration tests, interrupted-transfer resume, and real LiteRT-LM Qwen E2E.
 - Low-RAM recommendation boundary fix is fully re-validated after the earlier test-expectation error.
-- Added JVM coverage for catalog metadata-cache TTL and LRU eviction behavior.
+- Added JVM coverage for catalog metadata-cache TTL/LRU behavior and for cancellation propagating to the active OkHttp call.
+- Full CI for the newest cancellable-networking change is currently running; no pass claim is made yet.
 
 ## Benchmarks
 - CPU emulator baseline, Qwen3-0.6B INT4: first prompt 8.56 tokens/s, 1.536 s TTFT, 3.661 s total generation, ~1.02 GiB app RAM.
 - Same loaded conversation, second prompt: 9.81 tokens/s, 1.352 s TTFT, 3.414 s total, ~1.02 GiB app RAM.
 - After unload/reload: 6.98 tokens/s, 1.455 s TTFT, 2.168 s total, ~0.94 GiB app RAM.
-- No catalog-latency or runtime speed-improvement claim yet; the new catalog work reduces avoidable requests but has not been benchmarked on a phone network.
+- No catalog-latency or runtime speed-improvement claim yet; catalog changes reduce avoidable/stale requests but have not been benchmarked on a phone network.
 
 ## Known problems / regressions
 - GGUF remains intentionally unavailable; Mobie v1 currently relies on published LiteRT-LM artifacts.
@@ -37,4 +39,4 @@
 - Review captured SoC/performance-class data before using it for accelerator claims; detection is evidence input, not proof a backend works.
 - Review resumable-download handling around `206`, `416`, throttling/retry responses, and the forced-disconnect test.
 - Treat emulator performance figures as regression baselines only; collect comparable ARM-device measurements before making performance claims.
-- Review the catalog metadata cache/failure fallback for desired freshness versus reduced Hugging Face API traffic.
+- Review catalog caching/failure fallback and cancellation behavior for freshness, API traffic, and mobile-network efficiency.
