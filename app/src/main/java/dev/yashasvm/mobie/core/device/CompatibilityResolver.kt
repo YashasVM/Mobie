@@ -1,5 +1,7 @@
 package dev.yashasvm.mobie.core.device
 
+import dev.yashasvm.mobie.core.model.AiModel
+import dev.yashasvm.mobie.core.model.ArtifactExecutionTarget
 import dev.yashasvm.mobie.core.model.Compatibility
 import dev.yashasvm.mobie.core.model.CompatibilityResult
 import dev.yashasvm.mobie.core.model.DeviceProfile
@@ -9,6 +11,26 @@ import dev.yashasvm.mobie.core.model.estimateLiteRtRuntimeMemory
 import kotlin.math.max
 
 class CompatibilityResolver {
+    fun selectBestArtifact(model: AiModel, device: DeviceProfile): ModelArtifact? = model.artifacts
+        .asSequence()
+        .filter {
+            it.format == ModelFormat.LITERT_LM &&
+                it.executionTarget == ArtifactExecutionTarget.GENERIC
+        }
+        .map { artifact -> artifact to resolve(artifact, device) }
+        .filter { (_, result) ->
+            result.status == Compatibility.COMPATIBLE || result.status == Compatibility.WARNING
+        }
+        .minWithOrNull(
+            compareBy<Pair<ModelArtifact, CompatibilityResult>>(
+                { (_, result) -> if (result.status == Compatibility.COMPATIBLE) 0 else 1 },
+                { (_, result) -> result.estimatedRamBytes.takeIf { it > 0 } ?: Long.MAX_VALUE },
+                { (_, result) -> result.requiredStorageBytes.takeIf { it > 0 } ?: Long.MAX_VALUE },
+                { (artifact, _) -> artifact.sizeBytes.takeIf { it > 0 } ?: Long.MAX_VALUE },
+            ),
+        )
+        ?.first
+
     fun resolve(artifact: ModelArtifact?, device: DeviceProfile): CompatibilityResult {
         if (artifact == null || artifact.format != ModelFormat.LITERT_LM) {
             return CompatibilityResult(
