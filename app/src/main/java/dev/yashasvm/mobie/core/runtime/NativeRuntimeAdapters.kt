@@ -178,8 +178,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     }
 
     private fun conversationConfig(history: List<RuntimeMessage>): ConversationConfig {
-        // Cap restored context until LiteRT exposes a cheap pre-load token-count API.
-        val restored = history.takeLast(20).filter { it.text.isNotBlank() }.map {
+        val restored = ConversationHistoryPolicy.select(history).map {
             if (it.fromUser) Message.user(it.text) else Message.model(it.text)
         }
         return ConversationConfig(
