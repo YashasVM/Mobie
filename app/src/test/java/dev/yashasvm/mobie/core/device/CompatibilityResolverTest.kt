@@ -1,10 +1,12 @@
 package dev.yashasvm.mobie.core.device
 
+import dev.yashasvm.mobie.core.model.AiModel
 import dev.yashasvm.mobie.core.model.Compatibility
 import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -45,6 +47,49 @@ class CompatibilityResolverTest {
         assertEquals(65_536, result.contextWindowTokens)
         assertEquals(4 * gib, result.kvCacheBytes)
         assertEquals(Compatibility.WARNING, result.status)
+    }
+
+    @Test
+    fun `device selector prefers artifact that safely fits current device`() {
+        val model = AiModel(
+            id = "example/model",
+            title = "Example",
+            author = "example",
+            description = "",
+            artifacts = listOf(
+                artifact(size = gib, name = "model-c64k.litertlm"),
+                artifact(size = 2 * gib, name = "model-ekv2048.litertlm"),
+            ),
+        )
+        val selected = resolver.selectBestArtifact(model, device.copy(availableRamBytes = 4 * gib))
+        assertEquals("model-ekv2048.litertlm", selected?.fileName)
+    }
+
+    @Test
+    fun `device selector does not recommend artifacts that cannot fit storage`() {
+        val model = AiModel(
+            id = "example/model",
+            title = "Example",
+            author = "example",
+            description = "",
+            artifacts = listOf(artifact(size = 2 * gib)),
+        )
+        assertNull(resolver.selectBestArtifact(model, device.copy(availableStorageBytes = gib)))
+    }
+
+    @Test
+    fun `device selector ignores hardware specific artifacts`() {
+        val model = AiModel(
+            id = "example/model",
+            title = "Example",
+            author = "example",
+            description = "",
+            artifacts = listOf(
+                artifact(size = gib / 2, name = "model.mediatek.mt6993.litertlm"),
+                artifact(size = gib, name = "model-ekv2048.litertlm"),
+            ),
+        )
+        assertEquals("model-ekv2048.litertlm", resolver.selectBestArtifact(model, device)?.fileName)
     }
 
     @Test
