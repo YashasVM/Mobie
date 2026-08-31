@@ -85,10 +85,36 @@ internal fun inferArtifactQuantization(fileName: String): String? {
 
 internal fun inferArtifactContextWindow(fileName: String): Int? {
     val normalized = fileName.lowercase()
-    val match = Regex("(?:^|[._-])(?:e?kv|ctx|context)[_-]?(\\d{3,6})(?:[._-]|$)").find(normalized)
-        ?: return null
-    return match.groupValues.getOrNull(1)?.toIntOrNull()?.takeIf { it in 128..131_072 }
+
+    val explicit = Regex("(?:^|[._-])(?:e?kv|ctx|context)[_-]?(\\d{3,6})(?:[._-]|$)")
+        .find(normalized)
+        ?.groupValues
+        ?.getOrNull(1)
+        ?.toIntOrNull()
+        ?.takeIf(::isPlausibleContextWindow)
+    if (explicit != null) return explicit
+
+    // LiteRT community artifacts also commonly encode cache/context as c1024, c32k, c64k, etc.
+    // Missing these is dangerous: treating c64k as the 4096-token fallback underestimates KV-cache
+    // memory by roughly 16x and can make an otherwise unsafe model look runnable on a phone.
+    val compactK = Regex("(?:^|[._-])c(\\d{1,3})k(?:[._-]|$)")
+        .find(normalized)
+        ?.groupValues
+        ?.getOrNull(1)
+        ?.toIntOrNull()
+        ?.let { it * 1024 }
+        ?.takeIf(::isPlausibleContextWindow)
+    if (compactK != null) return compactK
+
+    return Regex("(?:^|[._-])c(\\d{3,6})(?:[._-]|$)")
+        .find(normalized)
+        ?.groupValues
+        ?.getOrNull(1)
+        ?.toIntOrNull()
+        ?.takeIf(::isPlausibleContextWindow)
 }
+
+private fun isPlausibleContextWindow(tokens: Int): Boolean = tokens in 128..131_072
 
 internal fun inferArtifactExecutionTarget(fileName: String): ArtifactExecutionTarget {
     val normalized = fileName.lowercase()

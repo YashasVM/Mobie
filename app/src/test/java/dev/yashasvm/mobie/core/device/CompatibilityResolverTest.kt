@@ -40,6 +40,14 @@ class CompatibilityResolverTest {
     }
 
     @Test
+    fun `compact 64k context marker prevents unsafe 4k fallback`() {
+        val result = resolver.resolve(artifact(size = gib, name = "MiniCPM5-1B-c64k.litertlm"), device)
+        assertEquals(65_536, result.contextWindowTokens)
+        assertEquals(4 * gib, result.kvCacheBytes)
+        assertEquals(Compatibility.WARNING, result.status)
+    }
+
+    @Test
     fun `model that can fit total ram but not safe current ram warns`() {
         val constrained = device.copy(availableRamBytes = 2 * gib)
         assertEquals(Compatibility.WARNING, resolver.resolve(artifact(size = gib), constrained).status)
