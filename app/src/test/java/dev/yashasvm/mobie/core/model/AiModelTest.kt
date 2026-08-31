@@ -5,6 +5,8 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class AiModelTest {
+    private val mib = 1024L * 1024L
+
     @Test
     fun `recommended GGUF prefers mobile quality over smallest file`() {
         val smallest = artifact("model-q2.gguf", 1_000, "Q2_K")
@@ -41,10 +43,29 @@ class AiModelTest {
     }
 
     @Test
-    fun `LiteRT INT4 is preferred over INT8 before file size`() {
-        val int8 = liteRtArtifact("model_int8.litertlm", 300, "INT8")
-        val int4 = liteRtArtifact("model_mixed_int4.litertlm", 400, "INT4")
+    fun `LiteRT selection prefers the lower runtime footprint`() {
+        val int8 = liteRtArtifact("model_int8.litertlm", 800 * mib, "INT8")
+        val int4 = liteRtArtifact("model_mixed_int4.litertlm", 500 * mib, "INT4")
         assertEquals(int4, modelWith(int8, int4).bestArtifact)
+    }
+
+    @Test
+    fun `long context variant does not hide a safer short context artifact`() {
+        val longContext = liteRtArtifact("model_int4_c64k.litertlm", 500 * mib, "INT4")
+        val shortContext = liteRtArtifact("model_int8_ekv2048.litertlm", 800 * mib, "INT8")
+        assertEquals(shortContext, modelWith(longContext, shortContext).bestArtifact)
+    }
+
+    @Test
+    fun `runtime footprint estimate includes context dependent KV cache`() {
+        val shortContext = liteRtArtifact("model_int4_ekv2048.litertlm", 500 * mib, "INT4")
+        val longContext = liteRtArtifact("model_int4_c64k.litertlm", 500 * mib, "INT4")
+        val shortEstimate = requireNotNull(estimateLiteRtRuntimeMemory(shortContext))
+        val longEstimate = requireNotNull(estimateLiteRtRuntimeMemory(longContext))
+        assertEquals(128 * mib, shortEstimate.kvCacheBytes)
+        assertEquals(4 * 1024L * mib, longEstimate.kvCacheBytes)
+        assertEquals(2_048, shortEstimate.contextWindowTokens)
+        assertEquals(65_536, longEstimate.contextWindowTokens)
     }
 
     @Test
