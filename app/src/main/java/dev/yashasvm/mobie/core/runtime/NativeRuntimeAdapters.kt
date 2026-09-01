@@ -2,6 +2,8 @@ package dev.yashasvm.mobie.core.runtime
 
 import android.app.ActivityManager
 import android.content.Context
+import android.os.Build
+import android.os.PowerManager
 import android.os.SystemClock
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Content
@@ -261,6 +263,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
             lowMemoryThresholdBytes = memory.threshold,
             isLowMemory = memory.lowMemory,
             isLowRamDevice = manager.isLowRamDevice,
+            thermalStatus = currentThermalStatus(),
         )
         if (reason != null) throw IllegalStateException(reason)
     }
@@ -268,8 +271,17 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     private fun ensureGenerationMemoryHeadroom() {
         val manager = appContext.getSystemService(ActivityManager::class.java)
         val memory = ActivityManager.MemoryInfo().also(manager::getMemoryInfo)
-        val reason = RuntimeLoadMemoryPolicy.generationBlockReason(memory.lowMemory)
+        val reason = RuntimeLoadMemoryPolicy.generationBlockReason(
+            isLowMemory = memory.lowMemory,
+            thermalStatus = currentThermalStatus(),
+        )
         if (reason != null) throw IllegalStateException(reason)
+    }
+
+    private fun currentThermalStatus(): Int = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        appContext.getSystemService(PowerManager::class.java).currentThermalStatus
+    } else {
+        PowerManager.THERMAL_STATUS_NONE
     }
 
     private fun closeRuntime() {
