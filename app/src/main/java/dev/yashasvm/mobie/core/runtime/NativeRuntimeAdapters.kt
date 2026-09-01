@@ -204,16 +204,26 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     private fun initializeEngineWithVisionFallback(modelPath: String, vision: Boolean): LoadedEngine {
         if (!vision) return LoadedEngine(initializeEngine(modelPath, visionBackend = null), visionReady = false)
 
+        // Keep text generation on the conservative CPU backend, but prefer GPU for the vision
+        // encoder. On supported Android GPUs this materially improves multimodal prefill and also
+        // avoids known LiteRT-LM CPU-vision instability. Devices without a working GPU delegate
+        // transparently fall back to CPU vision instead of losing multimodal support entirely.
         return try {
-            LoadedEngine(initializeEngine(modelPath, visionBackend = Backend.CPU()), visionReady = true)
-        } catch (multimodalError: Throwable) {
-            rethrowCancellation(multimodalError)
+            LoadedEngine(initializeEngine(modelPath, visionBackend = Backend.GPU()), visionReady = true)
+        } catch (gpuVisionError: Throwable) {
+            rethrowCancellation(gpuVisionError)
             try {
-                LoadedEngine(initializeEngine(modelPath, visionBackend = null), visionReady = false)
-            } catch (textOnlyError: Throwable) {
-                rethrowCancellation(textOnlyError)
-                textOnlyError.addSuppressed(multimodalError)
-                throw textOnlyError
+                LoadedEngine(initializeEngine(modelPath, visionBackend = Backend.CPU()), visionReady = true)
+            } catch (cpuVisionError: Throwable) {
+                rethrowCancellation(cpuVisionError)
+                try {
+                    LoadedEngine(initializeEngine(modelPath, visionBackend = null), visionReady = false)
+                } catch (textOnlyError: Throwable) {
+                    rethrowCancellation(textOnlyError)
+                    textOnlyError.addSuppressed(gpuVisionError)
+                    textOnlyError.addSuppressed(cpuVisionError)
+                    throw textOnlyError
+                }
             }
         }
     }
