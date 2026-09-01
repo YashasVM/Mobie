@@ -264,6 +264,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
     }
 
     private fun writeMetadata(destination: File) {
+        val expectedSha = inputData.getString(KEY_SHA256).orEmpty()
         val properties = Properties().apply {
             setProperty("modelId", inputData.getString(KEY_MODEL_ID).orEmpty())
             setProperty("title", inputData.getString(KEY_TITLE).orEmpty())
@@ -274,8 +275,9 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
             setProperty("gated", inputData.getBoolean(KEY_GATED, false).toString())
             setProperty("fileName", destination.name)
             setProperty("sourceFileName", inputData.getString(KEY_FILE_NAME).orEmpty())
-            setProperty("sha256", inputData.getString(KEY_SHA256).orEmpty())
+            setProperty("sha256", expectedSha)
             setProperty("quantization", inputData.getString(KEY_QUANTIZATION).orEmpty())
+            if (expectedSha.isNotBlank()) ModelFileVerification.stamp(this, destination)
         }
         val metadata = File(destination.parentFile, DownloadFilePolicy.METADATA_FILE)
         val partial = File(metadata.path + ".part")
