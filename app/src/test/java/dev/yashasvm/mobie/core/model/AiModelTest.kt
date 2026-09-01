@@ -24,6 +24,23 @@ class AiModelTest {
     }
 
     @Test
+    fun `device preferred artifact controls presentation without discarding alternatives`() {
+        val longContext = liteRtArtifact("model_int4_c64k.litertlm", 500 * mib, "INT4")
+        val shortContext = liteRtArtifact("model_int8_ekv2048.litertlm", 800 * mib, "INT8")
+        val model = modelWith(longContext, shortContext).preferArtifact(longContext)
+        assertEquals(longContext, model.bestArtifact)
+        assertEquals(2, model.artifacts.size)
+    }
+
+    @Test
+    fun `hardware targeted artifact cannot be forced as preferred generic artifact`() {
+        val npu = liteRtArtifact("model.qualcomm.sm8750.npu.litertlm", 250, "INT4")
+        val generic = liteRtArtifact("model_int8_ekv2048.litertlm", 800, "INT8")
+        val model = modelWith(npu, generic).preferArtifact(npu)
+        assertEquals(generic, model.bestArtifact)
+    }
+
+    @Test
     fun `current LiteRT quantization naming is recognized`() {
         assertEquals("Q4_BLOCK32", inferArtifactQuantization("qwen3_0.6b_q4_block32_ekv1280.litertlm"))
         assertEquals("INT4", inferArtifactQuantization("qwen3_0_6b_mixed_int4.litertlm"))
