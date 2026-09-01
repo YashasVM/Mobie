@@ -190,6 +190,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
     ): Boolean {
         if (!file.isFile) return false
         if (expectedSize > 0 && file.length() != expectedSize) return false
+        if (!ModelFileVerification.matchesInstalledLength(verifiedMetadata, file)) return false
         return when {
             !expectedSha.isNullOrBlank() && verifiedMetadata != null &&
                 ModelFileVerification.canReuseShaVerification(verifiedMetadata, file, expectedSha) -> true
@@ -297,6 +298,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
             setProperty("sourceFileName", inputData.getString(KEY_FILE_NAME).orEmpty())
             setProperty("sha256", expectedSha)
             setProperty("quantization", inputData.getString(KEY_QUANTIZATION).orEmpty())
+            ModelFileVerification.stampInstalledLength(this, destination)
             if (expectedSha.isNotBlank()) ModelFileVerification.stamp(this, destination)
         }
         val metadata = File(destination.parentFile, DownloadFilePolicy.METADATA_FILE)
