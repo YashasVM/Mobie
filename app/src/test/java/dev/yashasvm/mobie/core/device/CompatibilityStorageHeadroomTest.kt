@@ -18,7 +18,7 @@ class CompatibilityStorageHeadroomTest {
         val weights = 2 * gib
         val required = resolver.requiredStorageBytes(weights)
 
-        assertEquals(weights + 102L * mib + 614L * mib + 838_860L, required)
+        assertEquals(weights + weights / 20 + weights * 3 / 10, required)
         assertTrue(required > weights + weights / 20)
     }
 
