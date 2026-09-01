@@ -12,6 +12,7 @@ import java.util.Properties
  */
 internal object ModelFileVerification {
     const val KEY_INSTALLED_LENGTH = "installedLength"
+    const val KEY_LOCAL_SHA256 = "localSha256"
     const val KEY_VERIFIED_LENGTH = "verifiedLength"
     const val KEY_VERIFIED_LAST_MODIFIED = "verifiedLastModified"
 
@@ -31,15 +32,28 @@ internal object ModelFileVerification {
         return installedLength >= 0 && file.length() == installedLength
     }
 
-    fun stamp(properties: Properties, file: File) {
+    fun stamp(properties: Properties, file: File, verifiedSha256: String? = null) {
         properties.setProperty(KEY_VERIFIED_LENGTH, file.length().toString())
         properties.setProperty(KEY_VERIFIED_LAST_MODIFIED, file.lastModified().toString())
+        verifiedSha256?.takeIf(String::isNotBlank)?.let {
+            properties.setProperty(KEY_LOCAL_SHA256, it.lowercase())
+        }
     }
 
     fun canReuseShaVerification(properties: Properties, file: File, expectedSha: String): Boolean {
         if (!file.isFile || expectedSha.isBlank()) return false
         if (!properties.getProperty("sha256").orEmpty().equals(expectedSha, ignoreCase = true)) return false
-        if (properties.getProperty("fileName") != file.name) return false
+        return matchesVerifiedFingerprint(properties, file)
+    }
+
+    fun canReuseLocalVerification(properties: Properties, file: File): Boolean =
+        !properties.getProperty(KEY_LOCAL_SHA256).isNullOrBlank() && matchesVerifiedFingerprint(properties, file)
+
+    fun localSha256(properties: Properties?): String? =
+        properties?.getProperty(KEY_LOCAL_SHA256)?.trim()?.lowercase()?.takeIf(String::isNotBlank)
+
+    private fun matchesVerifiedFingerprint(properties: Properties, file: File): Boolean {
+        if (!file.isFile || properties.getProperty("fileName") != file.name) return false
         val verifiedLength = properties.getProperty(KEY_VERIFIED_LENGTH)?.toLongOrNull() ?: return false
         val verifiedLastModified = properties.getProperty(KEY_VERIFIED_LAST_MODIFIED)?.toLongOrNull() ?: return false
         return file.length() == verifiedLength && file.lastModified() == verifiedLastModified
