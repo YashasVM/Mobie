@@ -14,11 +14,12 @@
 - Improved Hugging Face catalog caching, request cancellation, partial metadata failure handling, and LiteRT quantization/context-name parsing.
 
 ## In progress
+- Validate installed-model length fingerprints. New downloads persist the exact completed file length and Mobie rejects later truncation/replacement even when Hugging Face publishes no SHA-256; legacy metadata remains readable.
 - Continue auditing safe runtime/backend choices that improve TTFT/tokens-per-second without increasing crashes, RAM pressure, or thermal load; do not enable main-model GPU/NPU paths without representative physical-device evidence.
 
 ## Tests actually performed
 - Exact resolved-response download storage tip `88c48aab`, persistent LiteRT cache tip `a9359ae7`, incomplete-turn recovery tip `ce740ee1`, first-load storage-headroom tip `6855974d`, download-timeout tip `c218481c`, direct hardware-target rejection tip `43a6461c`, turn-aware history tip `cfe09b4e`, and atomic-cancellation tip `005c9643` passed the full Android CI pipeline including JVM tests, lint/debug APK build, emulator integration, and real Qwen LiteRT-LM E2E where applicable.
-- Focused JVM coverage for resolved download-size storage admission verifies exact-fit remaining bytes pass, one-byte-short free space fails, and truly unknown sizes stay admissible until a size is known.
+- Added focused JVM coverage that a stamped installed length accepts the intact artifact, rejects later truncation without requiring a checksum, and preserves compatibility with legacy metadata lacking the new field.
 - Existing regression coverage includes interrupted download resume, cancellation/socket close, checksum mutation fallback, installed artifact identity, history recovery, load/decode memory admission, hardware-target exclusion, context inference, per-device artifact selection, thermal admission, and first-load storage headroom.
 
 ## Real benchmarks / performance improvements
@@ -34,8 +35,10 @@
 - Context metadata and restored-history sizing remain conservative where exact tokenizer/runtime metadata is unavailable.
 - Image history restores text turns but not prior image media into a recreated native conversation.
 - GPU vision, thermal behavior, proactive LMK admission, image-slot behavior, interrupted-generation recovery, and first-load cache sizing still need physical-device validation.
+- Exact-tip CI for installed-length corruption detection has not completed yet.
 
 ## Inspect before merging
+- Corrupt or truncate a newly installed no-checksum model in app-private storage and verify it disappears from installed-model discovery instead of being passed to LiteRT; also confirm legacy installs without `installedLength` still load.
 - Test an artifact whose catalog size is missing but HTTP headers provide a large Content-Length/Content-Range; verify Mobie fails before writing when remaining free storage is insufficient and resumes normally when space is adequate.
 - Run a real vision-capable `.litertlm` model on representative Adreno/Mali/Tensor phones; verify image understanding, repeated image turns, GPU→CPU fallback, TTFT/prefill, RAM, thermals, and crashes.
 - Verify per-device recommendations and artifact choices on low-RAM phones, under storage pressure, near Android LMK thresholds, and when repositories publish generic plus vendor-targeted LiteRT packages.
