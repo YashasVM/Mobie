@@ -184,9 +184,6 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                     }
                     if (cancelRequested) throw CancellationException("Generation cancelled")
                 } catch (error: Throwable) {
-                    // Cancellation of the collecting coroutine does not guarantee the native decoder
-                    // has stopped. Stop it before releasing the generation mutex so a fast follow-up
-                    // cannot rebuild/close a conversation while LiteRT is still decoding into it.
                     activeConversation.cancelProcess()
                     rememberInterruptedTurn(prompt, partialAnswer.toString().takeIf { it.isNotBlank() })
                     interruptedRecorded = true
@@ -245,10 +242,6 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     private fun initializeEngineWithVisionFallback(modelPath: String, vision: Boolean): LoadedEngine {
         if (!vision) return LoadedEngine(initializeEngine(modelPath, visionBackend = null), visionReady = false)
 
-        // Keep text generation on the conservative CPU backend, but prefer GPU for the vision
-        // encoder. On supported Android GPUs this materially improves multimodal prefill and also
-        // avoids known LiteRT-LM CPU-vision instability. Devices without a working GPU delegate
-        // transparently fall back to CPU vision instead of losing multimodal support entirely.
         return try {
             LoadedEngine(initializeEngine(modelPath, visionBackend = Backend.GPU()), visionReady = true)
         } catch (gpuVisionError: Throwable) {
@@ -270,20 +263,24 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     }
 
     private fun initializeEngine(modelPath: String, visionBackend: Backend?): Engine {
+        val cacheDirectory = File(File(modelPath).absoluteFile.parentFile, LITERT_CACHE_DIRECTORY).apply {
+            if (!isDirectory && !mkdirs()) {
+                throw IllegalStateException("Could not create LiteRT cache directory beside the installed model.")
+            }
+        }
         val createdEngine = Engine(
             EngineConfig(
                 modelPath = modelPath,
                 backend = Backend.CPU(),
                 visionBackend = visionBackend,
                 maxNumImages = if (visionBackend != null) 1 else null,
-                cacheDir = appContext.cacheDir.absolutePath,
+                cacheDir = cacheDirectory.absolutePath,
             ),
         )
         try {
             createdEngine.initialize()
             return createdEngine
         } catch (error: Throwable) {
-            // Engine.close() requires successful initialization, so only close initialized engines.
             if (createdEngine.isInitialized()) createdEngine.close()
             throw error
         }
@@ -394,6 +391,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
 
     private companion object {
         const val DEFAULT_MAX_OUTPUT_TOKENS = 256
+        const val LITERT_CACHE_DIRECTORY = ".litert-cache"
         val REASONING_CHANNELS = setOf(
             "analysis", "thinking", "reasoning", "reasoning_content", "thought", "thoughts",
             "deliberation", "scratchpad", "chain_of_thought", "chain-of-thought", "cot",
