@@ -171,6 +171,7 @@ data class DeviceProfile(
     val socManufacturer: String = "",
     val socModel: String = "",
     val mediaPerformanceClass: Int = 0,
+    val thermalStatus: Int = 0,
 )
 
 data class CompatibilityResult(
