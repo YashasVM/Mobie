@@ -8,23 +8,22 @@
 - Added load/decode memory admission, proactive LMK-headroom checks during generation, and severe/critical Android thermal safeguards.
 - Improved model compatibility and recommendation using RAM, current memory pressure, storage headroom, quantization, model size, inferred context/cache size, runtime-memory estimate, and supported backend.
 - Added per-device LiteRT artifact selection and persisted that exact artifact through UI → download → installed-model restoration → runtime load.
-- Excluded Qualcomm/MediaTek/NPU-specific packages from the generic runtime until a matching accelerator path is physically validated.
+- Excluded Qualcomm/MediaTek/NPU-specific packages from the generic runtime until a matching accelerator path is physically validated; direct compatibility evaluation now rejects them too, not only recommendation filtering.
 - Hardened multimodal startup with GPU-first vision, CPU-vision fallback, then text-only fallback while keeping text generation on CPU; explicitly reserves one image slot whenever vision is initialized.
 - Improved Hugging Face catalog caching, request cancellation, partial metadata failure handling, and modern LiteRT quantization/context-name parsing.
 - Rebuilds LiteRT-LM conversation state from canonical committed turns after interrupted generation; cancellation now stops native decode before releasing the generation mutex, and real-model E2E verifies immediate follow-up recovery.
 - Made bounded LiteRT history restoration turn-aware so oversized latest turns do not erase older valid restorable context.
 
 ## In progress
-- Close the remaining hardware-target compatibility hole: direct artifact compatibility now rejects Qualcomm/MediaTek/NPU-specific packages instead of allowing them to look runnable through generic LiteRT paths; exact-tip CI is pending.
 - Continue auditing safe runtime/backend choices that improve TTFT/tokens-per-second without increasing crashes, RAM pressure, or thermal load.
 
 ## Tests actually performed
-- Exact turn-aware history tip `cfe09b4e` passed Android CI: JVM tests, lint/debug APK build, emulator integration, and real Qwen LiteRT-LM E2E.
+- Exact direct hardware-target rejection tip `43a6461c` passed Android CI: JVM tests, lint/debug APK build, emulator integration, and real Qwen LiteRT-LM E2E.
+- Exact turn-aware history tip `cfe09b4e` passed the same full Android CI/E2E pipeline.
 - Exact atomic-cancellation tip `005c9643` passed Android CI including cancel-after-first-output → immediate successful follow-up generation.
 - Exact interrupted-generation recovery tip `13dda38d`, image-capacity tip `6b33793a`, GPU-first vision tip `cab21c13`, and proactive generation-memory tip `e0d0fadf` passed the same full Android CI/E2E pipeline.
 - Exact checksum-worker reuse tip `0d994054`, direct fingerprint-stamping tip `8ee9de7b`, checksum-caching tip `2dd582ca`, device-selected presentation tip `c8d1e06f`, thermal safeguard tip `a6721f61`, and per-device lifecycle tip `8c4673b5` all passed their relevant JVM/Android/emulator/E2E validation.
-- Existing regression coverage includes interrupted download resume, cancellation/socket close, checksum mutation fallback, installed artifact identity, bounded/turn-aware history restoration, transactional reset, load/decode memory admission, hardware-target exclusion, context inference, per-device artifact selection, thermal admission, and device-selected artifact presentation.
-- Direct hardware-target compatibility rejection has focused JVM coverage in the current pending change; exact-tip Android CI is not yet complete.
+- Existing regression coverage includes interrupted download resume, cancellation/socket close, checksum mutation fallback, installed artifact identity, bounded/turn-aware history restoration, transactional reset, load/decode memory admission, direct and recommendation-path hardware-target exclusion, context inference, per-device artifact selection, thermal admission, and device-selected artifact presentation.
 
 ## Real benchmarks / performance improvements
 - CPU-emulator Qwen3-0.6B INT4 baseline: 20.64 prefill tok/s, 7.51 decode tok/s, 1.468 s TTFT, 3.955 s total, ~1.02 GiB app RAM.
