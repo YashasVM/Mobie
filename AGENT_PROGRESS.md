@@ -12,17 +12,19 @@
 - Hardened multimodal startup with GPU-first vision, CPU-vision fallback, then text-only fallback while keeping text generation on CPU; explicitly reserves one image slot whenever vision is initialized.
 - Improved Hugging Face catalog caching, request cancellation, partial metadata failure handling, and modern LiteRT quantization/context-name parsing.
 - Rebuilds LiteRT-LM conversation state from canonical committed turns after interrupted generation; cancellation now stops native decode before releasing the generation mutex, and real-model E2E verifies immediate follow-up recovery.
+- Made bounded LiteRT history restoration turn-aware so oversized latest turns do not erase older valid restorable context.
 
 ## In progress
-- Make bounded LiteRT history restoration turn-aware so an oversized latest prompt/response cannot erase all older restorable context after cancellation or conversation rebuild.
+- Close the remaining hardware-target compatibility hole: direct artifact compatibility now rejects Qualcomm/MediaTek/NPU-specific packages instead of allowing them to look runnable through generic LiteRT paths; exact-tip CI is pending.
 - Continue auditing safe runtime/backend choices that improve TTFT/tokens-per-second without increasing crashes, RAM pressure, or thermal load.
 
 ## Tests actually performed
-- Exact atomic-cancellation tip `005c9643` passed Android CI: JVM tests, lint/debug APK build, emulator integration, and real Qwen LiteRT-LM E2E including cancel-after-first-output → immediate successful follow-up generation.
+- Exact turn-aware history tip `cfe09b4e` passed Android CI: JVM tests, lint/debug APK build, emulator integration, and real Qwen LiteRT-LM E2E.
+- Exact atomic-cancellation tip `005c9643` passed Android CI including cancel-after-first-output → immediate successful follow-up generation.
 - Exact interrupted-generation recovery tip `13dda38d`, image-capacity tip `6b33793a`, GPU-first vision tip `cab21c13`, and proactive generation-memory tip `e0d0fadf` passed the same full Android CI/E2E pipeline.
 - Exact checksum-worker reuse tip `0d994054`, direct fingerprint-stamping tip `8ee9de7b`, checksum-caching tip `2dd582ca`, device-selected presentation tip `c8d1e06f`, thermal safeguard tip `a6721f61`, and per-device lifecycle tip `8c4673b5` all passed their relevant JVM/Android/emulator/E2E validation.
-- Existing regression coverage includes interrupted download resume, cancellation/socket close, checksum mutation fallback, installed artifact identity, bounded history restoration, transactional reset, load/decode memory admission, hardware-target exclusion, context inference, per-device artifact selection, thermal admission, and device-selected artifact presentation.
-- Turn-aware oversized-history recovery has focused JVM coverage in the current pending change; exact-tip Android CI is not yet complete.
+- Existing regression coverage includes interrupted download resume, cancellation/socket close, checksum mutation fallback, installed artifact identity, bounded/turn-aware history restoration, transactional reset, load/decode memory admission, hardware-target exclusion, context inference, per-device artifact selection, thermal admission, and device-selected artifact presentation.
+- Direct hardware-target compatibility rejection has focused JVM coverage in the current pending change; exact-tip Android CI is not yet complete.
 
 ## Real benchmarks / performance improvements
 - CPU-emulator Qwen3-0.6B INT4 baseline: 20.64 prefill tok/s, 7.51 decode tok/s, 1.468 s TTFT, 3.955 s total, ~1.02 GiB app RAM.
@@ -44,7 +46,7 @@
 - Run a real vision-capable `.litertlm` model on representative Adreno/Mali/Tensor phones; verify image understanding, repeated image turns, GPU→CPU fallback, TTFT/prefill, RAM, thermals, and crashes.
 - Cancel generation after partial output and after memory/thermal interruption, then send another prompt; verify the next response uses the same visible/persisted history rather than stale native context.
 - Exercise very long prompts and responses across cancellation/reset; verify oversized latest turns are omitted from native restore without wiping older valid context.
-- Verify per-device recommendations and artifact choices on low-RAM phones, under storage pressure, and near Android LMK thresholds.
+- Verify per-device recommendations and artifact choices on low-RAM phones, under storage pressure, near Android LMK thresholds, and when repositories publish both generic and vendor-targeted LiteRT packages.
 - Compare context-aware RAM estimates against real ARM RSS for multiple cache/context variants.
 - Benchmark multi-GB installed-model discovery/retry paths and confirm file mutation still forces real SHA-256 revalidation.
 - Treat emulator performance figures as regression baselines only and collect comparable physical-device measurements before merging accelerator/performance claims.
