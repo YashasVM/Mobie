@@ -1,36 +1,31 @@
 # Agent progress
 
 ## Completed this week
-- Created the long-running `agent-dev` branch from current `main`.
-- Made device recommendations aware of Android low-memory state/LMK headroom and added stricter fit limits for Android-classified low-RAM devices.
-- Expanded device profiling with manufacturer/model, SoC manufacturer/model, ABI, and media performance class without making unverified accelerator claims.
-- Hardened resumable model downloads with strict `Content-Range`/server-size validation, transient HTTP retries, SHA-256 validation, and an Android forced-disconnect resume integration test.
-- Verified real Qwen3-0.6B INT4 local execution: download/checksum → load → repeated generation → conversation-only reset → generation → unload/reload → generation, with screenshot and machine-readable runtime evidence.
-- Added measured TTFT, total generation latency, decode tokens/sec, prefill tokens/sec/count, decode token count, and app RAM reporting for real LiteRT-LM runs; the exact instrumentation tip passed full Android CI and real Qwen E2E.
-- New Chat and history switching now reuse the initialized LiteRT engine by replacing only the conversation; if reuse is unavailable, Mobie safely falls back to a full model load.
-- Bound LiteRT conversation restoration by both message count and payload size and prevent restoration from starting on an orphan assistant message.
-- Reduced Hugging Face catalog request fan-out with a bounded detail cache, failure isolation, and coroutine-cancellable requests.
-- Made user-cancelled WorkManager model downloads cancel the underlying OkHttp call while retaining partial bytes for resume.
-- Preserved coroutine cancellation through LiteRT load/reset/generation and made conversation reset transactional.
-- Added load-time, pre-generation, and bounded mid-generation Android memory-pressure guards.
-- Hardened LiteRT multimodal loading with CPU vision initialization, safe text-only fallback, explicit image rejection in fallback mode, and text-before-media ordering.
-- Recognize current LiteRT Community quantization naming (`q4_block32`, `mixed_int4`, `dynamic_wi4b32`, `channelwise_int8`) so recommendations use real quantization metadata.
-- Hardware-specific MediaTek/Qualcomm/NPU LiteRT bundles are represented explicitly and excluded from Mobie's generic CPU artifact selection; the exact tip passed full Android CI.
-- Context-aware compatibility estimates infer published `ekv1280`, `ekv2048`, `ctx4096`, `context4096`, `c1024`, `c32k`, and `c64k` filename hints and scale the conservative KV-cache RAM allowance; the compact-marker tip passed full Android CI.
-- LiteRT artifact choice now uses the same estimated runtime-memory model as compatibility checks. Among generic candidates Mobie prefers the lower estimated weights + runtime overhead + KV-cache footprint before quantization rank, so a long-context INT4 variant cannot hide a safer short-context artifact from the same repository; the exact code tip passed full Android CI and real Qwen E2E.
+- Created and maintained the long-running `agent-dev` branch without modifying `main`.
+- Hardened resumable model downloads with strict range/server-size validation, retry handling, SHA-256 verification, cancellation that closes the active HTTP call, and retained partial files for resume.
+- Verified real Qwen3-0.6B INT4 local execution through Mobie: download → load → repeated generation → conversation reset → generation → unload/reload → generation.
+- Added real TTFT, total latency, prefill/decode throughput, token counts, and app RAM measurements for LiteRT-LM runs.
+- Reused loaded model weights for new-chat/history switching, bounded restored context, preserved cancellation, and made conversation replacement transactional.
+- Added Android low-memory admission checks before load/generation plus bounded checks during active decode to reduce OOM/LMK failures.
+- Hardened LiteRT multimodal initialization with a text-only fallback when the vision executor cannot initialize.
+- Improved Hugging Face catalog caching, request cancellation, and partial metadata failure handling.
+- Recognize current LiteRT quantization naming including `q4_block32`, `mixed_int4`, `dynamic_wi4b32`, and `channelwise_int8`.
+- Exclude MediaTek/Qualcomm/NPU-specific LiteRT bundles from the generic CPU runtime until a matching accelerator path is physically validated.
+- Infer published LiteRT context/cache markers including `ekv1280`, `ekv2048`, `ctx4096`, `context4096`, `c1024`, `c32k`, and `c64k`; scale conservative KV-cache RAM estimates accordingly.
+- Rank generic LiteRT artifacts using estimated weights + runtime overhead + context-dependent KV cache so long-context variants cannot hide safer lower-memory alternatives.
+- Added device-specific artifact selection using current RAM, Android memory pressure, storage headroom, runtime-memory estimate, context, and supported generic LiteRT backend.
+- Threaded the chosen device-specific artifact through compatibility state, download identity, cancellation, completed-file lookup, runtime adapter selection, chat resets/history switching, and installed-model restoration. Installed metadata now preserves the original Hugging Face artifact filename so context/quantization identity survives app restarts.
 
 ## In progress
-- Add device-specific artifact selection across multiple generic LiteRT variants. The resolver now chooses only generic LiteRT artifacts that are compatible or warning-level on the current device and ranks fully compatible candidates first, then by estimated runtime RAM/storage footprint. Focused JVM coverage was added; exact-tip Android CI is pending.
-- Thread the selected device-specific artifact through UI selection, download identity, installed-file lookup, and runtime loading so Mobie never silently switches variants after selection.
+- Make catalog/model-detail presentation use the same device-selected artifact as the functional lifecycle; a few UI-only `bestArtifact` references can still show a different size/status/file than Mobie will actually download.
 - Continue auditing real-device performance constraints and safe accelerator/backend selection.
-- Use the measured CPU prefill/decode baseline to identify runtime changes that materially improve TTFT/tokens-per-second without increasing RAM or instability.
+- Use measured CPU prefill/decode baselines to identify changes that improve TTFT/tokens-per-second without increasing RAM or instability.
 
 ## Tests performed
-- Post-merge `main` passed the full Android CI pipeline on the exact merged tree, including JVM tests, lint/debug APK build, emulator smoke/integration, and real LiteRT-LM Qwen E2E.
-- Hardware-target filtering, explicit/compact context inference, and the new memory-aware artifact-selection tip passed JVM tests, Android lint/debug APK build, emulator smoke/integration, and real LiteRT-LM Qwen E2E.
-- Existing runtime validation covers interrupted-transfer resume, explicit download cancellation/socket close, bounded history restoration, cancellation-safe inference, transactional conversation reset, load/decode memory admission, and real Qwen E2E.
-- Focused JVM cases cover current LiteRT quantization patterns, hardware-target exclusion, explicit and compact context inference, context-aware KV-cache estimates, lower-footprint artifact preference, and a regression where a 64K INT4 artifact previously outranked a safer 2K INT8 candidate.
-- New focused JVM cases verify the device selector prefers a variant that safely fits current RAM, returns no candidate when storage cannot fit any artifact, and excludes hardware-specific bundles.
+- Exact per-device lifecycle tip `8c4673b5` passed JVM unit tests, Android lint, debug APK build, emulator smoke/integration tests, and the real LiteRT-LM Qwen E2E workflow.
+- Added Android persistence coverage proving an installed `Qwen3-0.6B-int4-ekv2048.litertlm` keeps its original artifact identity, restores the 2048-token context hint/INT4 metadata, and resolves the hashed local file correctly after reconstruction.
+- The new persistence test initially failed test discovery because its expression-body `@Test` returned the Boolean result of `deleteRecursively()`; the root cause was fixed by making the test return `Unit`, after which the exact-tip emulator suite passed.
+- Existing validation covers interrupted-transfer resume, explicit download cancellation/socket close, bounded history restoration, cancellation-safe inference, transactional conversation reset, load/decode memory admission, hardware-target exclusion, context inference, and per-device artifact selection.
 
 ## Benchmarks
 - Current CPU-emulator Qwen3-0.6B INT4 baseline: first prompt 20.64 prefill tok/s, 7.51 decode tok/s, 1.468 s TTFT, 3.955 s total, ~1.02 GiB app RAM.
@@ -41,20 +36,18 @@
 
 ## Known problems / regressions
 - GGUF remains intentionally unavailable; Mobie v1 currently relies on published LiteRT-LM artifacts.
-- Emulator validation proves CPU LiteRT-LM execution but not real ARM phone performance or accelerator behavior.
-- GPU/NPU selection remains disabled until physical-device evidence shows it is safe and beneficial.
-- Hardware-targeted LiteRT bundles are deliberately unsupported by the generic runtime even on apparently matching SoCs until Mobie has a validated accelerator path.
-- The resolver can now choose a per-device artifact, but the existing UI/download/runtime flow still uses the model-level `bestArtifact`; wiring the chosen artifact through that complete lifecycle is unfinished and must be completed before claiming persistent per-device selection.
-- Context inference uses reliable filename hints when present; artifacts without explicit or recognized compact context metadata still fall back to a conservative 4096-token estimate because LiteRT-LM does not expose a cheap pre-load package metadata API.
+- Emulator validation proves CPU LiteRT-LM execution but not real ARM phone performance, thermal/battery behavior, or accelerator behavior.
+- GPU/NPU selection remains disabled until representative physical-device evidence shows it is safe and beneficial.
+- Hardware-targeted LiteRT bundles remain deliberately unsupported by the generic runtime even on apparently matching SoCs.
+- Catalog/model-detail UI still has a few display-only `bestArtifact` references; functional download/load state is already pinned to the device-selected artifact, but presentation should be aligned next.
+- Artifacts without recognized context metadata still use a conservative 4096-token estimate because LiteRT-LM does not expose a cheap pre-load package metadata API.
 - Restored-context sizing still uses a conservative character budget because LiteRT-LM does not expose a cheap pre-conversation token-count API.
-- Text-only fallback for a failed vision executor preserves chat but cannot make vision work on unsupported hardware.
+- Text-only fallback preserves chat when vision initialization fails but cannot make vision work on unsupported hardware.
 
 ## Inspect before merging
-- Verify model recommendations on real low-RAM phones and devices under memory pressure.
-- Review captured SoC/performance-class data before using it for accelerator claims.
-- Review LiteRT artifact ranking against current community repositories, especially generic CPU variants with different context/cache limits and SoC/NPU-specific files.
-- Review context-aware RAM estimates against artifacts with 1024/1280/2048/4096/32K/64K published cache limits and real device RSS measurements.
-- Review resumable-download handling around `206`, `416`, throttling/retry responses, forced disconnects, and explicit cancellation.
-- Treat emulator performance figures as regression baselines only; collect comparable ARM-device measurements before making performance claims.
-- Verify conversation reuse, long-history switching, and memory guards on representative phones.
-- Verify a real vision-capable `.litertlm` model on representative phones.
+- Verify recommendations and selected variants on real low-RAM phones and under deliberate memory pressure.
+- Review LiteRT artifact ranking against current repositories containing multiple quantization/context variants and SoC/NPU-specific bundles.
+- Compare context-aware RAM estimates against real ARM-device RSS for 1K/2K/4K/32K/64K cache variants.
+- Verify the displayed model package exactly matches the device-selected/downloaded artifact after the remaining UI consistency work.
+- Treat emulator performance figures as regression baselines only; collect comparable physical-device measurements before making performance claims.
+- Verify conversation reuse, long-history switching, memory guards, and a real vision-capable `.litertlm` model on representative phones.
