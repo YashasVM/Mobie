@@ -234,6 +234,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                 modelPath = modelPath,
                 backend = Backend.CPU(),
                 visionBackend = visionBackend,
+                maxNumImages = if (visionBackend != null) 1 else null,
                 cacheDir = appContext.cacheDir.absolutePath,
             ),
         )
