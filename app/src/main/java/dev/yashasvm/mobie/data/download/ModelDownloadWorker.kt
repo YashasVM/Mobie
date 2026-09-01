@@ -133,6 +133,9 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                     bodyLength = body.contentLength(),
                     startAt = startAt,
                 )
+                if (!DownloadFilePolicy.hasSpaceForRemaining(transferTotal, startAt, modelDir.usableSpace)) {
+                    return@withContext Result.failure(dataOf("Not enough free storage"))
+                }
 
                 RandomAccessFile(partial, "rw").use { output ->
                     output.seek(startAt)
