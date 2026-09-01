@@ -168,13 +168,20 @@ class ModelDownloadManager(context: Context) {
         metadataFile: File,
     ): Boolean {
         if (!ModelFileVerification.matchesInstalledLength(properties, file)) return false
-        if (expectedSha.isNullOrBlank()) return true
-        if (properties != null && ModelFileVerification.canReuseShaVerification(properties, file, expectedSha)) {
-            return true
+        val remoteSha = expectedSha?.trim()?.lowercase()?.takeIf(String::isNotBlank)
+        val localSha = ModelFileVerification.localSha256(properties)
+        val trustedSha = remoteSha ?: localSha ?: return true
+        if (properties != null) {
+            val fingerprintMatches = if (remoteSha != null) {
+                ModelFileVerification.canReuseShaVerification(properties, file, remoteSha)
+            } else {
+                ModelFileVerification.canReuseLocalVerification(properties, file)
+            }
+            if (fingerprintMatches) return true
         }
-        if (sha256(file) != expectedSha.lowercase()) return false
+        if (sha256(file) != trustedSha) return false
         if (properties != null && metadataFile.isFile) {
-            ModelFileVerification.stamp(properties, file)
+            ModelFileVerification.stamp(properties, file, trustedSha)
             writePropertiesAtomically(metadataFile, properties)
         }
         return true
