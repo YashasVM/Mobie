@@ -37,6 +37,31 @@ class DownloadFilePolicyTest {
     }
 
     @Test
+    fun `resolved transfer size is checked against remaining free space`() {
+        assertTrue(
+            DownloadFilePolicy.hasSpaceForRemaining(
+                totalBytes = 1_000,
+                downloadedBytes = 700,
+                usableSpaceBytes = 300,
+            ),
+        )
+        assertFalse(
+            DownloadFilePolicy.hasSpaceForRemaining(
+                totalBytes = 1_000,
+                downloadedBytes = 700,
+                usableSpaceBytes = 299,
+            ),
+        )
+        assertTrue(
+            DownloadFilePolicy.hasSpaceForRemaining(
+                totalBytes = 0,
+                downloadedBytes = 0,
+                usableSpaceBytes = 0,
+            ),
+        )
+    }
+
+    @Test
     fun `only unfinished downloads can be cancelled`() {
         fun progress(state: WorkInfo.State) = DownloadProgress(state, 0, 0, 0)
 
