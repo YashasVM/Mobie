@@ -15,6 +15,7 @@
 - Made bounded LiteRT history restoration turn-aware so oversized latest turns do not erase older valid restorable context.
 
 ## In progress
+- Harden long-running Hugging Face downloads against transient mobile/Wi-Fi stalls: the model worker now uses a 30 s connect timeout and 60 s read timeout instead of OkHttp's shorter defaults while retaining Range resume and WorkManager retry behavior; exact-tip CI is pending.
 - Continue auditing safe runtime/backend choices that improve TTFT/tokens-per-second without increasing crashes, RAM pressure, or thermal load.
 
 ## Tests actually performed
@@ -48,4 +49,5 @@
 - Verify per-device recommendations and artifact choices on low-RAM phones, under storage pressure, near Android LMK thresholds, and when repositories publish both generic and vendor-targeted LiteRT packages.
 - Compare context-aware RAM estimates against real ARM RSS for multiple cache/context variants.
 - Benchmark multi-GB installed-model discovery/retry paths and confirm file mutation still forces real SHA-256 revalidation.
+- Test model downloads over a deliberately stalled/throttled connection and confirm transient gaps longer than 10 s no longer consume retries while genuine dead connections still fail and resume cleanly.
 - Treat emulator performance figures as regression baselines only and collect comparable physical-device measurements before merging accelerator/performance claims.
