@@ -122,16 +122,17 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                     if (expectedQuery == null || state.value.query == expectedQuery) {
                         val device = container.deviceProfile.current()
                         val compatible = models
+                            .map { model -> model.preferArtifact(artifactForDevice(model, device)) }
                             .sortedWith(
                                 compareBy<AiModel> { model ->
-                                    val artifact = artifactForDevice(model, device)
+                                    val artifact = model.bestArtifact
                                     when (container.compatibility.resolve(artifact, device).status) {
                                         Compatibility.COMPATIBLE -> 0
                                         Compatibility.WARNING -> 1
                                         else -> 2
                                     }
                                 }
-                                    .thenBy { model -> artifactForDevice(model, device)?.sizeBytes ?: Long.MAX_VALUE }
+                                    .thenBy { model -> model.bestArtifact?.sizeBytes ?: Long.MAX_VALUE }
                                     .thenByDescending { it.downloads },
                             )
                         mutableState.update { it.copy(models = compatible, device = device, loading = false) }
@@ -152,21 +153,22 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         if (model == null) viewModelScope.launch { unloadRuntime() }
         val device = container.deviceProfile.current()
         val artifact = model?.let { artifactForDevice(it, device) }
-        val sessions = model?.let { container.chatHistory.sessions(it.id) }.orEmpty()
+        val presentedModel = model?.preferArtifact(artifact)
+        val sessions = presentedModel?.let { container.chatHistory.sessions(it.id) }.orEmpty()
         val currentSessionId = sessions.firstOrNull()?.id
         mutableState.update {
             it.copy(
-                selected = model,
+                selected = presentedModel,
                 selectedArtifact = artifact,
-                recentModels = if (model == null) it.recentModels else {
-                    (listOf(model) + it.recentModels.filterNot { recent -> recent.id == model.id }).take(5)
+                recentModels = if (presentedModel == null) it.recentModels else {
+                    (listOf(presentedModel) + it.recentModels.filterNot { recent -> recent.id == presentedModel.id }).take(5)
                 },
                 compatibility = artifact?.let { candidate -> container.compatibility.resolve(candidate, device) },
                 download = null,
                 downloadedPath = null,
                 chatting = false,
                 runtimeState = RuntimeState.IDLE,
-                messages = model?.let(::readHistory).orEmpty(),
+                messages = presentedModel?.let(::readHistory).orEmpty(),
                 history = sessions,
                 sessionId = currentSessionId,
                 stats = null,
@@ -174,13 +176,13 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 device = device,
             )
         }
-        if (model != null && artifact != null) {
-            observeDownload(model, artifact)
+        if (presentedModel != null && artifact != null) {
+            observeDownload(presentedModel, artifact)
             viewModelScope.launch(Dispatchers.IO) {
-                val downloaded = container.downloads.completedFile(model.id, artifact)?.absolutePath
+                val downloaded = container.downloads.completedFile(presentedModel.id, artifact)?.absolutePath
                 if (
                     downloaded != null &&
-                    state.value.selected?.id == model.id &&
+                    state.value.selected?.id == presentedModel.id &&
                     state.value.selectedArtifact == artifact
                 ) {
                     mutableState.update { it.copy(downloadedPath = downloaded) }
