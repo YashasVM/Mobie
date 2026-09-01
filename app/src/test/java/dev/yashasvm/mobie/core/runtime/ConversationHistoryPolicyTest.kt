@@ -23,7 +23,7 @@ class ConversationHistoryPolicyTest {
     }
 
     @Test
-    fun `drops orphan assistant when size boundary splits a turn`() {
+    fun `drops an older turn atomically when size boundary would split it`() {
         val largeUser = "u".repeat(ConversationHistoryPolicy.MAX_RESTORED_CHARS - 20)
         val history = listOf(
             RuntimeMessage(true, largeUser),
@@ -50,6 +50,20 @@ class ConversationHistoryPolicyTest {
         assertTrue(selected.sumOf { it.text.length } <= ConversationHistoryPolicy.MAX_RESTORED_CHARS)
         assertTrue(selected.size <= ConversationHistoryPolicy.MAX_RESTORED_MESSAGES)
         assertTrue(selected.isEmpty() || selected.first().fromUser)
+    }
+
+    @Test
+    fun `oversized newest turn does not erase older restorable context`() {
+        val history = listOf(
+            RuntimeMessage(true, "older user"),
+            RuntimeMessage(false, "older answer"),
+            RuntimeMessage(true, "x".repeat(ConversationHistoryPolicy.MAX_RESTORED_CHARS + 1)),
+            RuntimeMessage(false, "latest answer"),
+        )
+
+        val selected = ConversationHistoryPolicy.select(history)
+
+        assertEquals(listOf("older user", "older answer"), selected.map { it.text })
     }
 
     @Test
