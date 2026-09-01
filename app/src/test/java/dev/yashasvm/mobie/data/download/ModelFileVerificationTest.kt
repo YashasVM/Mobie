@@ -45,4 +45,32 @@ class ModelFileVerificationTest {
             file.delete()
         }
     }
+
+    @Test
+    fun `installed length detects truncation even without a checksum`() {
+        val file = File.createTempFile("mobie-installed-length", ".litertlm")
+        try {
+            file.writeBytes(byteArrayOf(1, 2, 3, 4))
+            val properties = Properties()
+            ModelFileVerification.stampInstalledLength(properties, file)
+
+            assertTrue(ModelFileVerification.matchesInstalledLength(properties, file))
+
+            file.writeBytes(byteArrayOf(1, 2))
+            assertFalse(ModelFileVerification.matchesInstalledLength(properties, file))
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun `legacy metadata without installed length remains readable`() {
+        val file = File.createTempFile("mobie-legacy-length", ".litertlm")
+        try {
+            file.writeBytes(byteArrayOf(1, 2, 3))
+            assertTrue(ModelFileVerification.matchesInstalledLength(Properties(), file))
+        } finally {
+            file.delete()
+        }
+    }
 }
