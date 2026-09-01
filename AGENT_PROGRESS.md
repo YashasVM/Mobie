@@ -17,6 +17,7 @@
 - Threaded the chosen device-specific artifact through compatibility state, download identity, cancellation, completed-file lookup, runtime adapter selection, chat resets/history switching, and installed-model restoration. Installed metadata now preserves the original Hugging Face artifact filename so context/quantization identity survives app restarts.
 
 ## In progress
+- Added Android thermal-state awareness: severe thermal pressure downgrades model recommendations to a warning, while critical thermal pressure blocks new model loads/generation and is rechecked during active decode. Exact-tip CI is pending.
 - Make catalog/model-detail presentation use the same device-selected artifact as the functional lifecycle; a few UI-only `bestArtifact` references can still show a different size/status/file than Mobie will actually download.
 - Continue auditing real-device performance constraints and safe accelerator/backend selection.
 - Use measured CPU prefill/decode baselines to identify changes that improve TTFT/tokens-per-second without increasing RAM or instability.
@@ -24,7 +25,7 @@
 ## Tests performed
 - Exact per-device lifecycle tip `8c4673b5` passed JVM unit tests, Android lint, debug APK build, emulator smoke/integration tests, and the real LiteRT-LM Qwen E2E workflow.
 - Added Android persistence coverage proving an installed `Qwen3-0.6B-int4-ekv2048.litertlm` keeps its original artifact identity, restores the 2048-token context hint/INT4 metadata, and resolves the hashed local file correctly after reconstruction.
-- The new persistence test initially failed test discovery because its expression-body `@Test` returned the Boolean result of `deleteRecursively()`; the root cause was fixed by making the test return `Unit`, after which the exact-tip emulator suite passed.
+- Added JVM coverage for thermal recommendation behavior and runtime admission: severe thermal pressure warns; critical thermal pressure blocks model load and generation; severe-but-not-critical pressure does not hard-stop an already usable runtime.
 - Existing validation covers interrupted-transfer resume, explicit download cancellation/socket close, bounded history restoration, cancellation-safe inference, transactional conversation reset, load/decode memory admission, hardware-target exclusion, context inference, and per-device artifact selection.
 
 ## Benchmarks
@@ -38,7 +39,7 @@
 - GGUF remains intentionally unavailable; Mobie v1 currently relies on published LiteRT-LM artifacts.
 - Emulator validation proves CPU LiteRT-LM execution but not real ARM phone performance, thermal/battery behavior, or accelerator behavior.
 - GPU/NPU selection remains disabled until representative physical-device evidence shows it is safe and beneficial.
-- Hardware-targeted LiteRT bundles remain deliberately unsupported by the generic runtime even on apparently matching SoCs.
+- Hardware-targeted LiteRT bundles remain deliberately unsupported by the generic runtime even on apparently matching SoCs; current LiteRT NPU artifacts can require vendor dispatch libraries and exact SoC/runtime combinations.
 - Catalog/model-detail UI still has a few display-only `bestArtifact` references; functional download/load state is already pinned to the device-selected artifact, but presentation should be aligned next.
 - Artifacts without recognized context metadata still use a conservative 4096-token estimate because LiteRT-LM does not expose a cheap pre-load package metadata API.
 - Restored-context sizing still uses a conservative character budget because LiteRT-LM does not expose a cheap pre-conversation token-count API.
@@ -46,6 +47,7 @@
 
 ## Inspect before merging
 - Verify recommendations and selected variants on real low-RAM phones and under deliberate memory pressure.
+- Verify severe/critical thermal behavior on a physical phone under sustained local inference; emulator/JVM tests cannot validate OEM thermal reporting or real throttling behavior.
 - Review LiteRT artifact ranking against current repositories containing multiple quantization/context variants and SoC/NPU-specific bundles.
 - Compare context-aware RAM estimates against real ARM-device RSS for 1K/2K/4K/32K/64K cache variants.
 - Verify the displayed model package exactly matches the device-selected/downloaded artifact after the remaining UI consistency work.
