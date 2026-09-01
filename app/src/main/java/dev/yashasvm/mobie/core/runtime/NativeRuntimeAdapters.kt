@@ -60,6 +60,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     private var visionReady = false
     private var committedHistory: List<RuntimeMessage> = emptyList()
     private var conversationDirty = false
+    @Volatile private var cancelRequested = false
 
     override suspend fun load(
         modelPath: String,
@@ -81,12 +82,14 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                         conversation = loadedEngine.engine.createConversation(conversationConfig(restored))
                         committedHistory = restored
                         conversationDirty = false
+                        cancelRequested = false
                     } catch (error: Throwable) {
                         loadedEngine.engine.close()
                         engine = null
                         visionReady = false
                         committedHistory = emptyList()
                         conversationDirty = false
+                        cancelRequested = false
                         throw error
                     }
                 }.onFailure(::rethrowCancellation)
@@ -108,6 +111,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                         conversation = replacement
                         committedHistory = restored
                         conversationDirty = false
+                        cancelRequested = false
                         previous?.close()
                         Unit
                     }.onFailure(::rethrowCancellation)
@@ -121,8 +125,10 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         config: GenerationConfig,
     ): Flow<InferenceEvent> {
         val partialAnswer = StringBuilder()
+        var interruptedRecorded = false
         return flow {
             generation.withLock {
+                cancelRequested = false
                 ensureGenerationMemoryHeadroom()
                 if (conversationDirty) rebuildConversationFromCommittedHistory()
                 val activeConversation = conversation
@@ -143,36 +149,48 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                 var firstTokenAt: Long? = null
                 var emittedVisibleOutput = false
                 var emittedReasoning = false
-                activeConversation.sendMessageAsync(contents, maxOutputToken = config.maxNewTokens).collect { chunk ->
-                    currentCoroutineContext().ensureActive()
-                    val now = SystemClock.elapsedRealtime()
-                    if (RuntimeLoadMemoryPolicy.shouldRecheckGenerationMemory(lastMemoryCheckAt, now)) {
-                        lastMemoryCheckAt = now
-                        try {
-                            ensureGenerationMemoryHeadroom()
-                        } catch (error: IllegalStateException) {
-                            activeConversation.cancelProcess()
-                            throw error
+                try {
+                    activeConversation.sendMessageAsync(contents, maxOutputToken = config.maxNewTokens).collect { chunk ->
+                        currentCoroutineContext().ensureActive()
+                        if (cancelRequested) throw CancellationException("Generation cancelled")
+                        val now = SystemClock.elapsedRealtime()
+                        if (RuntimeLoadMemoryPolicy.shouldRecheckGenerationMemory(lastMemoryCheckAt, now)) {
+                            lastMemoryCheckAt = now
+                            try {
+                                ensureGenerationMemoryHeadroom()
+                            } catch (error: IllegalStateException) {
+                                activeConversation.cancelProcess()
+                                throw error
+                            }
+                        }
+                        val reasoning = chunk.channels.entries
+                            .filter { (name, _) -> name.lowercase() in REASONING_CHANNELS }
+                            .joinToString("") { it.value }
+                        val visibleChannels = chunk.channels.entries
+                            .filterNot { (name, _) -> name.lowercase() in REASONING_CHANNELS }
+                            .joinToString("") { it.value }
+                        val answer = visibleChannels.ifEmpty { if (reasoning.isEmpty()) chunk.toString() else "" }
+                        if (reasoning.isNotEmpty()) {
+                            if (firstTokenAt == null) firstTokenAt = SystemClock.elapsedRealtime()
+                            emittedReasoning = true
+                            emit(InferenceEvent.Token(reasoning, thinking = true))
+                        }
+                        if (answer.isNotEmpty()) {
+                            if (firstTokenAt == null) firstTokenAt = SystemClock.elapsedRealtime()
+                            emittedVisibleOutput = true
+                            partialAnswer.append(answer)
+                            emit(InferenceEvent.Token(answer))
                         }
                     }
-                    val reasoning = chunk.channels.entries
-                        .filter { (name, _) -> name.lowercase() in REASONING_CHANNELS }
-                        .joinToString("") { it.value }
-                    val visibleChannels = chunk.channels.entries
-                        .filterNot { (name, _) -> name.lowercase() in REASONING_CHANNELS }
-                        .joinToString("") { it.value }
-                    val answer = visibleChannels.ifEmpty { if (reasoning.isEmpty()) chunk.toString() else "" }
-                    if (reasoning.isNotEmpty()) {
-                        if (firstTokenAt == null) firstTokenAt = SystemClock.elapsedRealtime()
-                        emittedReasoning = true
-                        emit(InferenceEvent.Token(reasoning, thinking = true))
-                    }
-                    if (answer.isNotEmpty()) {
-                        if (firstTokenAt == null) firstTokenAt = SystemClock.elapsedRealtime()
-                        emittedVisibleOutput = true
-                        partialAnswer.append(answer)
-                        emit(InferenceEvent.Token(answer))
-                    }
+                    if (cancelRequested) throw CancellationException("Generation cancelled")
+                } catch (error: Throwable) {
+                    // Cancellation of the collecting coroutine does not guarantee the native decoder
+                    // has stopped. Stop it before releasing the generation mutex so a fast follow-up
+                    // cannot rebuild/close a conversation while LiteRT is still decoding into it.
+                    activeConversation.cancelProcess()
+                    rememberInterruptedTurn(prompt, partialAnswer.toString().takeIf { it.isNotBlank() })
+                    interruptedRecorded = true
+                    throw error
                 }
                 val generationFinishedAt = SystemClock.elapsedRealtime()
                 val benchmark = activeConversation.getBenchmarkInfo()
@@ -199,17 +217,21 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                     emit(InferenceEvent.Error(message))
                     return@withLock
                 }
+                if (cancelRequested) throw CancellationException("Generation cancelled")
                 rememberCompletedTurn(prompt, partialAnswer.toString())
                 emit(InferenceEvent.Complete)
             }
         }.catch { error ->
-            rememberInterruptedTurn(prompt, partialAnswer.toString().takeIf { it.isNotBlank() })
+            if (!interruptedRecorded) {
+                rememberInterruptedTurn(prompt, partialAnswer.toString().takeIf { it.isNotBlank() })
+            }
             rethrowCancellation(error)
             emit(InferenceEvent.Error(error.message ?: "Inference failed"))
         }.flowOn(Dispatchers.Default)
     }
 
     override suspend fun cancel() = withContext(Dispatchers.Default) {
+        cancelRequested = true
         conversationDirty = true
         conversation?.cancelProcess()
         Unit
@@ -352,6 +374,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         visionReady = false
         committedHistory = emptyList()
         conversationDirty = false
+        cancelRequested = false
     }
 
     private fun currentAppRamBytes(): Long {
