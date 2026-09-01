@@ -274,6 +274,9 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         val reason = RuntimeLoadMemoryPolicy.generationBlockReason(
             isLowMemory = memory.lowMemory,
             thermalStatus = currentThermalStatus(),
+            availableRamBytes = memory.availMem,
+            lowMemoryThresholdBytes = memory.threshold,
+            totalRamBytes = memory.totalMem,
         )
         if (reason != null) throw IllegalStateException(reason)
     }

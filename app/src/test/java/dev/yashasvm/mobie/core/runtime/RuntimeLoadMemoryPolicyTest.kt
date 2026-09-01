@@ -75,6 +75,30 @@ class RuntimeLoadMemoryPolicyTest {
     }
 
     @Test
+    fun blocksGenerationBeforeCrossingAndroidLowMemoryThreshold() {
+        val reason = RuntimeLoadMemoryPolicy.generationBlockReason(
+            isLowMemory = false,
+            availableRamBytes = 620L * MIB,
+            lowMemoryThresholdBytes = 512L * MIB,
+            totalRamBytes = 8L * GIB,
+        )
+        assertNotNull(reason)
+        assertTrue(reason!!.contains("approaching Android's low-memory threshold"))
+    }
+
+    @Test
+    fun allowsGenerationWithHealthyFreeRamHeadroom() {
+        assertNull(
+            RuntimeLoadMemoryPolicy.generationBlockReason(
+                isLowMemory = false,
+                availableRamBytes = 900L * MIB,
+                lowMemoryThresholdBytes = 512L * MIB,
+                totalRamBytes = 8L * GIB,
+            ),
+        )
+    }
+
+    @Test
     fun allowsGenerationAtSevereButNotCriticalThermalPressure() {
         assertNull(RuntimeLoadMemoryPolicy.generationBlockReason(isLowMemory = false, thermalStatus = 3))
     }

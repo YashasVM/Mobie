@@ -44,11 +44,23 @@ internal object RuntimeLoadMemoryPolicy {
     fun generationBlockReason(
         isLowMemory: Boolean,
         thermalStatus: Int = THERMAL_STATUS_NONE,
-    ): String? = when {
-        isLowMemory -> "Android reports active memory pressure. Close other apps before starting generation."
-        thermalStatus >= THERMAL_STATUS_CRITICAL ->
-            "Android reports critical thermal pressure. Let the device cool before starting generation."
-        else -> null
+        availableRamBytes: Long = 0,
+        lowMemoryThresholdBytes: Long = 0,
+        totalRamBytes: Long = 0,
+    ): String? {
+        if (isLowMemory) {
+            return "Android reports active memory pressure. Close other apps before starting generation."
+        }
+        if (thermalStatus >= THERMAL_STATUS_CRITICAL) {
+            return "Android reports critical thermal pressure. Let the device cool before starting generation."
+        }
+        if (availableRamBytes > 0 && lowMemoryThresholdBytes > 0) {
+            val proactiveReserve = max(MIN_GENERATION_HEADROOM_BYTES, totalRamBytes / 50)
+            if (availableRamBytes <= lowMemoryThresholdBytes + proactiveReserve) {
+                return "Free RAM is approaching Android's low-memory threshold. Close other apps before continuing local generation."
+            }
+        }
+        return null
     }
 
     /** Avoid querying Android system services for every streamed token while reacting quickly to pressure. */
@@ -57,6 +69,7 @@ internal object RuntimeLoadMemoryPolicy {
 
     private const val GENERATION_MEMORY_RECHECK_MS = 500L
     private const val MIB = 1024L * 1024L
+    private const val MIN_GENERATION_HEADROOM_BYTES = 128L * MIB
     private const val THERMAL_STATUS_NONE = 0
     private const val THERMAL_STATUS_CRITICAL = 4
 }
