@@ -35,6 +35,7 @@ data class AiModel(
     val license: String? = null,
     val type: ModelType = ModelType.TEXT_GENERATION,
     val artifacts: List<ModelArtifact> = emptyList(),
+    val preferredArtifactFileName: String? = null,
 ) {
     val supportsVision: Boolean get() = type == ModelType.VISION
 
@@ -44,6 +45,7 @@ data class AiModel(
             .filter { it.executionTarget == ArtifactExecutionTarget.GENERIC }
             .minWithOrNull(
                 compareBy<ModelArtifact>(
+                    { if (it.fileName == preferredArtifactFileName) 0 else 1 },
                     { if (it.format == ModelFormat.LITERT_LM) 0 else 1 },
                     { if (estimateLiteRtRuntimeMemory(it) != null) 0 else 1 },
                     { estimateLiteRtRuntimeMemory(it)?.estimatedRamBytes ?: Long.MAX_VALUE },
@@ -52,6 +54,11 @@ data class AiModel(
                     { it.sizeBytes.takeIf { size -> size > 0 } ?: Long.MAX_VALUE },
                 ),
             )
+
+    fun preferArtifact(artifact: ModelArtifact?): AiModel {
+        val preferred = artifact?.fileName
+        return if (preferredArtifactFileName == preferred) this else copy(preferredArtifactFileName = preferred)
+    }
 
     private fun quantizationRank(quantization: String?): Int {
         val normalized = quantization?.uppercase() ?: return 20
