@@ -84,6 +84,12 @@ class CompatibilityResolver {
                 "Android reports active memory pressure. Free memory before loading this model.",
             )
         }
+        if (device.thermalStatus >= THERMAL_STATUS_SEVERE) {
+            return result(
+                Compatibility.WARNING,
+                "Android reports severe thermal pressure. Let the device cool before loading a local model.",
+            )
+        }
         if (estimatedRam > safeAvailableRam) {
             val reason = if (device.isLowRamDevice) {
                 "The model may fit, but this low-RAM device needs extra Android memory headroom. Close other apps first."
@@ -97,5 +103,6 @@ class CompatibilityResolver {
 
     private companion object {
         const val MIB = 1024L * 1024L
+        const val THERMAL_STATUS_SEVERE = 3
     }
 }
