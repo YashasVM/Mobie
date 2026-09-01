@@ -21,11 +21,12 @@
 - Persist the checksum-verification fingerprint directly at successful download completion, and reuse it inside the download worker itself when WorkManager restarts/retries an already verified destination.
 
 ## In progress
-- Finish exact-tip CI validation for the proactive generation-memory headroom guard.
+- Validate GPU-first LiteRT vision initialization: keep text inference on CPU, prefer GPU only for the vision encoder, fall back to CPU vision, then text-only if neither vision backend initializes.
 - Continue auditing real-device performance constraints and safe accelerator/backend selection.
 - Use measured CPU prefill/decode baselines to identify changes that improve TTFT/tokens-per-second without increasing RAM or instability.
 
 ## Tests performed
+- Exact proactive generation-memory headroom tip `e0d0fadf` passed Android CI after JVM tests, lint/debug APK build, emulator integration, and real Qwen LiteRT-LM E2E validation.
 - Exact worker-side checksum-fingerprint tip `0d994054` passed Android CI after JVM tests, lint/debug APK build, emulator integration, and real Qwen LiteRT-LM E2E validation.
 - Exact direct-fingerprint-stamping tip `8ee9de7b` passed Android CI after JVM tests, lint/debug APK build, emulator integration, and real Qwen LiteRT-LM E2E validation.
 - Exact checksum-caching tip `2dd582ca` passed Android CI after JVM tests, lint/debug APK build, emulator integration, and real Qwen LiteRT-LM E2E validation.
@@ -42,16 +43,17 @@
 - Same loaded conversation, second prompt: 21.41 prefill tok/s, 7.81 decode tok/s, 1.375 s TTFT, 2.965 s total, ~1.02 GiB app RAM.
 - After conversation-only reset with restored history: 26.56 prefill tok/s, 7.80 decode tok/s, 2.264 s TTFT, 3.214 s total, ~1.02 GiB app RAM.
 - Conversation-only reset setup measured 2.95 ms versus 1524.24 ms for full unload + reload on the CI CPU emulator (~517x less setup wall time). Emulator regression baseline only.
-- No physical-device performance claim yet; checksum-read savings and proactive memory admission are structurally tested but not yet wall-time/LMK benchmarked on representative phones.
+- No physical-device performance claim yet; checksum-read savings, proactive memory admission, and GPU vision acceleration still require representative-phone measurements.
 
 ## Known problems / regressions
 - GGUF remains intentionally unavailable; Mobie v1 currently relies on published LiteRT-LM artifacts.
 - Emulator validation proves CPU LiteRT-LM execution but not real ARM phone performance, thermal/battery behavior, or accelerator behavior.
-- GPU/NPU selection remains disabled until representative physical-device evidence shows it is safe and beneficial.
+- Main-model GPU/NPU selection remains disabled until representative physical-device evidence shows it is safe and beneficial.
 - Hardware-targeted LiteRT bundles remain deliberately unsupported by the generic runtime even on apparently matching SoCs; current LiteRT NPU artifacts can require vendor dispatch libraries and exact SoC/runtime combinations.
 - Artifacts without recognized context metadata still use a conservative 4096-token estimate because LiteRT-LM does not expose a cheap pre-load package metadata API.
 - Restored-context sizing still uses a conservative character budget because LiteRT-LM does not expose a cheap pre-conversation token-count API.
 - Text-only fallback preserves chat when vision initialization fails but cannot make vision work on unsupported hardware.
+- GPU-first vision initialization still needs physical-device validation across Adreno/Mali/Tensor devices; CPU vision remains the fallback when the GPU delegate cannot initialize.
 - Proactive generation-memory headroom is deliberately conservative and still needs physical-device validation against OEM LMK behavior.
 
 ## Inspect before merging
@@ -62,5 +64,6 @@
 - Verify catalog cards and model details show the same package size/status/file that Mobie actually downloads.
 - Benchmark installed-model discovery, immediate post-download lookup, and WorkManager restart/retry with multi-GB files; modifying the file must still force SHA-256 revalidation.
 - Exercise sustained generation while forcing available RAM toward the LMK threshold; confirm Mobie cancels before an OS kill without aborting healthy generations too early.
+- Test a real vision-capable `.litertlm` model on representative Adreno/Mali/Tensor phones; compare GPU-vision initialization, image TTFT/prefill, repeated image turns, CPU fallback, RAM, thermals, and crashes.
 - Treat emulator performance figures as regression baselines only; collect comparable physical-device measurements before making performance claims.
-- Verify conversation reuse, long-history switching, memory guards, and a real vision-capable `.litertlm` model on representative phones.
+- Verify conversation reuse, long-history switching, memory guards, and multimodal fallback behavior on representative phones.
