@@ -89,6 +89,10 @@ class LocalPersistenceTest {
         directory.deleteRecursively()
         directory.mkdirs()
         val artifact = File(directory, "model.litertlm").apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        val liteRtCache = File(directory, ".litert-cache").apply {
+            mkdirs()
+            File(this, "compiled-cache.bin").writeBytes(byteArrayOf(4, 5, 6))
+        }
         Properties().apply {
             setProperty("modelId", modelId)
             setProperty("title", "Deletable model")
@@ -101,7 +105,9 @@ class LocalPersistenceTest {
 
         val manager = ModelDownloadManager(context)
         val entry = manager.installedModels().single { it.model.id == modelId }
+        assertTrue(liteRtCache.isDirectory)
         assertTrue(manager.deleteInstalled(entry.model))
         assertFalse(directory.exists())
+        assertFalse(liteRtCache.exists())
     }
 }
