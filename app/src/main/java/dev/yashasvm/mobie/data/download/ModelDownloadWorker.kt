@@ -23,6 +23,7 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.Properties
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -30,7 +31,10 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 
 class ModelDownloadWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
-    private val client = OkHttpClient()
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .build()
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         if (runAttemptCount >= MAX_ATTEMPTS) {
@@ -319,6 +323,8 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
         const val KEY_PATH = "path"
         const val KEY_ERROR = "error"
         const val MAX_ATTEMPTS = 4
+        private const val CONNECT_TIMEOUT_SECONDS = 30L
+        private const val READ_TIMEOUT_SECONDS = 60L
         private const val PROGRESS_INTERVAL_MS = 250L
         private const val CHANNEL_ID = "model_downloads"
     }
