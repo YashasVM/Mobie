@@ -17,6 +17,7 @@
 - Prevented persisted user-only turns from cancelled/failed generations from being replayed into LiteRT before the next user prompt; completed older context is still restored.
 
 ## In progress
+- Persist LiteRT compiled/optimized cache artifacts beside each installed model instead of Android's evictable app cache, so subsequent loads can reuse optimization work and deleting the model removes its cache with it; Android CI/E2E validation is pending.
 - Continue auditing safe runtime/backend choices that improve TTFT/tokens-per-second without increasing crashes, RAM pressure, or thermal load; do not enable main-model GPU/NPU paths without representative physical-device evidence.
 
 ## Tests actually performed
@@ -27,12 +28,14 @@
 - Exact interrupted-generation recovery tip `13dda38d`, image-capacity tip `6b33793a`, GPU-first vision tip `cab21c13`, and proactive generation-memory tip `e0d0fadf` passed the same full Android CI/E2E pipeline.
 - Exact checksum-worker reuse tip `0d994054`, direct fingerprint-stamping tip `8ee9de7b`, checksum-caching tip `2dd582ca`, device-selected presentation tip `c8d1e06f`, thermal safeguard tip `a6721f61`, and per-device lifecycle tip `8c4673b5` all passed their relevant JVM/Android/emulator/E2E validation.
 - Existing regression coverage includes interrupted download resume, cancellation/socket close, checksum mutation fallback, installed artifact identity, bounded/turn-aware history restoration, transactional reset, load/decode memory admission, hardware-target exclusion, context inference, per-device artifact selection, thermal admission, device-selected artifact presentation, and first-load storage headroom.
+- Added Android persistence coverage that verifies deleting an installed model also removes its nested LiteRT optimized-cache directory.
 
 ## Real benchmarks / performance improvements
 - CPU-emulator Qwen3-0.6B INT4 baseline: 20.64 prefill tok/s, 7.51 decode tok/s, 1.468 s TTFT, 3.955 s total, ~1.02 GiB app RAM.
 - Same loaded conversation, second prompt: 21.41 prefill tok/s, 7.81 decode tok/s, 1.375 s TTFT, 2.965 s total, ~1.02 GiB app RAM.
 - Conversation-only reset with restored history: 26.56 prefill tok/s, 7.80 decode tok/s, 2.264 s TTFT, 3.214 s total, ~1.02 GiB app RAM.
 - Conversation-only reset setup: 2.95 ms versus 1524.24 ms for full unload/reload on the CI CPU emulator (~517× less setup wall time).
+- No speed claim is attached to the persistent-cache change until repeated cold-load measurements are collected; the change follows LiteRT's documented cache reuse path.
 - No physical-device speed claim yet; emulator numbers are regression baselines only.
 
 ## Known problems / regressions
@@ -52,6 +55,7 @@
 - Verify per-device recommendations and artifact choices on low-RAM phones, under storage pressure, near Android LMK thresholds, and when repositories publish both generic and vendor-targeted LiteRT packages.
 - Compare context-aware RAM estimates against real ARM RSS for multiple cache/context variants.
 - Measure first-load LiteRT cache growth for several model sizes on physical devices and tune the conservative storage reserve if needed.
+- Measure first and subsequent cold model loads after process restarts; verify the per-model persistent LiteRT cache is reused, remains bounded, and disappears when the installed model is deleted.
 - Benchmark multi-GB installed-model discovery/retry paths and confirm file mutation still forces real SHA-256 revalidation.
 - Test model downloads over a deliberately stalled/throttled connection and confirm transient gaps longer than 10 s no longer consume retries while genuine dead connections still fail and resume cleanly.
 - Treat emulator performance figures as regression baselines only and collect comparable physical-device measurements before merging accelerator/performance claims.
