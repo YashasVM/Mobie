@@ -14,9 +14,10 @@
 - Improved Hugging Face catalog caching, request cancellation, partial metadata failure handling, and modern LiteRT quantization/context-name parsing.
 - Rebuilds LiteRT-LM conversation state from canonical committed turns after interrupted generation; cancellation now stops native decode before releasing the generation mutex, and real-model E2E verifies immediate follow-up recovery.
 - Made bounded LiteRT history restoration turn-aware so oversized latest turns do not erase older valid restorable context.
+- Prevented persisted user-only turns from cancelled/failed generations from being replayed into LiteRT before the next user prompt; completed older context is still restored.
 
 ## In progress
-- Continue auditing safe runtime/backend choices that improve TTFT/tokens-per-second without increasing crashes, RAM pressure, or thermal load; do not enable main-model GPU/NPU paths without representative physical-device evidence.
+- Validate the incomplete-turn recovery change at exact tip, then continue auditing safe runtime/backend choices that improve TTFT/tokens-per-second without increasing crashes, RAM pressure, or thermal load; do not enable main-model GPU/NPU paths without representative physical-device evidence.
 
 ## Tests actually performed
 - Exact first-load storage-headroom tip `6855974d` passed Android CI: JVM tests, lint/debug APK build, emulator integration, and real Qwen LiteRT-LM E2E.
@@ -45,7 +46,7 @@
 
 ## Inspect before merging
 - Run a real vision-capable `.litertlm` model on representative Adreno/Mali/Tensor phones; verify image understanding, repeated image turns, GPU→CPU fallback, TTFT/prefill, RAM, thermals, and crashes.
-- Cancel generation after partial output and after memory/thermal interruption, then send another prompt; verify the next response uses the same visible/persisted history rather than stale native context.
+- Cancel generation both before the first assistant token and after partial output, then send another prompt; verify persisted user-only cancelled turns stay visible but are not replayed as stale native context, and partial-output recovery still matches visible history.
 - Exercise very long prompts and responses across cancellation/reset; verify oversized latest turns are omitted from native restore without wiping older valid context.
 - Verify per-device recommendations and artifact choices on low-RAM phones, under storage pressure, near Android LMK thresholds, and when repositories publish both generic and vendor-targeted LiteRT packages.
 - Compare context-aware RAM estimates against real ARM RSS for multiple cache/context variants.
