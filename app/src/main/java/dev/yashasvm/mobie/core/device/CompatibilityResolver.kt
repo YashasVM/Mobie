@@ -39,6 +39,13 @@ class CompatibilityResolver {
                 0,
             )
         }
+        if (artifact.executionTarget != ArtifactExecutionTarget.GENERIC) {
+            return CompatibilityResult(
+                Compatibility.INCOMPATIBLE,
+                "This package targets device-specific acceleration that Mobie's current runtime does not support yet.",
+                0,
+            )
+        }
         if (device.supportedAbis.none { it == "arm64-v8a" || it == "x86_64" }) {
             return CompatibilityResult(Compatibility.INCOMPATIBLE, "LiteRT-LM requires a supported 64-bit device.", 0)
         }
