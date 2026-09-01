@@ -59,7 +59,7 @@ class CompatibilityResolver {
 
         val memoryEstimate = requireNotNull(estimateLiteRtRuntimeMemory(artifact))
         val estimatedRam = memoryEstimate.estimatedRamBytes
-        val requiredStorage = artifact.sizeBytes + max(artifact.sizeBytes / 20, 64L * MIB)
+        val requiredStorage = requiredStorageBytes(artifact.sizeBytes)
         val memoryReserve = max(device.lowMemoryThresholdBytes, device.totalRamBytes / 20)
         val availableFraction = if (device.isLowRamDevice) 0.75 else 0.85
         val totalFraction = if (device.isLowRamDevice) 0.70 else 0.80
@@ -75,7 +75,10 @@ class CompatibilityResolver {
             requiredStorageBytes = requiredStorage,
         )
         if (requiredStorage > device.availableStorageBytes) {
-            return result(Compatibility.INCOMPATIBLE, "Not enough free storage, including download headroom.")
+            return result(
+                Compatibility.INCOMPATIBLE,
+                "Not enough free storage for the model, download headroom, and LiteRT's first-load optimized cache.",
+            )
         }
         if (estimatedRam > device.totalRamBytes * totalFraction) {
             val reason = if (device.isLowRamDevice) {
@@ -106,6 +109,19 @@ class CompatibilityResolver {
             return result(Compatibility.WARNING, reason)
         }
         return result(Compatibility.COMPATIBLE, "Expected to fit this device with Android memory headroom reserved.")
+    }
+
+    /**
+     * LiteRT-LM optimizes model weights for the current device on first load and stores those
+     * artifacts in the configured cache directory. Reserve persistent cache space in addition to
+     * the model and download margin so a download is not recommended when first inference is
+     * likely to exhaust storage. The cache allowance is intentionally conservative until Mobie can
+     * measure per-model cache growth on representative physical devices.
+     */
+    internal fun requiredStorageBytes(modelWeightsBytes: Long): Long {
+        val downloadHeadroom = max(modelWeightsBytes / 20, 64L * MIB)
+        val optimizedCacheHeadroom = max(modelWeightsBytes * 3 / 10, 256L * MIB)
+        return modelWeightsBytes + downloadHeadroom + optimizedCacheHeadroom
     }
 
     private companion object {
