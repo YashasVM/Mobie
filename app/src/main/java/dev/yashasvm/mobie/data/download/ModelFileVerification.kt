@@ -27,6 +27,7 @@ internal object ModelFileVerification {
         if (!file.isFile) return false
         val installedLength = properties?.getProperty(KEY_INSTALLED_LENGTH)?.toLongOrNull()
             ?: return true
+        if (properties.getProperty("fileName")?.let { it != file.name } == true) return false
         return installedLength >= 0 && file.length() == installedLength
     }
 
