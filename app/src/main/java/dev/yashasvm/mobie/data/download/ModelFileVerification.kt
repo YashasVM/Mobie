@@ -11,8 +11,24 @@ import java.util.Properties
  * app-private files can reuse the verification performed by the download worker.
  */
 internal object ModelFileVerification {
+    const val KEY_INSTALLED_LENGTH = "installedLength"
     const val KEY_VERIFIED_LENGTH = "verifiedLength"
     const val KEY_VERIFIED_LAST_MODIFIED = "verifiedLastModified"
+
+    fun stampInstalledLength(properties: Properties, file: File) {
+        properties.setProperty(KEY_INSTALLED_LENGTH, file.length().toString())
+    }
+
+    /**
+     * Rejects silent truncation/replacement for newly installed artifacts even when Hugging Face did
+     * not publish a checksum. Legacy metadata without an installedLength remains readable.
+     */
+    fun matchesInstalledLength(properties: Properties?, file: File): Boolean {
+        if (!file.isFile) return false
+        val installedLength = properties?.getProperty(KEY_INSTALLED_LENGTH)?.toLongOrNull()
+            ?: return true
+        return installedLength >= 0 && file.length() == installedLength
+    }
 
     fun stamp(properties: Properties, file: File) {
         properties.setProperty(KEY_VERIFIED_LENGTH, file.length().toString())
