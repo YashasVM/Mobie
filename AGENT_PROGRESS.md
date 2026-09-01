@@ -17,9 +17,10 @@
 - Prevented persisted user-only turns from cancelled/failed generations from being replayed into LiteRT before the next user prompt; completed older context is still restored.
 
 ## In progress
-- Validate the incomplete-turn recovery change at exact tip, then continue auditing safe runtime/backend choices that improve TTFT/tokens-per-second without increasing crashes, RAM pressure, or thermal load; do not enable main-model GPU/NPU paths without representative physical-device evidence.
+- Continue auditing safe runtime/backend choices that improve TTFT/tokens-per-second without increasing crashes, RAM pressure, or thermal load; do not enable main-model GPU/NPU paths without representative physical-device evidence.
 
 ## Tests actually performed
+- Exact incomplete-turn recovery tip `ce740ee1` passed Android CI, including JVM tests, lint/debug APK build, emulator integration, and the real Qwen LiteRT-LM E2E pipeline.
 - Exact first-load storage-headroom tip `6855974d` passed Android CI: JVM tests, lint/debug APK build, emulator integration, and real Qwen LiteRT-LM E2E.
 - Exact download-timeout hardening tip `c218481c` passed the same full Android CI/E2E pipeline.
 - Exact direct hardware-target rejection tip `43a6461c`, turn-aware history tip `cfe09b4e`, and atomic-cancellation tip `005c9643` passed the same full Android CI/E2E pipeline.
