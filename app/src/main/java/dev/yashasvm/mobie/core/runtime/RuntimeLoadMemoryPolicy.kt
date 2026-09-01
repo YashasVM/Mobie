@@ -11,9 +11,13 @@ internal object RuntimeLoadMemoryPolicy {
         lowMemoryThresholdBytes: Long,
         isLowMemory: Boolean,
         isLowRamDevice: Boolean,
+        thermalStatus: Int = THERMAL_STATUS_NONE,
     ): String? {
         if (isLowMemory) {
             return "Android reports active memory pressure. Free memory before loading this model."
+        }
+        if (thermalStatus >= THERMAL_STATUS_CRITICAL) {
+            return "Android reports critical thermal pressure. Let the device cool before loading a local model."
         }
         if (modelWeightsBytes <= 0 || totalRamBytes <= 0) return null
 
@@ -37,22 +41,22 @@ internal object RuntimeLoadMemoryPolicy {
         return null
     }
 
-    /**
-     * A loaded model can still be killed by Android if a new decode starts while the system is
-     * already under LMK pressure. Do not add guessed free-RAM thresholds here: MemoryInfo.lowMemory
-     * is Android's own threshold signal and is safer than blocking healthy devices heuristically.
-     */
-    fun generationBlockReason(isLowMemory: Boolean): String? =
-        if (isLowMemory) {
-            "Android reports active memory pressure. Close other apps before starting generation."
-        } else {
-            null
-        }
+    fun generationBlockReason(
+        isLowMemory: Boolean,
+        thermalStatus: Int = THERMAL_STATUS_NONE,
+    ): String? = when {
+        isLowMemory -> "Android reports active memory pressure. Close other apps before starting generation."
+        thermalStatus >= THERMAL_STATUS_CRITICAL ->
+            "Android reports critical thermal pressure. Let the device cool before starting generation."
+        else -> null
+    }
 
-    /** Avoid querying ActivityManager for every streamed token while still reacting quickly to LMK pressure. */
+    /** Avoid querying Android system services for every streamed token while reacting quickly to pressure. */
     fun shouldRecheckGenerationMemory(lastCheckAtMs: Long, nowMs: Long): Boolean =
         nowMs - lastCheckAtMs >= GENERATION_MEMORY_RECHECK_MS
 
     private const val GENERATION_MEMORY_RECHECK_MS = 500L
     private const val MIB = 1024L * 1024L
+    private const val THERMAL_STATUS_NONE = 0
+    private const val THERMAL_STATUS_CRITICAL = 4
 }
