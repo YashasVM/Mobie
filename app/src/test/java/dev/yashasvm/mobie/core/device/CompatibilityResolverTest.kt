@@ -107,6 +107,14 @@ class CompatibilityResolverTest {
     }
 
     @Test
+    fun `severe thermal pressure warns before recommending a local model load`() {
+        val hot = device.copy(thermalStatus = 3)
+        val result = resolver.resolve(artifact(size = gib), hot)
+        assertEquals(Compatibility.WARNING, result.status)
+        assertTrue(result.reason.contains("severe thermal pressure"))
+    }
+
+    @Test
     fun `android low memory threshold is reserved from recommendation headroom`() {
         val thresholdConstrained = device.copy(availableRamBytes = 3 * gib, lowMemoryThresholdBytes = 2 * gib)
         assertEquals(Compatibility.WARNING, resolver.resolve(artifact(size = gib), thresholdConstrained).status)
