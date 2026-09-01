@@ -63,7 +63,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
 
         try {
             if (isComplete(storageDestination, expectedSize, expectedSha, verifiedMetadata)) {
-                return@withContext success(storageDestination)
+                return@withContext success(storageDestination, ModelFileVerification.localSha256(verifiedMetadata))
             }
             if (storageDestination.exists()) storageDestination.delete()
 
@@ -73,8 +73,9 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                 downloaded = 0
             }
             if (isComplete(partial, expectedSize, expectedSha)) {
+                val completedSha = sha256(partial)
                 finalizeFile(partial, storageDestination)
-                return@withContext success(storageDestination)
+                return@withContext success(storageDestination, completedSha)
             }
 
             val remaining = DownloadFilePolicy.remainingBytes(expectedSize, downloaded)
@@ -88,6 +89,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
             }.build()
 
             var transferTotal = expectedSize
+            var transferSha: String? = null
             client.newCall(request).awaitResponse().use { response ->
                 when (response.code) {
                     401, 403 -> return@withContext Result.failure(
@@ -96,8 +98,9 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                     404 -> return@withContext Result.failure(dataOf("Model artifact was not found"))
                     416 -> {
                         if (isComplete(partial, expectedSize, expectedSha)) {
+                            val completedSha = sha256(partial)
                             finalizeFile(partial, storageDestination)
-                            return@withContext success(storageDestination)
+                            return@withContext success(storageDestination, completedSha)
                         }
                         partial.delete()
                         return@withContext Result.retry()
@@ -137,6 +140,8 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                     return@withContext Result.failure(dataOf("Not enough free storage"))
                 }
 
+                val digest = MessageDigest.getInstance("SHA-256")
+                if (startAt > 0) updateDigestFromPrefix(partial, startAt, digest)
                 RandomAccessFile(partial, "rw").use { output ->
                     output.seek(startAt)
                     body.byteStream().use { input ->
@@ -149,6 +154,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                             val read = input.read(buffer)
                             if (read < 0) break
                             output.write(buffer, 0, read)
+                            digest.update(buffer, 0, read)
                             current += read
                             val now = SystemClock.elapsedRealtime()
                             if (now - lastProgressAt >= PROGRESS_INTERVAL_MS) {
@@ -164,15 +170,16 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                         }
                     }
                 }
+                transferSha = digestHex(digest)
             }
 
             if (transferTotal > 0 && partial.length() != transferTotal) return@withContext Result.retry()
-            if (!expectedSha.isNullOrBlank() && sha256(partial) != expectedSha) {
+            if (!expectedSha.isNullOrBlank() && transferSha != expectedSha) {
                 partial.delete()
                 return@withContext Result.failure(dataOf("Checksum validation failed"))
             }
             finalizeFile(partial, storageDestination)
-            success(storageDestination)
+            success(storageDestination, transferSha)
         } catch (error: CancellationException) {
             throw error
         } catch (_: IOException) {
@@ -217,18 +224,27 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
         }
     }
 
-    private fun sha256(file: File): String {
-        val digest = MessageDigest.getInstance("SHA-256")
+    private fun updateDigestFromPrefix(file: File, length: Long, digest: MessageDigest) {
+        var remaining = length
         FileInputStream(file).use { input ->
             val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-            while (true) {
-                val count = input.read(buffer)
-                if (count < 0) break
+            while (remaining > 0) {
+                val count = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+                if (count < 0) throw IOException("Partial model ended before resume offset")
                 digest.update(buffer, 0, count)
+                remaining -= count
             }
         }
-        return digest.digest().joinToString("") { "%02x".format(it) }
     }
+
+    private fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        updateDigestFromPrefix(file, file.length(), digest)
+        return digestHex(digest)
+    }
+
+    private fun digestHex(digest: MessageDigest): String =
+        digest.digest().joinToString("") { "%02x".format(it) }
 
     private suspend fun updateForeground(fileName: String, downloaded: Long, total: Long, speed: Long = 0) {
         setProgress(progressData(downloaded, total, speed))
@@ -273,8 +289,8 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
         .putLong(KEY_SPEED, speed)
         .build()
 
-    private fun success(destination: File): Result {
-        writeMetadata(destination)
+    private fun success(destination: File, verifiedSha256: String? = null): Result {
+        writeMetadata(destination, verifiedSha256)
         return Result.success(
             Data.Builder()
                 .putString(KEY_PATH, destination.absolutePath)
@@ -284,8 +300,9 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
         )
     }
 
-    private fun writeMetadata(destination: File) {
+    private fun writeMetadata(destination: File, verifiedSha256: String? = null) {
         val expectedSha = inputData.getString(KEY_SHA256).orEmpty()
+        val trustedSha = verifiedSha256?.takeIf(String::isNotBlank) ?: expectedSha.takeIf(String::isNotBlank)
         val properties = Properties().apply {
             setProperty("modelId", inputData.getString(KEY_MODEL_ID).orEmpty())
             setProperty("title", inputData.getString(KEY_TITLE).orEmpty())
@@ -299,7 +316,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
             setProperty("sha256", expectedSha)
             setProperty("quantization", inputData.getString(KEY_QUANTIZATION).orEmpty())
             ModelFileVerification.stampInstalledLength(this, destination)
-            if (expectedSha.isNotBlank()) ModelFileVerification.stamp(this, destination)
+            if (!trustedSha.isNullOrBlank()) ModelFileVerification.stamp(this, destination, trustedSha)
         }
         val metadata = File(destination.parentFile, DownloadFilePolicy.METADATA_FILE)
         val partial = File(metadata.path + ".part")
