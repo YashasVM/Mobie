@@ -167,6 +167,7 @@ class ModelDownloadManager(context: Context) {
         properties: Properties?,
         metadataFile: File,
     ): Boolean {
+        if (!ModelFileVerification.matchesInstalledLength(properties, file)) return false
         if (expectedSha.isNullOrBlank()) return true
         if (properties != null && ModelFileVerification.canReuseShaVerification(properties, file, expectedSha)) {
             return true
