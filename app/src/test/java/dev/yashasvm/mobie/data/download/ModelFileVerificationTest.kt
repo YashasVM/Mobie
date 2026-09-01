@@ -2,6 +2,7 @@ package dev.yashasvm.mobie.data.download
 
 import java.io.File
 import java.util.Properties
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -58,6 +59,28 @@ class ModelFileVerificationTest {
 
             file.writeBytes(byteArrayOf(1, 2))
             assertFalse(ModelFileVerification.matchesInstalledLength(properties, file))
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun `local digest protects checksum-less model fingerprint`() {
+        val file = File.createTempFile("mobie-local-digest", ".litertlm")
+        try {
+            file.writeBytes(byteArrayOf(1, 2, 3, 4))
+            val properties = Properties().apply { setProperty("fileName", file.name) }
+            ModelFileVerification.stampInstalledLength(properties, file)
+            ModelFileVerification.stamp(properties, file, "AABBCC")
+
+            assertEquals("aabbcc", ModelFileVerification.localSha256(properties))
+            assertTrue(ModelFileVerification.canReuseLocalVerification(properties, file))
+
+            file.writeBytes(byteArrayOf(4, 3, 2, 1))
+            val stampedMtime = properties.getProperty(ModelFileVerification.KEY_VERIFIED_LAST_MODIFIED).toLong()
+            file.setLastModified(stampedMtime + 1_000)
+            assertTrue(ModelFileVerification.matchesInstalledLength(properties, file))
+            assertFalse(ModelFileVerification.canReuseLocalVerification(properties, file))
         } finally {
             file.delete()
         }
