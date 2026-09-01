@@ -8,10 +8,12 @@ package dev.yashasvm.mobie.core.runtime
  * tokenizer count before conversation creation, so character count is used as a conservative,
  * deterministic guard in addition to the message-count limit.
  *
- * Selection is turn-aware: a restored history never starts with an orphan assistant message and
- * never keeps only half of an older completed turn. If the newest turn alone is too large to fit,
- * it is skipped so an oversized prompt cannot erase all otherwise-restorable context after a
- * cancellation/rebuild.
+ * Selection is turn-aware: a restored history never starts with an orphan assistant message,
+ * never keeps only half of an older completed turn, and never replays a user-only interrupted turn.
+ * User-only turns remain in the persisted UI transcript, but replaying one into LiteRT would leave
+ * the native conversation ending on a user message immediately before the next user prompt. If the
+ * newest complete turn alone is too large to fit, it is skipped so an oversized prompt cannot erase
+ * all otherwise-restorable context after a cancellation/rebuild.
  */
 internal object ConversationHistoryPolicy {
     const val MAX_RESTORED_MESSAGES = 20
@@ -40,6 +42,11 @@ internal object ConversationHistoryPolicy {
         var selectedAny = false
 
         for (turn in turns.asReversed()) {
+            // A stopped/failed generation can be persisted after the user prompt but before the
+            // first assistant token. Keep that visible in history, but do not seed LiteRT with an
+            // unfinished user turn that would be followed by another user message on the next send.
+            if (turn.none { !it.fromUser }) continue
+
             val turnChars = turn.sumOf { it.text.length }
             val turnMessages = turn.size
             val turnFitsAlone = turnChars <= MAX_RESTORED_CHARS && turnMessages <= MAX_RESTORED_MESSAGES

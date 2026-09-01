@@ -67,6 +67,28 @@ class ConversationHistoryPolicyTest {
     }
 
     @Test
+    fun `drops trailing user-only interrupted turn but keeps completed context`() {
+        val history = listOf(
+            RuntimeMessage(true, "completed user"),
+            RuntimeMessage(false, "completed answer"),
+            RuntimeMessage(true, "cancelled before first token"),
+        )
+
+        val selected = ConversationHistoryPolicy.select(history)
+
+        assertEquals(listOf("completed user", "completed answer"), selected.map { it.text })
+    }
+
+    @Test
+    fun `never restores a user-only conversation`() {
+        val selected = ConversationHistoryPolicy.select(
+            listOf(RuntimeMessage(true, "cancelled before first token")),
+        )
+
+        assertTrue(selected.isEmpty())
+    }
+
+    @Test
     fun `ignores blank messages and refuses a single over-budget history entry`() {
         val history = listOf(
             RuntimeMessage(false, "   "),
