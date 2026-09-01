@@ -50,8 +50,33 @@ class RuntimeLoadMemoryPolicyTest {
     }
 
     @Test
+    fun blocksModelLoadAtCriticalThermalPressure() {
+        val reason = RuntimeLoadMemoryPolicy.blockReason(
+            modelWeightsBytes = 350L * MIB,
+            totalRamBytes = 8L * GIB,
+            availableRamBytes = 5L * GIB,
+            lowMemoryThresholdBytes = 512L * MIB,
+            isLowMemory = false,
+            isLowRamDevice = false,
+            thermalStatus = 4,
+        )
+        assertNotNull(reason)
+        assertTrue(reason!!.contains("critical thermal pressure"))
+    }
+
+    @Test
     fun blocksGenerationWhenAndroidReportsLowMemory() {
         assertNotNull(RuntimeLoadMemoryPolicy.generationBlockReason(isLowMemory = true))
+    }
+
+    @Test
+    fun blocksGenerationAtCriticalThermalPressure() {
+        assertNotNull(RuntimeLoadMemoryPolicy.generationBlockReason(isLowMemory = false, thermalStatus = 4))
+    }
+
+    @Test
+    fun allowsGenerationAtSevereButNotCriticalThermalPressure() {
+        assertNull(RuntimeLoadMemoryPolicy.generationBlockReason(isLowMemory = false, thermalStatus = 3))
     }
 
     @Test
