@@ -17,19 +17,21 @@
 - Threaded the chosen device-specific artifact through compatibility state, download identity, cancellation, completed-file lookup, runtime adapter selection, chat resets/history switching, installed-model restoration, and catalog/model-detail presentation.
 - Added Android thermal-state awareness: severe thermal pressure downgrades recommendations to a warning, while critical thermal pressure blocks new model loads/generation and is rechecked during active decode.
 - Avoid repeated full-file SHA-256 reads for unchanged installed models by caching the exact verified filename/length/mtime fingerprint; changed files still force a real checksum pass.
+- Persist the checksum-verification fingerprint directly at successful download completion, and reuse it inside the download worker itself when WorkManager restarts/retries an already verified destination.
 
 ## In progress
-- Finish exact-tip CI validation for writing the checksum fingerprint directly from the download worker, avoiding an immediate second full-file SHA-256 read after a successful multi-GB download.
+- Finish exact-tip CI validation for worker-side checksum-fingerprint reuse.
 - Continue auditing real-device performance constraints and safe accelerator/backend selection.
 - Use measured CPU prefill/decode baselines to identify changes that improve TTFT/tokens-per-second without increasing RAM or instability.
 
 ## Tests performed
+- Exact direct-fingerprint-stamping tip `8ee9de7b` passed Android CI after JVM tests, lint/debug APK build, emulator integration, and real Qwen LiteRT-LM E2E validation.
 - Exact checksum-caching tip `2dd582ca` passed Android CI after JVM tests, lint/debug APK build, emulator integration, and real Qwen LiteRT-LM E2E validation.
 - Exact device-selected presentation tip `c8d1e06f` passed Android CI: JVM tests, lint/debug APK build, emulator integration, and the real Qwen LiteRT-LM E2E workflow.
 - Exact thermal-safeguard tip `a6721f61` passed Android CI after JVM tests, lint/debug APK build, emulator integration, and the real Qwen LiteRT-LM E2E workflow.
 - Exact per-device lifecycle tip `8c4673b5` passed JVM unit tests, Android lint, debug APK build, emulator smoke/integration tests, and the real LiteRT-LM Qwen E2E workflow.
-- Added focused JVM coverage for checksum-verification reuse: cached verification is accepted only for the exact checksum, stored filename, length, and last-modified fingerprint; changed files or incomplete metadata force real re-verification.
-- Added emulator coverage that a checksum-verified resumed download persists its verified length/mtime fingerprint at completion, so the first installed-model lookup can reuse the checksum result without re-reading the whole file.
+- Focused checksum-verification coverage requires the exact checksum, stored filename, length, and last-modified fingerprint; changed files or incomplete metadata force real re-verification.
+- Emulator coverage verifies a checksum-validated resumed download persists its verified length/mtime fingerprint at completion.
 - Existing validation covers interrupted-transfer resume, explicit download cancellation/socket close, installed artifact identity, bounded history restoration, cancellation-safe inference, transactional conversation reset, load/decode memory admission, hardware-target exclusion, context inference, per-device artifact selection, thermal admission, and device-selected artifact presentation.
 
 ## Benchmarks
@@ -47,7 +49,7 @@
 - Artifacts without recognized context metadata still use a conservative 4096-token estimate because LiteRT-LM does not expose a cheap pre-load package metadata API.
 - Restored-context sizing still uses a conservative character budget because LiteRT-LM does not expose a cheap pre-conversation token-count API.
 - Text-only fallback preserves chat when vision initialization fails but cannot make vision work on unsupported hardware.
-- Direct download-worker fingerprint stamping is pending exact-tip Android CI and a large-file wall-time benchmark.
+- Worker-side checksum-fingerprint reuse is pending exact-tip Android CI and a large-file wall-time benchmark.
 
 ## Inspect before merging
 - Verify recommendations and selected variants on real low-RAM phones and under deliberate memory pressure.
@@ -55,6 +57,6 @@
 - Review LiteRT artifact ranking against current repositories containing multiple quantization/context variants and SoC/NPU-specific bundles.
 - Compare context-aware RAM estimates against real ARM-device RSS for 1K/2K/4K/32K/64K cache variants.
 - Verify catalog cards and model details show the same package size/status/file that Mobie actually downloads.
-- Benchmark installed-model discovery and immediate post-download lookup with multi-GB files; modifying the file must still force SHA-256 revalidation.
+- Benchmark installed-model discovery, immediate post-download lookup, and WorkManager restart/retry with multi-GB files; modifying the file must still force SHA-256 revalidation.
 - Treat emulator performance figures as regression baselines only; collect comparable physical-device measurements before making performance claims.
 - Verify conversation reuse, long-history switching, memory guards, and a real vision-capable `.litertlm` model on representative phones.
