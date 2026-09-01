@@ -93,6 +93,13 @@ class CompatibilityResolverTest {
     }
 
     @Test
+    fun `direct compatibility rejects unsupported hardware specific artifacts`() {
+        val result = resolver.resolve(artifact(size = gib / 2, name = "model.qualcomm.npu.litertlm"), device)
+        assertEquals(Compatibility.INCOMPATIBLE, result.status)
+        assertTrue(result.reason.contains("device-specific acceleration"))
+    }
+
+    @Test
     fun `model that can fit total ram but not safe current ram warns`() {
         val constrained = device.copy(availableRamBytes = 2 * gib)
         assertEquals(Compatibility.WARNING, resolver.resolve(artifact(size = gib), constrained).status)
