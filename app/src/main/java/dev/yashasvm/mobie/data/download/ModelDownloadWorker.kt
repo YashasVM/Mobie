@@ -50,13 +50,15 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
         ).apply { mkdirs() }
         val storageDestination = File(modelDir, DownloadFilePolicy.storageFileName(fileName))
         val partial = File(storageDestination.path + ".part")
+        val metadataFile = File(modelDir, DownloadFilePolicy.METADATA_FILE)
+        val verifiedMetadata = metadataFile.takeIf(File::isFile)?.let(::readProperties)
 
         if (inputData.getBoolean(KEY_GATED, false) && HuggingFaceTokenStore(applicationContext).read().isNullOrBlank()) {
             return@withContext Result.failure(dataOf("This gated model requires a Hugging Face token"))
         }
 
         try {
-            if (isComplete(storageDestination, expectedSize, expectedSha)) {
+            if (isComplete(storageDestination, expectedSize, expectedSha, verifiedMetadata)) {
                 return@withContext success(storageDestination)
             }
             if (storageDestination.exists()) storageDestination.delete()
@@ -173,15 +175,26 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
         }
     }
 
-    private fun isComplete(file: File, expectedSize: Long, expectedSha: String?): Boolean {
+    private fun isComplete(
+        file: File,
+        expectedSize: Long,
+        expectedSha: String?,
+        verifiedMetadata: Properties? = null,
+    ): Boolean {
         if (!file.isFile) return false
         if (expectedSize > 0 && file.length() != expectedSize) return false
         return when {
+            !expectedSha.isNullOrBlank() && verifiedMetadata != null &&
+                ModelFileVerification.canReuseShaVerification(verifiedMetadata, file, expectedSha) -> true
             !expectedSha.isNullOrBlank() -> sha256(file) == expectedSha
             expectedSize > 0 -> true
             else -> false
         }
     }
+
+    private fun readProperties(file: File): Properties? = runCatching {
+        Properties().apply { file.inputStream().use(::load) }
+    }.getOrNull()
 
     private fun finalizeFile(partial: File, destination: File) {
         try {
