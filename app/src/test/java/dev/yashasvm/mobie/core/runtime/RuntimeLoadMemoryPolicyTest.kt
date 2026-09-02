@@ -75,7 +75,7 @@ class RuntimeLoadMemoryPolicyTest {
     }
 
     @Test
-    fun blocksModelLoadAtCriticalThermalPressure() {
+    fun blocksModelLoadAtSevereThermalPressure() {
         val reason = RuntimeLoadMemoryPolicy.blockReason(
             modelWeightsBytes = 350L * MIB,
             totalRamBytes = 8L * GIB,
@@ -83,10 +83,25 @@ class RuntimeLoadMemoryPolicyTest {
             lowMemoryThresholdBytes = 512L * MIB,
             isLowMemory = false,
             isLowRamDevice = false,
-            thermalStatus = 4,
+            thermalStatus = 3,
         )
         assertNotNull(reason)
-        assertTrue(reason!!.contains("critical thermal pressure"))
+        assertTrue(reason!!.contains("severe thermal pressure"))
+    }
+
+    @Test
+    fun allowsModelLoadBelowSevereThermalPressure() {
+        assertNull(
+            RuntimeLoadMemoryPolicy.blockReason(
+                modelWeightsBytes = 350L * MIB,
+                totalRamBytes = 8L * GIB,
+                availableRamBytes = 5L * GIB,
+                lowMemoryThresholdBytes = 512L * MIB,
+                isLowMemory = false,
+                isLowRamDevice = false,
+                thermalStatus = 2,
+            ),
+        )
     }
 
     @Test
@@ -95,8 +110,15 @@ class RuntimeLoadMemoryPolicyTest {
     }
 
     @Test
-    fun blocksGenerationAtCriticalThermalPressure() {
-        assertNotNull(RuntimeLoadMemoryPolicy.generationBlockReason(isLowMemory = false, thermalStatus = 4))
+    fun blocksGenerationAtSevereThermalPressure() {
+        val reason = RuntimeLoadMemoryPolicy.generationBlockReason(isLowMemory = false, thermalStatus = 3)
+        assertNotNull(reason)
+        assertTrue(reason!!.contains("severe thermal pressure"))
+    }
+
+    @Test
+    fun allowsGenerationBelowSevereThermalPressure() {
+        assertNull(RuntimeLoadMemoryPolicy.generationBlockReason(isLowMemory = false, thermalStatus = 2))
     }
 
     @Test
@@ -121,11 +143,6 @@ class RuntimeLoadMemoryPolicyTest {
                 totalRamBytes = 8L * GIB,
             ),
         )
-    }
-
-    @Test
-    fun allowsGenerationAtSevereButNotCriticalThermalPressure() {
-        assertNull(RuntimeLoadMemoryPolicy.generationBlockReason(isLowMemory = false, thermalStatus = 3))
     }
 
     @Test
