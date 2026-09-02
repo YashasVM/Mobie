@@ -80,6 +80,20 @@ class ConversationHistoryPolicyTest {
     }
 
     @Test
+    fun `drops partial interrupted assistant turn but keeps completed context`() {
+        val history = listOf(
+            RuntimeMessage(true, "completed user"),
+            RuntimeMessage(false, "completed answer"),
+            RuntimeMessage(true, "cancelled prompt", interrupted = true),
+            RuntimeMessage(false, "partial answer", interrupted = true),
+        )
+
+        val selected = ConversationHistoryPolicy.select(history)
+
+        assertEquals(listOf("completed user", "completed answer"), selected.map { it.text })
+    }
+
+    @Test
     fun `never restores a user-only conversation`() {
         val selected = ConversationHistoryPolicy.select(
             listOf(RuntimeMessage(true, "cancelled before first token")),
