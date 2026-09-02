@@ -10,16 +10,16 @@
 - Added load/generation memory admission, SEVERE thermal safeguards, first-load LiteRT cache storage headroom, persistent optimized-cache reuse, and per-device artifact selection.
 - Aligned inferred c32k/c64k/c128k-style context with both final RAM admission and native LiteRT `EngineConfig.maxNumTokens`.
 - Replacement model loads release the previous LiteRT engine before RAM admission; conversation reset/recovery closes the prior native conversation before replacement.
-- Restored LiteRT history is now UTF-8 bounded so token-dense Unicode cannot consume an unsafe share of the default 4K context; exact-tip Android CI passed.
+- Restored LiteRT history is UTF-8 bounded and scales with the configured context window while remaining capped to avoid unbounded reset prefill/TTFT cost; exact-tip Android CI passed.
 
 ## In progress
-- Scale restored-history replay to the model's configured context window. Explicit 32K/64K/128K contexts can now retain materially more completed turns than the conservative 4K fallback, with a bounded replay cap to avoid unbounded prefill/TTFT cost. Exact-tip CI pending.
+- Recognize explicit K-suffixed context/KV filename markers such as `ctx32k`, `context-64k`, `kv128k`, and `ekv2k` so these artifacts do not silently fall back to a 4K runtime/memory estimate. Focused JVM coverage added; exact-tip CI pending.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
 
 ## Tests actually performed
-- Latest validated tip `64a4ae0d` passed Android CI; the pipeline includes JVM tests, lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E path.
-- Earlier interruption recovery, vision-history restoration, backend/platform filtering, persistent LiteRT cache, resumable download, storage admission, corruption detection, thermal safeguards, context-window wiring, recommendation changes, replacement-load memory handling, and stop-generation ordering passed the same Android CI pipeline at their validated tips where applicable.
-- New JVM coverage compares 4K and 32K history replay, verifies larger contexts retain more complete turns, keeps turn boundaries intact, and caps replay at 24 KiB for large contexts; exact-tip CI is pending.
+- Latest validated tip `d5c5be75` passed Android CI; the pipeline includes JVM tests, lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E path.
+- Earlier interruption recovery, vision-history restoration, backend/platform filtering, persistent LiteRT cache, resumable download, storage admission, corruption detection, thermal safeguards, context-window wiring, recommendation changes, replacement-load memory handling, stop-generation ordering, and conversation lifecycle fixes passed the same Android CI pipeline at their validated tips where applicable.
+- New JVM coverage verifies `ctx32k`, `context-64k`, `kv128k`, and `ekv2k` resolve to their real context sizes; exact-tip CI is pending.
 
 ## Real benchmarks / performance improvements
 - CPU-emulator Qwen3-0.6B INT4 baseline: 20.64 prefill tok/s, 7.51 decode tok/s, 1.468 s TTFT, 3.955 s total, ~1.02 GiB app RAM.
@@ -28,7 +28,7 @@
 - No physical-device speed claim yet; emulator numbers are regression baselines only.
 
 ## Known problems / regressions
-- Context-aware history replay is committed but not yet exact-tip CI validated.
+- K-suffixed explicit context-marker inference is committed but not yet exact-tip CI validated.
 - Vision history and interrupted-generation recovery still need representative physical-device testing.
 - GGUF remains intentionally unavailable; v1 currently relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU execution remains disabled until representative phones show a reliable net benefit.
@@ -37,9 +37,10 @@
 
 ## Inspect before merging
 - Reopen/reset long chats on 4K and explicit 32K/64K models; verify larger contexts retain more useful recent turns without unacceptable reset TTFT or memory growth.
+- Verify K-suffixed context artifacts are recommended/admitted with the same context and KV-cache sizing used by native LiteRT initialization.
 - Switch directly between two installed LiteRT models under constrained RAM and verify the old engine is released before the next load admission.
 - Reset/recover a loaded conversation repeatedly and after cancellation; verify no native session-lifecycle failures occur.
 - Heat representative phones through MODERATE → SEVERE and verify inference blocks/stops cleanly without ANR or corrupting conversation state.
-- Test c32k/c64k/c128k artifacts and compare configured native context, RAM use, recommendation/load admission, and restored-history behavior on memory-constrained devices.
+- Test c32k/c64k/c128k and ctx/context/kv K-suffixed artifacts and compare configured native context, RAM use, recommendation/load admission, and restored-history behavior on memory-constrained devices.
 - Interrupt/resume a large real download under low storage and verify final checksum/local fingerprint behavior.
 - Run a real vision-capable `.litertlm` model on representative Adreno/Mali/Tensor phones and verify repeated/restored image turns plus GPU→CPU/text-only fallback.
