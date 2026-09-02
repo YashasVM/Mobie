@@ -9,6 +9,10 @@ class ExtendedContextInferenceTest {
         assertEquals(262_144, inferArtifactContextWindow("model_ctx256k.litertlm"))
         assertEquals(524_288, inferArtifactContextWindow("model-context-512k.litertlm"))
         assertEquals(1_048_576, inferArtifactContextWindow("model_c1024k.litertlm"))
+        assertEquals(1_048_576, inferArtifactContextWindow("model_ctx1m.litertlm"))
+        assertEquals(1_048_576, inferArtifactContextWindow("model-context-1m.litertlm"))
+        assertEquals(1_048_576, inferArtifactContextWindow("model_kv1m.litertlm"))
+        assertEquals(1_048_576, inferArtifactContextWindow("model_c1m.litertlm"))
         assertEquals(262_144, inferArtifactContextWindow("model_kv262144.litertlm"))
     }
 
