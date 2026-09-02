@@ -84,4 +84,23 @@ internal object ConversationHistoryPolicy {
 
         return selectedNewestFirst.asReversed().flatten()
     }
+
+    /**
+     * Records a failed/cancelled generation for runtime recovery without accidentally committing
+     * its prompt or partial assistant output as valid native context. The UI persists the visible
+     * interrupted turn separately; this helper only determines the in-memory LiteRT replay state.
+     */
+    fun afterInterruptedTurn(
+        committedHistory: List<RuntimeMessage>,
+        prompt: String,
+        partialAnswer: String?,
+    ): List<RuntimeMessage> {
+        val interruptedTurn = buildList {
+            add(RuntimeMessage(fromUser = true, text = prompt, interrupted = true))
+            if (!partialAnswer.isNullOrBlank()) {
+                add(RuntimeMessage(fromUser = false, text = partialAnswer, interrupted = true))
+            }
+        }
+        return select(committedHistory + interruptedTurn)
+    }
 }
