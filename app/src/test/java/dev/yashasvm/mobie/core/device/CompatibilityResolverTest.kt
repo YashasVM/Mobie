@@ -66,6 +66,23 @@ class CompatibilityResolverTest {
     }
 
     @Test
+    fun `device selector prefers measurable warning over unknown-size warning`() {
+        val model = AiModel(
+            id = "example/model",
+            title = "Example",
+            author = "example",
+            description = "",
+            artifacts = listOf(
+                artifact(size = 0, name = "unknown-size.litertlm"),
+                artifact(size = gib, name = "known-size.litertlm"),
+            ),
+        )
+        val pressured = device.copy(isLowMemory = true)
+
+        assertEquals("known-size.litertlm", resolver.selectBestArtifact(model, pressured)?.fileName)
+    }
+
+    @Test
     fun `device selector does not recommend artifacts that cannot fit storage`() {
         val model = AiModel(
             id = "example/model",
