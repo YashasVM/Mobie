@@ -24,6 +24,10 @@ class CompatibilityResolver {
         .minWithOrNull(
             compareBy<Pair<ModelArtifact, CompatibilityResult>>(
                 { (_, result) -> if (result.status == Compatibility.COMPATIBLE) 0 else 1 },
+                // Unknown publisher size yields zero RAM/storage estimates. Never let that missing
+                // metadata make an unmeasurable warning artifact look cheaper than a warning artifact
+                // whose actual footprint we can estimate.
+                { (artifact, result) -> if (artifact.sizeBytes > 0 && result.estimatedRamBytes > 0) 0 else 1 },
                 { (_, result) -> result.estimatedRamBytes.takeIf { it > 0 } ?: Long.MAX_VALUE },
                 { (_, result) -> result.requiredStorageBytes.takeIf { it > 0 } ?: Long.MAX_VALUE },
                 { (artifact, _) -> artifact.sizeBytes.takeIf { it > 0 } ?: Long.MAX_VALUE },
