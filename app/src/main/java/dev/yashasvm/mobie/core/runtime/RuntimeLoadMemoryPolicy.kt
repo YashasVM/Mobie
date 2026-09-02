@@ -12,6 +12,7 @@ internal object RuntimeLoadMemoryPolicy {
         isLowMemory: Boolean,
         isLowRamDevice: Boolean,
         thermalStatus: Int = THERMAL_STATUS_NONE,
+        contextWindowTokens: Int = DEFAULT_CONTEXT_TOKENS,
     ): String? {
         if (isLowMemory) {
             return "Android reports active memory pressure. Free memory before loading this model."
@@ -22,7 +23,12 @@ internal object RuntimeLoadMemoryPolicy {
         if (modelWeightsBytes <= 0 || totalRamBytes <= 0) return null
 
         val runtimeOverhead = max((modelWeightsBytes * 0.4).toLong(), 512L * MIB)
-        val estimatedRam = modelWeightsBytes + runtimeOverhead + 256L * MIB
+        val safeContextWindow = contextWindowTokens.coerceAtLeast(MIN_CONTEXT_TOKENS)
+        val kvCacheBytes = max(
+            MIN_KV_CACHE_BYTES,
+            DEFAULT_KV_CACHE_BYTES * safeContextWindow / DEFAULT_CONTEXT_TOKENS,
+        )
+        val estimatedRam = modelWeightsBytes + runtimeOverhead + kvCacheBytes
         val totalFraction = if (isLowRamDevice) 0.70 else 0.80
         if (estimatedRam > totalRamBytes * totalFraction) {
             return if (isLowRamDevice) {
@@ -70,6 +76,10 @@ internal object RuntimeLoadMemoryPolicy {
     private const val GENERATION_MEMORY_RECHECK_MS = 500L
     private const val MIB = 1024L * 1024L
     private const val MIN_GENERATION_HEADROOM_BYTES = 128L * MIB
+    private const val MIN_KV_CACHE_BYTES = 64L * MIB
+    private const val DEFAULT_KV_CACHE_BYTES = 256L * MIB
+    private const val DEFAULT_CONTEXT_TOKENS = 4_096
+    private const val MIN_CONTEXT_TOKENS = 128
     private const val THERMAL_STATUS_NONE = 0
     private const val THERMAL_STATUS_CRITICAL = 4
 }
