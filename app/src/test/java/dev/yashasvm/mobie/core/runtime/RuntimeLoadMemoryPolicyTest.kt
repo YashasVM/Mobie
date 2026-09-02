@@ -1,5 +1,6 @@
 package dev.yashasvm.mobie.core.runtime
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -47,6 +48,17 @@ class RuntimeLoadMemoryPolicyTest {
                 isLowRamDevice = false,
             ),
         )
+    }
+
+    @Test
+    fun resolvesRuntimeContextFromArtifactName() {
+        assertEquals(65_536, runtimeContextWindowTokens("/models/qwen3-int4-c64k.litertlm"))
+        assertEquals(32_768, runtimeContextWindowTokens("/models/gemma-context32768.litertlm"))
+    }
+
+    @Test
+    fun usesConservativeRuntimeContextWhenArtifactHasNoMarker() {
+        assertEquals(4_096, runtimeContextWindowTokens("/models/qwen3-int4.litertlm"))
     }
 
     @Test
