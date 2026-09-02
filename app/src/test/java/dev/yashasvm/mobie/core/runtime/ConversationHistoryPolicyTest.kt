@@ -94,6 +94,39 @@ class ConversationHistoryPolicyTest {
     }
 
     @Test
+    fun `runtime interrupted turn never enters committed replay history`() {
+        val committed = listOf(
+            RuntimeMessage(true, "completed user"),
+            RuntimeMessage(false, "completed answer"),
+        )
+
+        val selected = ConversationHistoryPolicy.afterInterruptedTurn(
+            committedHistory = committed,
+            prompt = "cancelled prompt",
+            partialAnswer = "partial answer",
+        )
+
+        assertEquals(listOf("completed user", "completed answer"), selected.map { it.text })
+        assertTrue(selected.none { it.text == "cancelled prompt" || it.text == "partial answer" })
+    }
+
+    @Test
+    fun `runtime cancellation before first token also preserves only committed context`() {
+        val committed = listOf(
+            RuntimeMessage(true, "completed user"),
+            RuntimeMessage(false, "completed answer"),
+        )
+
+        val selected = ConversationHistoryPolicy.afterInterruptedTurn(
+            committedHistory = committed,
+            prompt = "cancelled before output",
+            partialAnswer = null,
+        )
+
+        assertEquals(listOf("completed user", "completed answer"), selected.map { it.text })
+    }
+
+    @Test
     fun `never restores a user-only conversation`() {
         val selected = ConversationHistoryPolicy.select(
             listOf(RuntimeMessage(true, "cancelled before first token")),
