@@ -12,6 +12,7 @@ data class HistoryMessage(
     val text: String,
     val imagePath: String? = null,
     val thinking: String = "",
+    val interrupted: Boolean = false,
 )
 
 @Serializable
