@@ -270,7 +270,14 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             mutableState.update { it.copy(runtimeState = RuntimeState.ERROR, error = "No runtime for this model") }
             return
         }
-        val restored = history.map { RuntimeMessage(it.fromUser, it.text, it.interrupted) }
+        val restored = history.map {
+            RuntimeMessage(
+                fromUser = it.fromUser,
+                text = it.text,
+                interrupted = it.interrupted,
+                imagePath = it.imagePath,
+            )
+        }
         val result = runtimeLifecycle.withLock {
             if (preferReset) {
                 val reset = adapter.resetConversation(restored)
