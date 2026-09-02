@@ -199,7 +199,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                         ),
                     )
                     if (!emittedVisibleOutput) {
-                        rememberInterruptedTurn(prompt, null)
+                        rememberInterruptedTurn(prompt, null, imagePath)
                         val message = if (emittedReasoning) {
                             "The model used its output budget for reasoning before producing a final answer. Retry with a larger output limit or disable thinking for this prompt."
                         } else {
@@ -209,11 +209,11 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                         return@withLock
                     }
                     if (cancelRequested) throw CancellationException("Generation cancelled")
-                    rememberCompletedTurn(prompt, partialAnswer.toString())
+                    rememberCompletedTurn(prompt, partialAnswer.toString(), imagePath)
                     emit(InferenceEvent.Complete)
                 } catch (error: Throwable) {
                     activeConversation.cancelProcess()
-                    rememberInterruptedTurn(prompt, partialAnswer.toString().takeIf { it.isNotBlank() })
+                    rememberInterruptedTurn(prompt, partialAnswer.toString().takeIf { it.isNotBlank() }, imagePath)
                     rethrowCancellation(error)
                     emit(InferenceEvent.Error(error.message ?: "Inference failed"))
                 }
@@ -293,26 +293,45 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         previous?.close()
     }
 
-    private fun rememberCompletedTurn(prompt: String, answer: String) {
+    private fun rememberCompletedTurn(prompt: String, answer: String, imagePath: String?) {
         committedHistory = ConversationHistoryPolicy.select(
-            committedHistory + RuntimeMessage(fromUser = true, text = prompt) +
+            committedHistory + RuntimeMessage(fromUser = true, text = prompt, imagePath = imagePath) +
                 RuntimeMessage(fromUser = false, text = answer),
         )
         conversationDirty = false
     }
 
-    private fun rememberInterruptedTurn(prompt: String, partialAnswer: String?) {
+    private fun rememberInterruptedTurn(prompt: String, partialAnswer: String?, imagePath: String?) {
         committedHistory = ConversationHistoryPolicy.afterInterruptedTurn(
             committedHistory = committedHistory,
             prompt = prompt,
             partialAnswer = partialAnswer,
+            imagePath = imagePath,
         )
         conversationDirty = true
     }
 
     private fun conversationConfig(history: List<RuntimeMessage>): ConversationConfig {
-        val restored = ConversationHistoryPolicy.select(history).map {
-            if (it.fromUser) Message.user(it.text) else Message.model(it.text)
+        val selected = ConversationHistoryPolicy.select(history)
+        val restoredImageIndex = VisionHistoryPolicy.latestUsableImageIndex(
+            history = selected,
+            visionReady = visionReady,
+        ) { path ->
+            File(path).let { it.isFile && it.canRead() }
+        }
+        val restored = selected.mapIndexed { index, message ->
+            if (!message.fromUser) {
+                Message.model(message.text)
+            } else if (index == restoredImageIndex && message.imagePath != null) {
+                Message.user(
+                    Contents.of(
+                        Content.Text(message.text),
+                        Content.ImageFile(message.imagePath),
+                    ),
+                )
+            } else {
+                Message.user(message.text)
+            }
         }
         return ConversationConfig(
             initialMessages = restored,
