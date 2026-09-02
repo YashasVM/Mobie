@@ -75,8 +75,10 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         generation.withLock {
             lifecycle.withLock {
                 runCatching {
-                    ensureLoadMemoryHeadroom(modelPath)
+                    // Replacement loads must be admitted against RAM after the previous native engine is gone.
+                    // Keeping the old engine alive here can falsely reject the next model and strand stale RAM.
                     closeRuntime()
+                    ensureLoadMemoryHeadroom(modelPath)
                     ExperimentalFlags.enableBenchmark = true
                     val loadedEngine = initializeEngineWithVisionFallback(modelPath, vision)
                     try {
