@@ -95,6 +95,23 @@ class AiModelTest {
     }
 
     @Test
+    fun `backend constrained LiteRT artifacts are not treated as generic CPU packages`() {
+        val constrainedNames = listOf(
+            "model-gpu.litertlm",
+            "model.opencl.litertlm",
+            "model-adreno.litertlm",
+            "model-qnn.litertlm",
+            "model-htp.litertlm",
+            "model-hexagon.litertlm",
+            "model-google_tensor.litertlm",
+        )
+        constrainedNames.forEach { name ->
+            assertEquals(name, ArtifactExecutionTarget.HARDWARE_SPECIFIC, liteRtArtifact(name, 250, "INT4").executionTarget)
+        }
+        assertEquals(ArtifactExecutionTarget.GENERIC, liteRtArtifact("model-int4-c2048.litertlm", 300, "INT4").executionTarget)
+    }
+
+    @Test
     fun `hardware only LiteRT model has no runnable generic artifact`() {
         val npu = liteRtArtifact("model.qualcomm.sm8750.npu.litertlm", 250, "INT4")
         assertEquals(ArtifactExecutionTarget.HARDWARE_SPECIFIC, npu.executionTarget)

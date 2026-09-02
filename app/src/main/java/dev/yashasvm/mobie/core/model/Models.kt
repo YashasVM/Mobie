@@ -152,10 +152,22 @@ private fun isPlausibleContextWindow(tokens: Int): Boolean = tokens in 128..131_
 
 internal fun inferArtifactExecutionTarget(fileName: String): ArtifactExecutionTarget {
     val normalized = fileName.lowercase()
-    val hardwareSpecific =
-        Regex("(?:^|[._-])mediatek(?:[._-]|$)").containsMatchIn(normalized) ||
-            Regex("(?:^|[._-])qualcomm(?:[._-]|$)").containsMatchIn(normalized) ||
-            Regex("(?:^|[._-])npu(?:[._-]|$)").containsMatchIn(normalized)
+    val hardwareSpecificTokens = listOf(
+        "mediatek",
+        "qualcomm",
+        "npu",
+        "gpu",
+        "opencl",
+        "adreno",
+        "qnn",
+        "htp",
+        "hexagon",
+        "google_tensor",
+        "google-tensor",
+    )
+    val hardwareSpecific = hardwareSpecificTokens.any { token ->
+        Regex("(?:^|[._-])${Regex.escape(token)}(?:[._-]|$)").containsMatchIn(normalized)
+    }
     return if (hardwareSpecific) {
         ArtifactExecutionTarget.HARDWARE_SPECIFIC
     } else {
