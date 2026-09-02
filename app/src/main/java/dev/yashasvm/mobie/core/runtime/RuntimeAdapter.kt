@@ -7,7 +7,11 @@ data class GenerationConfig(
     val maxNewTokens: Int = 256,
 )
 
-data class RuntimeMessage(val fromUser: Boolean, val text: String)
+data class RuntimeMessage(
+    val fromUser: Boolean,
+    val text: String,
+    val interrupted: Boolean = false,
+)
 
 data class InferenceStats(
     val tokensPerSecond: Double,
