@@ -23,6 +23,18 @@ class ConversationHistoryPolicyTest {
     }
 
     @Test
+    fun `preserves image path on completed user turns`() {
+        val history = listOf(
+            RuntimeMessage(true, "describe this", imagePath = "/tmp/vision.jpg"),
+            RuntimeMessage(false, "a test image"),
+        )
+
+        val selected = ConversationHistoryPolicy.select(history)
+
+        assertEquals("/tmp/vision.jpg", selected.first().imagePath)
+    }
+
+    @Test
     fun `drops an older turn atomically when size boundary would split it`() {
         val largeUser = "u".repeat(ConversationHistoryPolicy.MAX_RESTORED_CHARS - 20)
         val history = listOf(
