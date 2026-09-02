@@ -164,6 +164,18 @@ internal fun inferArtifactExecutionTarget(fileName: String): ArtifactExecutionTa
         "hexagon",
         "google_tensor",
         "google-tensor",
+        // LiteRT repositories can contain platform-specific packages alongside Android artifacts.
+        // Mobie's v1 runtime is Android CPU-only for the main model, so desktop/web-targeted
+        // containers must not fall through as generic candidates simply because they use .litertlm.
+        "intel",
+        "web",
+        "webgpu",
+        "windows",
+        "linux",
+        "macos",
+        "darwin",
+        "ios",
+        "metal",
     )
     val hardwareSpecific = hardwareSpecificTokens.any { token ->
         Regex("(?:^|[._-])${Regex.escape(token)}(?:[._-]|$)").containsMatchIn(normalized)
