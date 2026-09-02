@@ -11,6 +11,7 @@ data class RuntimeMessage(
     val fromUser: Boolean,
     val text: String,
     val interrupted: Boolean = false,
+    val imagePath: String? = null,
 )
 
 data class InferenceStats(
