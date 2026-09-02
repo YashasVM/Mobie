@@ -6,9 +6,11 @@ package dev.yashasvm.mobie.core.runtime
  * The UI/history store keeps the full transcript. This policy only controls what is re-prefilled
  * into LiteRT-LM when a conversation is recreated. LiteRT-LM does not currently expose a cheap
  * tokenizer count before conversation creation, so we bound both characters and UTF-8 bytes.
- * The byte cap is deliberately conservative for the default 4K runtime context: byte-fallback
+ * The default byte cap is deliberately conservative for a 4K runtime context: byte-fallback
  * tokenizers cannot require more tokens than the number of input bytes, leaving roughly 1K tokens
  * for the next prompt, output budget, and prompt-template overhead even for token-dense Unicode.
+ * Larger explicitly configured contexts receive a proportionally larger replay budget, capped to
+ * avoid turning conversation restoration into an unbounded prefill/TTFT penalty.
  *
  * Selection is turn-aware: a restored history never starts with an orphan assistant message,
  * never keeps only half of an older completed turn, and never replays an interrupted turn. User-only
@@ -22,9 +24,17 @@ internal object ConversationHistoryPolicy {
     const val MAX_RESTORED_CHARS = 12 * 1024
     const val MAX_RESTORED_UTF8_BYTES = 3 * 1024
 
-    fun select(history: List<RuntimeMessage>): List<RuntimeMessage> {
+    private const val DEFAULT_CONTEXT_WINDOW_TOKENS = 4_096
+    private const val MAX_CONTEXT_SCALE = 8
+    private const val MAX_SCALED_MESSAGES = 64
+
+    fun select(
+        history: List<RuntimeMessage>,
+        contextWindowTokens: Int = DEFAULT_CONTEXT_WINDOW_TOKENS,
+    ): List<RuntimeMessage> {
         if (history.isEmpty()) return emptyList()
 
+        val budget = replayBudget(contextWindowTokens)
         val turns = mutableListOf<MutableList<RuntimeMessage>>()
         for (message in history) {
             val text = message.text.trim()
@@ -68,9 +78,9 @@ internal object ConversationHistoryPolicy {
             val turnUtf8Bytes = turn.sumOf { it.text.toByteArray(Charsets.UTF_8).size }
             val turnMessages = turn.size
             val turnFitsAlone =
-                turnChars <= MAX_RESTORED_CHARS &&
-                    turnUtf8Bytes <= MAX_RESTORED_UTF8_BYTES &&
-                    turnMessages <= MAX_RESTORED_MESSAGES
+                turnChars <= budget.maxChars &&
+                    turnUtf8Bytes <= budget.maxUtf8Bytes &&
+                    turnMessages <= budget.maxMessages
 
             if (!turnFitsAlone) {
                 // A single pathological latest turn should not make all prior context disappear.
@@ -79,9 +89,9 @@ internal object ConversationHistoryPolicy {
             }
 
             if (
-                selectedMessages + turnMessages > MAX_RESTORED_MESSAGES ||
-                selectedChars + turnChars > MAX_RESTORED_CHARS ||
-                selectedUtf8Bytes + turnUtf8Bytes > MAX_RESTORED_UTF8_BYTES
+                selectedMessages + turnMessages > budget.maxMessages ||
+                selectedChars + turnChars > budget.maxChars ||
+                selectedUtf8Bytes + turnUtf8Bytes > budget.maxUtf8Bytes
             ) {
                 break
             }
@@ -106,6 +116,7 @@ internal object ConversationHistoryPolicy {
         prompt: String,
         partialAnswer: String?,
         imagePath: String? = null,
+        contextWindowTokens: Int = DEFAULT_CONTEXT_WINDOW_TOKENS,
     ): List<RuntimeMessage> {
         val interruptedTurn = buildList {
             add(RuntimeMessage(fromUser = true, text = prompt, interrupted = true, imagePath = imagePath))
@@ -113,6 +124,22 @@ internal object ConversationHistoryPolicy {
                 add(RuntimeMessage(fromUser = false, text = partialAnswer, interrupted = true))
             }
         }
-        return select(committedHistory + interruptedTurn)
+        return select(committedHistory + interruptedTurn, contextWindowTokens)
     }
+
+    private fun replayBudget(contextWindowTokens: Int): ReplayBudget {
+        val safeContextTokens = contextWindowTokens.coerceAtLeast(DEFAULT_CONTEXT_WINDOW_TOKENS)
+        val scale = (safeContextTokens / DEFAULT_CONTEXT_WINDOW_TOKENS).coerceIn(1, MAX_CONTEXT_SCALE)
+        return ReplayBudget(
+            maxMessages = (MAX_RESTORED_MESSAGES * scale).coerceAtMost(MAX_SCALED_MESSAGES),
+            maxChars = MAX_RESTORED_CHARS * scale,
+            maxUtf8Bytes = MAX_RESTORED_UTF8_BYTES * scale,
+        )
+    }
+
+    private data class ReplayBudget(
+        val maxMessages: Int,
+        val maxChars: Int,
+        val maxUtf8Bytes: Int,
+    )
 }
