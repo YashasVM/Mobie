@@ -37,6 +37,7 @@ data class ChatMessage(
     val imagePath: String? = null,
     val thinking: String = "",
     val rawText: String? = null,
+    val interrupted: Boolean = false,
 )
 
 data class MobieUiState(
@@ -269,7 +270,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             mutableState.update { it.copy(runtimeState = RuntimeState.ERROR, error = "No runtime for this model") }
             return
         }
-        val restored = history.map { RuntimeMessage(it.fromUser, it.text) }
+        val restored = history.map { RuntimeMessage(it.fromUser, it.text, it.interrupted) }
         val result = runtimeLifecycle.withLock {
             if (preferReset) {
                 val reset = adapter.resetConversation(restored)
@@ -312,7 +313,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                     }
                     is InferenceEvent.Stats -> mutableState.update { it.copy(stats = event.value) }
                     is InferenceEvent.Error -> {
-                        val messages = state.value.messages.removeBlankAssistant()
+                        val messages = state.value.messages.removeBlankAssistant().markLastAssistantInterrupted()
                         persistHistory(model.id, messages)
                         mutableState.update {
                             it.copy(
@@ -338,7 +339,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         if (state.value.runtimeState != RuntimeState.GENERATING) return
         inferenceJob?.cancel()
         val model = state.value.selected
-        val messages = state.value.messages.removeBlankAssistant()
+        val messages = state.value.messages.removeBlankAssistant().markLastAssistantInterrupted()
         if (model != null) persistHistory(model.id, messages)
         mutableState.update { it.copy(runtimeState = RuntimeState.READY, messages = messages, error = null) }
         viewModelScope.launch { container.runtimes.all().forEach { it.cancel() } }
@@ -469,13 +470,15 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         container.compatibility.selectBestArtifact(model, device) ?: model.bestArtifact
 
     private fun readHistory(model: AiModel): List<ChatMessage> = container.chatHistory.read(model.id).map {
-        ChatMessage(it.fromUser, it.text, it.imagePath, it.thinking)
+        ChatMessage(it.fromUser, it.text, it.imagePath, it.thinking, interrupted = it.interrupted)
     }
 
     private fun persistHistory(modelId: String, messages: List<ChatMessage>) {
         container.chatHistory.write(
             modelId,
-            messages.map { HistoryMessage(it.fromUser, it.text, it.imagePath, it.thinking) },
+            messages.map {
+                HistoryMessage(it.fromUser, it.text, it.imagePath, it.thinking, it.interrupted)
+            },
         )
     }
 
@@ -514,6 +517,14 @@ internal fun List<ChatMessage>.updateLastAssistant(chunk: String, thinkingChunk:
             else -> (raw.substring(0, open) + raw.substring(close + tag!!.first.length + 3)).trim()
         }
         this[index] = message.copy(text = answer, thinking = thinking, rawText = raw)
+    }
+}
+
+internal fun List<ChatMessage>.markLastAssistantInterrupted(): List<ChatMessage> {
+    val index = indexOfLast { !it.fromUser }
+    if (index < 0) return this
+    return toMutableList().apply {
+        this[index] = this[index].copy(interrupted = true)
     }
 }
 
