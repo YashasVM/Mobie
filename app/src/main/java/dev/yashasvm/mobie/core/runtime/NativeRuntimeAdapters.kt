@@ -112,13 +112,15 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                         val activeEngine = engine
                             ?: throw IllegalStateException("Load a model before resetting the conversation")
                         val restored = ConversationHistoryPolicy.select(history)
-                        val replacement = activeEngine.createConversation(conversationConfig(restored))
                         val previous = conversation
+                        conversation = null
+                        previous?.close()
+                        conversationDirty = true
+                        val replacement = activeEngine.createConversation(conversationConfig(restored))
                         conversation = replacement
                         committedHistory = restored
                         conversationDirty = false
                         cancelRequested = false
-                        previous?.close()
                         Unit
                     }.onFailure(::rethrowCancellation)
                 }
@@ -292,11 +294,13 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     private fun rebuildConversationFromCommittedHistory() {
         val activeEngine = engine
             ?: throw IllegalStateException("Load a model before rebuilding the conversation")
-        val replacement = activeEngine.createConversation(conversationConfig(committedHistory))
         val previous = conversation
+        conversation = null
+        previous?.close()
+        conversationDirty = true
+        val replacement = activeEngine.createConversation(conversationConfig(committedHistory))
         conversation = replacement
         conversationDirty = false
-        previous?.close()
     }
 
     private fun rememberCompletedTurn(prompt: String, answer: String, imagePath: String?) {
