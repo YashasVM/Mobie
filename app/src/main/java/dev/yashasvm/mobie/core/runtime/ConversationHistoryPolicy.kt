@@ -33,6 +33,7 @@ internal object ConversationHistoryPolicy {
                         fromUser = true,
                         text = text,
                         interrupted = message.interrupted,
+                        imagePath = message.imagePath,
                     ),
                 )
             } else {
@@ -94,9 +95,10 @@ internal object ConversationHistoryPolicy {
         committedHistory: List<RuntimeMessage>,
         prompt: String,
         partialAnswer: String?,
+        imagePath: String? = null,
     ): List<RuntimeMessage> {
         val interruptedTurn = buildList {
-            add(RuntimeMessage(fromUser = true, text = prompt, interrupted = true))
+            add(RuntimeMessage(fromUser = true, text = prompt, interrupted = true, imagePath = imagePath))
             if (!partialAnswer.isNullOrBlank()) {
                 add(RuntimeMessage(fromUser = false, text = partialAnswer, interrupted = true))
             }
