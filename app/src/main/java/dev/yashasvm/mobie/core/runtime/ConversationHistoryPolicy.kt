@@ -5,8 +5,10 @@ package dev.yashasvm.mobie.core.runtime
  *
  * The UI/history store keeps the full transcript. This policy only controls what is re-prefilled
  * into LiteRT-LM when a conversation is recreated. LiteRT-LM does not currently expose a cheap
- * tokenizer count before conversation creation, so character count is used as a conservative,
- * deterministic guard in addition to the message-count limit.
+ * tokenizer count before conversation creation, so we bound both characters and UTF-8 bytes.
+ * The byte cap is deliberately conservative for the default 4K runtime context: byte-fallback
+ * tokenizers cannot require more tokens than the number of input bytes, leaving roughly 1K tokens
+ * for the next prompt, output budget, and prompt-template overhead even for token-dense Unicode.
  *
  * Selection is turn-aware: a restored history never starts with an orphan assistant message,
  * never keeps only half of an older completed turn, and never replays an interrupted turn. User-only
@@ -18,6 +20,7 @@ package dev.yashasvm.mobie.core.runtime
 internal object ConversationHistoryPolicy {
     const val MAX_RESTORED_MESSAGES = 20
     const val MAX_RESTORED_CHARS = 12 * 1024
+    const val MAX_RESTORED_UTF8_BYTES = 3 * 1024
 
     fun select(history: List<RuntimeMessage>): List<RuntimeMessage> {
         if (history.isEmpty()) return emptyList()
@@ -52,6 +55,7 @@ internal object ConversationHistoryPolicy {
         val selectedNewestFirst = mutableListOf<List<RuntimeMessage>>()
         var selectedMessages = 0
         var selectedChars = 0
+        var selectedUtf8Bytes = 0
         var selectedAny = false
 
         for (turn in turns.asReversed()) {
@@ -61,8 +65,12 @@ internal object ConversationHistoryPolicy {
             if (turn.none { !it.fromUser } || turn.any { it.interrupted }) continue
 
             val turnChars = turn.sumOf { it.text.length }
+            val turnUtf8Bytes = turn.sumOf { it.text.toByteArray(Charsets.UTF_8).size }
             val turnMessages = turn.size
-            val turnFitsAlone = turnChars <= MAX_RESTORED_CHARS && turnMessages <= MAX_RESTORED_MESSAGES
+            val turnFitsAlone =
+                turnChars <= MAX_RESTORED_CHARS &&
+                    turnUtf8Bytes <= MAX_RESTORED_UTF8_BYTES &&
+                    turnMessages <= MAX_RESTORED_MESSAGES
 
             if (!turnFitsAlone) {
                 // A single pathological latest turn should not make all prior context disappear.
@@ -72,7 +80,8 @@ internal object ConversationHistoryPolicy {
 
             if (
                 selectedMessages + turnMessages > MAX_RESTORED_MESSAGES ||
-                selectedChars + turnChars > MAX_RESTORED_CHARS
+                selectedChars + turnChars > MAX_RESTORED_CHARS ||
+                selectedUtf8Bytes + turnUtf8Bytes > MAX_RESTORED_UTF8_BYTES
             ) {
                 break
             }
@@ -80,6 +89,7 @@ internal object ConversationHistoryPolicy {
             selectedNewestFirst += turn
             selectedMessages += turnMessages
             selectedChars += turnChars
+            selectedUtf8Bytes += turnUtf8Bytes
             selectedAny = true
         }
 
