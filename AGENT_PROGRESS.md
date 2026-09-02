@@ -2,6 +2,7 @@
 
 ## Completed this week
 - Hardened resumable Hugging Face downloads with strict Range/size validation, cancellation that closes active calls, checksum verification, retained partials, trusted post-verification fingerprints, longer transfer timeouts, and a second storage-admission check once HTTP response headers reveal the actual remaining transfer size.
+- Stream SHA-256 while model bytes are written so fresh multi-GB downloads avoid a second full-file verification read; resumed transfers hash only the retained prefix before continuing. Persist the streamed digest for checksum-less artifacts so later same-length changes can be revalidated.
 - Added installed-model length fingerprints so newly downloaded artifacts are rejected after later truncation/replacement even when Hugging Face publishes no SHA-256; legacy metadata remains readable.
 - Verified real Qwen3-0.6B INT4 LiteRT-LM execution through Mobie: download → load → repeated generation → conversation reset/history restore → unload/reload → generation.
 - Added real inference telemetry: TTFT, total latency, prefill/decode throughput, token counts, and app RAM.
@@ -15,18 +16,17 @@
 - Improved Hugging Face catalog caching, request cancellation, partial metadata failure handling, and LiteRT quantization/context-name parsing.
 
 ## In progress
-- Stream SHA-256 while model bytes are written so fresh multi-GB downloads avoid a second full-file verification read; resumed transfers hash only the retained prefix before continuing. Persist the streamed digest for checksum-less artifacts so later same-length changes can be revalidated. Exact-tip Android CI/E2E is pending.
 - Continue auditing safe runtime/backend choices that improve TTFT/tokens-per-second without increasing crashes, RAM pressure, or thermal load; do not enable main-model GPU/NPU paths without representative physical-device evidence.
 
 ## Tests actually performed
-- Exact installed-model corruption-guard tip `5f5081a6`, resolved-response download storage tip `88c48aab`, persistent LiteRT cache tip `a9359ae7`, incomplete-turn recovery tip `ce740ee1`, first-load storage-headroom tip `6855974d`, download-timeout tip `c218481c`, direct hardware-target rejection tip `43a6461c`, turn-aware history tip `cfe09b4e`, and atomic-cancellation tip `005c9643` passed the full Android CI pipeline including JVM tests, lint/debug APK build, emulator integration, and real Qwen LiteRT-LM E2E where applicable.
-- Focused JVM coverage exists for installed-length truncation, local digest fingerprint reuse/invalidation, interrupted download resume, cancellation/socket close, checksum mutation fallback, installed artifact identity, history recovery, load/decode memory admission, hardware-target exclusion, context inference, per-device artifact selection, thermal admission, and first-load storage headroom. The new streamed-digest exact tip is awaiting CI.
+- Exact streamed-verification tip `048a7add`, installed-model corruption-guard tip `5f5081a6`, resolved-response download storage tip `88c48aab`, persistent LiteRT cache tip `a9359ae7`, incomplete-turn recovery tip `ce740ee1`, first-load storage-headroom tip `6855974d`, download-timeout tip `c218481c`, direct hardware-target rejection tip `43a6461c`, turn-aware history tip `cfe09b4e`, and atomic-cancellation tip `005c9643` passed the full Android CI pipeline including JVM tests, lint/debug APK build, emulator integration, and real Qwen LiteRT-LM E2E where applicable.
+- Focused JVM coverage exists for installed-length truncation, local digest fingerprint reuse/invalidation, interrupted download resume, cancellation/socket close, checksum mutation fallback, installed artifact identity, history recovery, load/decode memory admission, hardware-target exclusion, context inference, per-device artifact selection, thermal admission, and first-load storage headroom.
 
 ## Real benchmarks / performance improvements
 - CPU-emulator Qwen3-0.6B INT4 baseline: 20.64 prefill tok/s, 7.51 decode tok/s, 1.468 s TTFT, 3.955 s total, ~1.02 GiB app RAM.
 - Same loaded conversation, second prompt: 21.41 prefill tok/s, 7.81 decode tok/s, 1.375 s TTFT, 2.965 s total, ~1.02 GiB app RAM.
 - Conversation-only reset setup: 2.95 ms versus 1524.24 ms for full unload/reload on the CI CPU emulator (~517× less setup wall time).
-- Fresh downloads now compute SHA-256 inline with the write path instead of rereading the completed artifact solely for checksum verification; no wall-time claim until CI/physical measurements are collected.
+- Fresh downloads now compute SHA-256 inline with the write path instead of rereading the completed artifact solely for checksum verification; no wall-time claim until physical measurements are collected.
 - No physical-device speed claim yet; emulator numbers are regression baselines only.
 
 ## Known problems / regressions
