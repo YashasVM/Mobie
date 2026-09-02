@@ -56,6 +56,10 @@ class AiModelTest {
         assertEquals(1_024, inferArtifactContextWindow("MiniCPM5-1B-qualcomm-sm8750-c1024.litertlm"))
         assertEquals(32_768, inferArtifactContextWindow("MiniCPM5-1B-c32k.litertlm"))
         assertEquals(65_536, inferArtifactContextWindow("MiniCPM5-1B-c64k.litertlm"))
+        assertEquals(32_768, inferArtifactContextWindow("model_ctx32k.litertlm"))
+        assertEquals(65_536, inferArtifactContextWindow("model-context-64k.litertlm"))
+        assertEquals(131_072, inferArtifactContextWindow("model_kv128k.litertlm"))
+        assertEquals(2_048, inferArtifactContextWindow("model_ekv2k.litertlm"))
         assertNull(inferArtifactContextWindow("model.litertlm"))
     }
 
