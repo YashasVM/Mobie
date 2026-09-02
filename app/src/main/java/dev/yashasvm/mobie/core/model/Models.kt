@@ -120,6 +120,18 @@ internal fun inferArtifactQuantization(fileName: String): String? {
 internal fun inferArtifactContextWindow(fileName: String): Int? {
     val normalized = fileName.lowercase()
 
+    // Context/KV markers are published both as raw token counts (ctx32768/ekv2048) and
+    // human-readable K suffixes (ctx32k/context-64k/kv128k). Missing the latter is unsafe:
+    // the runtime would fall back to 4K and materially under-estimate KV-cache RAM.
+    val explicitK = Regex("(?:^|[._-])(?:e?kv|ctx|context)[_-]?(\\d{1,3})k(?:[._-]|$)")
+        .find(normalized)
+        ?.groupValues
+        ?.getOrNull(1)
+        ?.toIntOrNull()
+        ?.let { it * 1024 }
+        ?.takeIf(::isPlausibleContextWindow)
+    if (explicitK != null) return explicitK
+
     val explicit = Regex("(?:^|[._-])(?:e?kv|ctx|context)[_-]?(\\d{3,6})(?:[._-]|$)")
         .find(normalized)
         ?.groupValues
