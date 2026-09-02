@@ -62,6 +62,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     private var engine: Engine? = null
     private var conversation: Conversation? = null
     private var visionReady = false
+    private var contextWindowTokens = DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS
     private var committedHistory: List<RuntimeMessage> = emptyList()
     private var conversationDirty = false
     @Volatile private var cancelRequested = false
@@ -80,9 +81,11 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                     closeRuntime()
                     ensureLoadMemoryHeadroom(modelPath)
                     ExperimentalFlags.enableBenchmark = true
+                    val configuredContextWindowTokens = runtimeContextWindowTokens(modelPath)
                     val loadedEngine = initializeEngineWithVisionFallback(modelPath, vision)
                     try {
-                        val restored = ConversationHistoryPolicy.select(history)
+                        contextWindowTokens = configuredContextWindowTokens
+                        val restored = ConversationHistoryPolicy.select(history, contextWindowTokens)
                         engine = loadedEngine.engine
                         visionReady = loadedEngine.visionReady
                         conversation = loadedEngine.engine.createConversation(conversationConfig(restored))
@@ -93,6 +96,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                         loadedEngine.engine.close()
                         engine = null
                         visionReady = false
+                        contextWindowTokens = DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS
                         committedHistory = emptyList()
                         conversationDirty = false
                         cancelRequested = false
@@ -111,7 +115,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                     runCatching {
                         val activeEngine = engine
                             ?: throw IllegalStateException("Load a model before resetting the conversation")
-                        val restored = ConversationHistoryPolicy.select(history)
+                        val restored = ConversationHistoryPolicy.select(history, contextWindowTokens)
                         val previous = conversation
                         conversation = null
                         previous?.close()
@@ -307,6 +311,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         committedHistory = ConversationHistoryPolicy.select(
             committedHistory + RuntimeMessage(fromUser = true, text = prompt, imagePath = imagePath) +
                 RuntimeMessage(fromUser = false, text = answer),
+            contextWindowTokens,
         )
         conversationDirty = false
     }
@@ -317,12 +322,13 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
             prompt = prompt,
             partialAnswer = partialAnswer,
             imagePath = imagePath,
+            contextWindowTokens = contextWindowTokens,
         )
         conversationDirty = true
     }
 
     private fun conversationConfig(history: List<RuntimeMessage>): ConversationConfig {
-        val selected = ConversationHistoryPolicy.select(history)
+        val selected = ConversationHistoryPolicy.select(history, contextWindowTokens)
         val restoredImageIndex = VisionHistoryPolicy.latestUsableImageIndex(
             history = selected,
             visionReady = visionReady,
@@ -398,6 +404,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         engine?.close()
         engine = null
         visionReady = false
+        contextWindowTokens = DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS
         committedHistory = emptyList()
         conversationDirty = false
         cancelRequested = false
