@@ -1,54 +1,44 @@
 # Agent progress
 
 ## Completed this week
-- Hardened resumable Hugging Face downloads with strict Range/size validation, cancellation that closes active calls, checksum verification, retained partials, trusted post-verification fingerprints, longer transfer timeouts, and a second storage-admission check once HTTP response headers reveal the actual remaining transfer size.
-- Stream SHA-256 while model bytes are written so fresh multi-GB downloads avoid a second full-file verification read; resumed transfers hash only the retained prefix before continuing. Persist the streamed digest for checksum-less artifacts so later same-length changes can be revalidated.
-- Added installed-model length fingerprints so newly downloaded artifacts are rejected after later truncation/replacement even when Hugging Face publishes no SHA-256; legacy metadata remains readable.
+- Hardened resumable Hugging Face downloads: strict range/size validation, retained partials, cancellation that closes active calls, checksum/local-digest verification, inline SHA-256 for fresh downloads, installed-file fingerprints, and a second storage-admission check after resolved HTTP length is known.
 - Verified real Qwen3-0.6B INT4 LiteRT-LM execution through Mobie: download → load → repeated generation → conversation reset/history restore → unload/reload → generation.
-- Added real inference telemetry: TTFT, total latency, prefill/decode throughput, token counts, and app RAM.
-- Reused loaded weights across conversation resets; bounded restored history and hardened cancellation/interrupted-turn recovery before the first assistant token.
-- Completed persisted partial-output interruption recovery end-to-end: visible cancelled/failed assistant output is retained for the user but marked interrupted through UI history → persisted history → runtime history, so turn-aware LiteRT restore excludes the unfinished turn after reload/reset.
-- Completed same-process interrupted-generation recovery: cancelled/failed prompt + partial output is excluded from the in-memory LiteRT committed history before the next prompt rebuilds the conversation; exact-tip Android CI/E2E passed.
-- Serialized cancellation/failure replay recovery inside the generation critical section so a new prompt cannot race ahead of interrupted-turn filtering; preserved normal error events for pre-generation admission/setup failures. Exact-tip Android CI/E2E passed.
-- Preserved compatible vision history through LiteRT conversation recreation: persisted `imagePath` reaches `RuntimeMessage`, completed same-process image turns retain it, and recreation restores only the newest readable user image because the current engine is configured for one image slot. Missing files, older image turns, and text-only vision fallback degrade to text context instead of failing model load/reset. Exact-tip Android CI/E2E passed.
-- Added load/decode memory admission, LMK-headroom checks during generation, and severe/critical thermal safeguards.
-- Improved model recommendations using RAM, current memory pressure, storage headroom, quantization, model size, inferred context/cache size, runtime-memory estimates, and backend support.
-- Reserved first-load LiteRT optimized-cache storage and persisted LiteRT cache artifacts beside each installed model so subsequent loads can reuse them and model deletion removes them.
-- Added per-device LiteRT artifact selection and persisted the selected artifact through UI → download → installed-model restoration → runtime load.
-- Excluded Qualcomm/MediaTek/NPU-specific and explicitly GPU/OpenCL/Adreno/QNN/HTP/Hexagon/Google Tensor packages from the generic CPU runtime until matching accelerator paths are physically validated; full Android CI, emulator smoke, and real Qwen LiteRT-LM E2E passed.
-- Hardened multimodal startup with GPU-first vision, CPU-vision fallback, then text-only fallback while keeping text generation on CPU.
-- Improved Hugging Face catalog caching, request cancellation, partial metadata failure handling, and LiteRT quantization/context-name parsing.
+- Added real inference telemetry for TTFT, total latency, prefill/decode throughput, token counts, and app RAM; conversation reset reuses loaded weights.
+- Hardened interrupted generation across persistence and same-process replay so cancelled/failed partial assistant turns remain visible to the user but do not re-enter native context; serialized recovery to prevent prompt races.
+- Preserved compatible vision history through LiteRT recreation with newest-readable-image restoration and safe text-only fallback for missing files or unavailable vision initialization.
+- Improved model recommendations using RAM, current pressure, storage headroom, quantization, artifact size, inferred context/KV cache, runtime-memory estimates, and backend support.
+- Excluded vendor/backend-constrained LiteRT packages from the generic CPU path until matching accelerator paths are physically validated.
+- Prevented unknown-size warning artifacts from outranking measurable warning-state alternatives solely because missing publisher metadata produced zero RAM/storage estimates; exact-tip CI passed unit/lint/build, emulator smoke, and real Qwen E2E.
+- Added load/generation memory admission, thermal safeguards, first-load LiteRT cache storage headroom, persistent optimized-cache reuse, and per-device artifact selection.
 
 ## In progress
-- Prevent unknown-size LiteRT artifacts from outranking measurable warning-state alternatives merely because missing publisher size produces zero RAM/storage estimates. Selection logic and focused JVM regression coverage are pushed at `79ce0486`; exact-tip Android CI is running.
-- Continue auditing safe runtime/backend choices that improve TTFT/tokens-per-second without increasing crashes, RAM pressure, or thermal load; do not enable main-model GPU/NPU paths without representative physical-device evidence.
+- Make final native LiteRT load admission context-aware. Recommendation estimates already scale KV cache using artifact names such as `c64k`; the runtime preflight previously assumed 4K/256 MiB. Runtime admission now accepts context size, and the LiteRT adapter infers the context from the installed filename before engine initialization. Focused regression coverage is pushed; exact-tip CI is pending.
+- Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
 
 ## Tests actually performed
-- Backend-constraint filtering tip `2a0d5505`, exact vision-history restoration tip `c504b655`, serialized interruption-recovery tip `1e5e311f`, same-process interrupted-generation tip `f7466524`, partial-output interruption-recovery tip `c7062500`, streamed-verification tip `048a7add`, installed-model corruption-guard tip `5f5081a6`, resolved-response download storage tip `88c48aab`, persistent LiteRT cache tip `a9359ae7`, incomplete-turn recovery tip `ce740ee1`, first-load storage-headroom tip `6855974d`, download-timeout tip `c218481c`, direct hardware-target rejection tip `43a6461c`, turn-aware history tip `cfe09b4e`, and atomic-cancellation tip `005c9643` passed the full Android CI pipeline including JVM tests, lint/debug APK build, emulator integration, and real Qwen LiteRT-LM E2E where applicable.
-- Focused JVM coverage exists for installed-length truncation, local digest fingerprint reuse/invalidation, interrupted download resume, cancellation/socket close, checksum mutation fallback, installed artifact identity, history recovery, load/decode memory admission, hardware-target exclusion including backend-constrained LiteRT filename detection, context inference, per-device artifact selection, measurable-over-unknown warning artifact preference, thermal admission, first-load storage headroom, exclusion of explicitly interrupted partial assistant turns from native replay, preserving/marking visible partial assistant output as interrupted, same-process interrupted-turn filtering before runtime replay, preservation of vision attachment metadata through runtime history selection, and single-slot vision-history selection including missing-image fallback.
+- Latest validated tip `853c1c0e` passed JVM tests, lint/debug APK build, emulator smoke, and real Qwen LiteRT-LM E2E.
+- Earlier interruption recovery, vision-history restoration, backend-target filtering, persistent LiteRT cache, resumable download, storage admission, corruption detection, and streamed verification changes each passed the same Android CI pipeline at their exact code tips where applicable.
+- Focused JVM coverage includes context parsing, per-device artifact choice, measurable-over-unknown warning preference, hardware-target exclusion, load/decode memory admission, thermal admission, interrupted-turn replay exclusion, vision history, download resume/cancellation, checksums/fingerprints, and storage headroom.
 
 ## Real benchmarks / performance improvements
 - CPU-emulator Qwen3-0.6B INT4 baseline: 20.64 prefill tok/s, 7.51 decode tok/s, 1.468 s TTFT, 3.955 s total, ~1.02 GiB app RAM.
 - Same loaded conversation, second prompt: 21.41 prefill tok/s, 7.81 decode tok/s, 1.375 s TTFT, 2.965 s total, ~1.02 GiB app RAM.
 - Conversation-only reset setup: 2.95 ms versus 1524.24 ms for full unload/reload on the CI CPU emulator (~517× less setup wall time).
-- Fresh downloads now compute SHA-256 inline with the write path instead of rereading the completed artifact solely for checksum verification; no wall-time claim until physical measurements are collected.
 - No physical-device speed claim yet; emulator numbers are regression baselines only.
 
 ## Known problems / regressions
-- Vision-history reconstruction is CI-validated but still needs physical-device validation with a real vision-capable `.litertlm` model; only one historical image is intentionally restored because the engine currently exposes one image slot.
-- Partial-output interruption recovery is CI-validated across persistence/reload and same-process replay but still needs representative physical-device cancellation/failure testing before weekly merge review.
+- Context-aware native load admission is not yet CI-validated at the newest tip.
+- Vision history and interrupted-generation recovery still need representative physical-device testing.
 - GGUF remains intentionally unavailable; v1 currently relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU execution remains disabled until representative phones show a reliable net benefit.
-- Hardware/backend-targeted LiteRT packages remain excluded from the generic CPU path until exact vendor/runtime combinations are validated; filename classification cannot detect backend constraints hidden only inside model metadata.
-- Unknown artifact size still cannot be made a reliable compatibility claim until Hugging Face or the resolved download response supplies a byte length; Mobie keeps these artifacts warning-only.
-- Context metadata and restored-history sizing remain conservative where exact tokenizer/runtime metadata is unavailable.
-- GPU vision, thermal behavior, proactive LMK admission, image-slot behavior, interrupted-generation recovery, and first-load cache sizing still need physical-device validation.
+- Backend constraints hidden only inside model metadata cannot yet be detected by filename classification.
+- Unknown artifact size remains warning-only until Hugging Face or the resolved response supplies a byte length.
+- First-load cache sizing, thermal behavior, LMK admission, and image-slot behavior still need physical-device validation.
 
 ## Inspect before merging
-- Cancel generation after visible assistant tokens, immediately send another prompt without restarting, then restart the app and send another prompt; verify the interrupted partial turn enters neither same-process nor restored LiteRT context.
-- Interrupt and resume a large real download, verify the final digest/checksum succeeds, then modify a checksum-less installed artifact without changing its length and verify Mobie rehashes/rejects it rather than trusting the length alone.
-- Test an artifact whose catalog size is missing but HTTP headers provide a large Content-Length/Content-Range; verify Mobie fails before writing when remaining free storage is insufficient and resumes normally when space is adequate.
-- Run a real vision-capable `.litertlm` model on representative Adreno/Mali/Tensor phones; verify image understanding, repeated image turns, restored newest-image context, missing-image/text-only fallback, GPU→CPU fallback, TTFT/prefill, RAM, thermals, and crashes.
-- Verify per-device recommendations and artifact choices on low-RAM phones, under storage pressure, near Android LMK thresholds, when artifact size metadata is missing, and when repositories publish generic plus vendor/backend-targeted LiteRT packages.
-- Measure first/subsequent cold model loads after process restarts and first-load cache growth across several model sizes on physical devices.
-- Treat emulator performance figures as regression baselines only and collect comparable physical-device measurements before merging accelerator/performance claims.
+- Test `c64k`/`c128k` LiteRT artifacts on memory-constrained devices and confirm native load admission matches the recommendation RAM estimate rather than assuming 4K context.
+- Cancel generation after visible tokens, immediately send another prompt, then restart and send another prompt; verify the interrupted partial turn enters neither same-process nor restored context.
+- Interrupt/resume a large real download and verify final checksum/local fingerprint behavior under low storage.
+- Run a real vision-capable `.litertlm` model on representative Adreno/Mali/Tensor phones and verify repeated/restored image turns plus GPU→CPU/text-only fallback.
+- Verify recommendations on low-RAM phones, storage pressure, near LMK thresholds, missing artifact sizes, and repositories publishing generic plus vendor/backend-targeted packages.
+- Measure first/subsequent cold loads and LiteRT cache growth across several model sizes on physical devices.
