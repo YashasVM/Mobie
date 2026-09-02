@@ -17,6 +17,7 @@ import com.google.ai.edge.litertlm.ExperimentalFlags
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.SamplerConfig
 import dev.yashasvm.mobie.core.model.ModelFormat
+import dev.yashasvm.mobie.core.model.inferArtifactContextWindow
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -140,7 +141,6 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                 val contents = if (imagePath == null) {
                     Contents.of(prompt)
                 } else {
-                    // LiteRT-LM's multimodal guidance expects text before media content.
                     Contents.of(Content.Text(prompt), Content.ImageFile(imagePath))
                 }
                 val generationStartedAt = SystemClock.elapsedRealtime()
@@ -348,14 +348,17 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     private fun ensureLoadMemoryHeadroom(modelPath: String) {
         val manager = appContext.getSystemService(ActivityManager::class.java)
         val memory = ActivityManager.MemoryInfo().also(manager::getMemoryInfo)
+        val modelFile = File(modelPath)
+        val contextWindowTokens = inferArtifactContextWindow(modelFile.name) ?: DEFAULT_CONTEXT_WINDOW_TOKENS
         val reason = RuntimeLoadMemoryPolicy.blockReason(
-            modelWeightsBytes = File(modelPath).length(),
+            modelWeightsBytes = modelFile.length(),
             totalRamBytes = memory.totalMem,
             availableRamBytes = memory.availMem,
             lowMemoryThresholdBytes = memory.threshold,
             isLowMemory = memory.lowMemory,
             isLowRamDevice = manager.isLowRamDevice,
             thermalStatus = currentThermalStatus(),
+            contextWindowTokens = contextWindowTokens,
         )
         if (reason != null) throw IllegalStateException(reason)
     }
@@ -407,6 +410,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
 
     private companion object {
         const val DEFAULT_MAX_OUTPUT_TOKENS = 256
+        const val DEFAULT_CONTEXT_WINDOW_TOKENS = 4_096
         const val LITERT_CACHE_DIRECTORY = ".litert-cache"
         val REASONING_CHANNELS = setOf(
             "analysis", "thinking", "reasoning", "reasoning_content", "thought", "thoughts",
