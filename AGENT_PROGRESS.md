@@ -12,7 +12,7 @@
 - Aligned inferred c32k/c64k/c128k-style context with both final RAM admission and native LiteRT `EngineConfig.maxNumTokens`; exact-tip CI passed unit/lint/build, emulator smoke, and real Qwen E2E.
 
 ## In progress
-- Fix a UI/runtime stop-generation race: `stopGeneration()` currently marks chat READY before asynchronous runtime cancellation completes, so an immediately submitted replacement prompt can be cancelled by the stale stop request. The next implementation should keep sending disabled until the original inference job has terminated and its runtime cancellation/recovery is complete.
+- Stop-generation ordering is now serialized at the UI boundary: chat enters a non-sendable STOPPING state and only returns to READY after the active inference coroutine has cancelled and joined, preventing a replacement prompt from racing stale cancellation. Exact-tip Android CI is pending.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
 
 ## Tests actually performed
@@ -27,7 +27,7 @@
 - No physical-device speed claim yet; emulator numbers are regression baselines only.
 
 ## Known problems / regressions
-- Stop-generation has a UI/runtime ordering race until the active inference cancellation is awaited before chat returns to READY.
+- Stop-generation UI/runtime ordering is implemented but not yet exact-tip CI validated.
 - Vision history and interrupted-generation recovery still need representative physical-device testing.
 - GGUF remains intentionally unavailable; v1 currently relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU execution remains disabled until representative phones show a reliable net benefit.
@@ -36,7 +36,7 @@
 - First-load cache sizing, thermal behavior, LMK admission, and image-slot behavior still need physical-device validation.
 
 ## Inspect before merging
-- Rapidly stop a generation after visible output and immediately try to send another prompt; verify the replacement prompt cannot start until native cancellation/recovery completes and is never cancelled by the stale stop request.
+- Rapidly stop a generation after visible output and immediately try to send another prompt; verify send stays disabled during STOPPING and the replacement prompt is never cancelled by the stale stop request.
 - Heat a representative phone into MODERATE then SEVERE thermal status; verify local inference remains available at MODERATE and stops/blocks at SEVERE without ANR or corrupting conversation state.
 - Test c32k/c64k/c128k LiteRT artifacts and verify configured native context, actual RAM use, and recommendation/load admission remain consistent on memory-constrained devices.
 - Interrupt/resume a large real download and verify final checksum/local fingerprint behavior under low storage.
