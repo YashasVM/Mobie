@@ -19,6 +19,7 @@ import dev.yashasvm.mobie.data.history.ChatHistorySession
 import dev.yashasvm.mobie.data.history.HistoryMessage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,7 +30,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 
-enum class RuntimeState { IDLE, LOADING, READY, GENERATING, ERROR }
+enum class RuntimeState { IDLE, LOADING, READY, GENERATING, STOPPING, ERROR }
 
 data class ChatMessage(
     val fromUser: Boolean,
@@ -343,13 +344,33 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun stopGeneration() {
-        if (state.value.runtimeState != RuntimeState.GENERATING) return
-        inferenceJob?.cancel()
-        val model = state.value.selected
-        val messages = state.value.messages.removeBlankAssistant().markLastAssistantInterrupted()
-        if (model != null) persistHistory(model.id, messages)
-        mutableState.update { it.copy(runtimeState = RuntimeState.READY, messages = messages, error = null) }
-        viewModelScope.launch { container.runtimes.all().forEach { it.cancel() } }
+        val current = state.value
+        if (current.runtimeState != RuntimeState.GENERATING) return
+        val activeInference = inferenceJob
+        val modelId = current.selected?.id
+        val sessionId = current.sessionId
+        val messages = current.messages.removeBlankAssistant().markLastAssistantInterrupted()
+        if (modelId != null) persistHistory(modelId, messages)
+        mutableState.update {
+            it.copy(runtimeState = RuntimeState.STOPPING, messages = messages, error = null)
+        }
+        viewModelScope.launch {
+            activeInference?.cancelAndJoin()
+            mutableState.update { latest ->
+                if (
+                    latest.runtimeState == RuntimeState.STOPPING &&
+                    latest.selected?.id == modelId &&
+                    latest.sessionId == sessionId
+                ) {
+                    latest.copy(
+                        runtimeState = RuntimeState.READY,
+                        history = modelId?.let { container.chatHistory.sessions(it) }.orEmpty(),
+                    )
+                } else {
+                    latest
+                }
+            }
+        }
     }
 
     fun newChat() {
