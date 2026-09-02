@@ -32,6 +32,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
+internal fun runtimeContextWindowTokens(modelPath: String): Int =
+    inferArtifactContextWindow(File(modelPath).name) ?: DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS
+
 /**
  * Deliberately explicit placeholders for the native bridges. Shipping a fake inference path would
  * make compatibility claims unsafe. Wire the audited llama.cpp JNI library here before enabling it.
@@ -270,6 +273,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                 modelPath = modelPath,
                 backend = Backend.CPU(),
                 visionBackend = visionBackend,
+                maxNumTokens = runtimeContextWindowTokens(modelPath),
                 maxNumImages = if (visionBackend != null) 1 else null,
                 cacheDir = cacheDirectory.absolutePath,
             ),
@@ -349,7 +353,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         val manager = appContext.getSystemService(ActivityManager::class.java)
         val memory = ActivityManager.MemoryInfo().also(manager::getMemoryInfo)
         val modelFile = File(modelPath)
-        val contextWindowTokens = inferArtifactContextWindow(modelFile.name) ?: DEFAULT_CONTEXT_WINDOW_TOKENS
+        val contextWindowTokens = runtimeContextWindowTokens(modelPath)
         val reason = RuntimeLoadMemoryPolicy.blockReason(
             modelWeightsBytes = modelFile.length(),
             totalRamBytes = memory.totalMem,
@@ -410,7 +414,6 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
 
     private companion object {
         const val DEFAULT_MAX_OUTPUT_TOKENS = 256
-        const val DEFAULT_CONTEXT_WINDOW_TOKENS = 4_096
         const val LITERT_CACHE_DIRECTORY = ".litert-cache"
         val REASONING_CHANNELS = setOf(
             "analysis", "thinking", "reasoning", "reasoning_content", "thought", "thoughts",
@@ -418,3 +421,5 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         )
     }
 }
+
+private const val DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS = 4_096
