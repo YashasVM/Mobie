@@ -35,8 +35,8 @@ class ConversationHistoryPolicyTest {
     }
 
     @Test
-    fun `drops an older turn atomically when size boundary would split it`() {
-        val largeUser = "u".repeat(ConversationHistoryPolicy.MAX_RESTORED_CHARS - 20)
+    fun `drops an older turn atomically when byte boundary would split it`() {
+        val largeUser = "u".repeat(ConversationHistoryPolicy.MAX_RESTORED_UTF8_BYTES - 20)
         val history = listOf(
             RuntimeMessage(true, largeUser),
             RuntimeMessage(false, "old assistant"),
@@ -51,8 +51,8 @@ class ConversationHistoryPolicyTest {
     }
 
     @Test
-    fun `never restores more than character budget`() {
-        val chunk = "x".repeat(1024)
+    fun `never restores more than byte or character budget`() {
+        val chunk = "x".repeat(512)
         val history = (1..20).flatMap {
             listOf(RuntimeMessage(true, chunk), RuntimeMessage(false, chunk))
         }
@@ -60,7 +60,26 @@ class ConversationHistoryPolicyTest {
         val selected = ConversationHistoryPolicy.select(history)
 
         assertTrue(selected.sumOf { it.text.length } <= ConversationHistoryPolicy.MAX_RESTORED_CHARS)
+        assertTrue(
+            selected.sumOf { it.text.toByteArray(Charsets.UTF_8).size } <=
+                ConversationHistoryPolicy.MAX_RESTORED_UTF8_BYTES,
+        )
         assertTrue(selected.size <= ConversationHistoryPolicy.MAX_RESTORED_MESSAGES)
+        assertTrue(selected.isEmpty() || selected.first().fromUser)
+    }
+
+    @Test
+    fun `utf8 byte budget limits token dense unicode history`() {
+        val unicodeChunk = "你".repeat(700)
+        val history = (1..4).flatMap {
+            listOf(RuntimeMessage(true, unicodeChunk), RuntimeMessage(false, unicodeChunk))
+        }
+
+        val selected = ConversationHistoryPolicy.select(history)
+        val restoredBytes = selected.sumOf { it.text.toByteArray(Charsets.UTF_8).size }
+
+        assertTrue(restoredBytes <= ConversationHistoryPolicy.MAX_RESTORED_UTF8_BYTES)
+        assertTrue(selected.size <= 2)
         assertTrue(selected.isEmpty() || selected.first().fromUser)
     }
 
@@ -69,7 +88,7 @@ class ConversationHistoryPolicyTest {
         val history = listOf(
             RuntimeMessage(true, "older user"),
             RuntimeMessage(false, "older answer"),
-            RuntimeMessage(true, "x".repeat(ConversationHistoryPolicy.MAX_RESTORED_CHARS + 1)),
+            RuntimeMessage(true, "x".repeat(ConversationHistoryPolicy.MAX_RESTORED_UTF8_BYTES + 1)),
             RuntimeMessage(false, "latest answer"),
         )
 
@@ -151,7 +170,7 @@ class ConversationHistoryPolicyTest {
     fun `ignores blank messages and refuses a single over-budget history entry`() {
         val history = listOf(
             RuntimeMessage(false, "   "),
-            RuntimeMessage(true, "x".repeat(ConversationHistoryPolicy.MAX_RESTORED_CHARS + 1)),
+            RuntimeMessage(true, "x".repeat(ConversationHistoryPolicy.MAX_RESTORED_UTF8_BYTES + 1)),
         )
 
         assertTrue(ConversationHistoryPolicy.select(history).isEmpty())
