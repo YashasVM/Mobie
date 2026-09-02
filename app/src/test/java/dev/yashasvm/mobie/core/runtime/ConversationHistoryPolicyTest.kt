@@ -69,6 +69,26 @@ class ConversationHistoryPolicyTest {
     }
 
     @Test
+    fun `larger configured contexts restore more completed history`() {
+        val chunk = "x".repeat(700)
+        val history = (1..12).flatMap { turn ->
+            listOf(
+                RuntimeMessage(true, "user-$turn-$chunk"),
+                RuntimeMessage(false, "assistant-$turn-$chunk"),
+            )
+        }
+
+        val defaultContext = ConversationHistoryPolicy.select(history, contextWindowTokens = 4_096)
+        val largeContext = ConversationHistoryPolicy.select(history, contextWindowTokens = 32_768)
+
+        assertTrue(largeContext.size > defaultContext.size)
+        assertEquals("assistant-12-$chunk", largeContext.last().text)
+        assertTrue(largeContext.first().fromUser)
+        assertTrue(largeContext.size % 2 == 0)
+        assertTrue(largeContext.sumOf { it.text.toByteArray(Charsets.UTF_8).size } <= 24 * 1024)
+    }
+
+    @Test
     fun `utf8 byte budget limits token dense unicode history`() {
         val unicodeChunk = "你".repeat(700)
         val history = (1..4).flatMap {
