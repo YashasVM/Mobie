@@ -23,6 +23,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
@@ -217,6 +218,9 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                     emit(InferenceEvent.Error(error.message ?: "Inference failed"))
                 }
             }
+        }.catch { error ->
+            rethrowCancellation(error)
+            emit(InferenceEvent.Error(error.message ?: "Inference failed"))
         }.flowOn(Dispatchers.Default)
     }
 
