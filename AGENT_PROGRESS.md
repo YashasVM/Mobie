@@ -7,6 +7,7 @@
 - Verified real Qwen3-0.6B INT4 LiteRT-LM execution through Mobie: download → load → repeated generation → conversation reset/history restore → unload/reload → generation.
 - Added real inference telemetry: TTFT, total latency, prefill/decode throughput, token counts, and app RAM.
 - Reused loaded weights across conversation resets; bounded restored history and hardened cancellation/interrupted-turn recovery before the first assistant token.
+- Completed partial-output interruption recovery end-to-end: visible cancelled/failed assistant output is retained for the user but marked interrupted through UI history → persisted history → runtime history, so turn-aware LiteRT restore excludes the unfinished turn from later native context.
 - Added load/decode memory admission, LMK-headroom checks during generation, and severe/critical thermal safeguards.
 - Improved model recommendations using RAM, current memory pressure, storage headroom, quantization, model size, inferred context/cache size, runtime-memory estimates, and backend support.
 - Reserved first-load LiteRT optimized-cache storage and persisted LiteRT cache artifacts beside each installed model so subsequent loads can reuse them and model deletion removes them.
@@ -16,11 +17,10 @@
 - Improved Hugging Face catalog caching, request cancellation, partial metadata failure handling, and LiteRT quantization/context-name parsing.
 
 ## In progress
-- Partial-output cancellation/failure recovery is now wired end-to-end through UI history → persisted `HistoryMessage.interrupted` → `RuntimeMessage.interrupted` → turn-aware LiteRT restore exclusion. Focused marking tests landed; exact-tip Android CI is still pending before this is considered fully validated.
 - Continue auditing safe runtime/backend choices that improve TTFT/tokens-per-second without increasing crashes, RAM pressure, or thermal load; do not enable main-model GPU/NPU paths without representative physical-device evidence.
 
 ## Tests actually performed
-- Exact streamed-verification tip `048a7add`, installed-model corruption-guard tip `5f5081a6`, resolved-response download storage tip `88c48aab`, persistent LiteRT cache tip `a9359ae7`, incomplete-turn recovery tip `ce740ee1`, first-load storage-headroom tip `6855974d`, download-timeout tip `c218481c`, direct hardware-target rejection tip `43a6461c`, turn-aware history tip `cfe09b4e`, and atomic-cancellation tip `005c9643` passed the full Android CI pipeline including JVM tests, lint/debug APK build, emulator integration, and real Qwen LiteRT-LM E2E where applicable.
+- Exact partial-output interruption-recovery tip `c7062500`, streamed-verification tip `048a7add`, installed-model corruption-guard tip `5f5081a6`, resolved-response download storage tip `88c48aab`, persistent LiteRT cache tip `a9359ae7`, incomplete-turn recovery tip `ce740ee1`, first-load storage-headroom tip `6855974d`, download-timeout tip `c218481c`, direct hardware-target rejection tip `43a6461c`, turn-aware history tip `cfe09b4e`, and atomic-cancellation tip `005c9643` passed the full Android CI pipeline including JVM tests, lint/debug APK build, emulator integration, and real Qwen LiteRT-LM E2E where applicable.
 - Focused JVM coverage exists for installed-length truncation, local digest fingerprint reuse/invalidation, interrupted download resume, cancellation/socket close, checksum mutation fallback, installed artifact identity, history recovery, load/decode memory admission, hardware-target exclusion, context inference, per-device artifact selection, thermal admission, first-load storage headroom, exclusion of explicitly interrupted partial assistant turns from native replay, and preserving/marking visible partial assistant output as interrupted.
 
 ## Real benchmarks / performance improvements
@@ -31,7 +31,7 @@
 - No physical-device speed claim yet; emulator numbers are regression baselines only.
 
 ## Known problems / regressions
-- Partial-output interruption wiring still needs exact-tip CI and physical-device validation before it is considered merge-ready.
+- Partial-output interruption recovery is CI-validated but still needs representative physical-device cancellation/failure testing before weekly merge review.
 - GGUF remains intentionally unavailable; v1 currently relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU execution remains disabled until representative phones show a reliable net benefit.
 - Hardware-targeted LiteRT packages remain excluded from the generic path until exact vendor/runtime combinations are validated.
