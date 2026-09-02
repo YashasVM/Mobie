@@ -19,12 +19,12 @@
 - Improved Hugging Face catalog caching, request cancellation, partial metadata failure handling, and LiteRT quantization/context-name parsing.
 
 ## In progress
-- Preserve compatible vision history through LiteRT conversation recreation. Mobie persists image paths in chat history today, but runtime restoration currently converts historical turns to text-only messages; the fix must respect LiteRT-LM image-count limits and degrade safely if a persisted image file no longer exists.
+- Preserve compatible vision history through LiteRT conversation recreation. Runtime history now carries `imagePath` through turn-aware selection with regression coverage; remaining work is the UI/history → runtime mapping plus recreating user messages with `Contents`/`ImageFile`, while degrading safely when vision falls back to text-only or a persisted image file is missing.
 - Continue auditing safe runtime/backend choices that improve TTFT/tokens-per-second without increasing crashes, RAM pressure, or thermal load; do not enable main-model GPU/NPU paths without representative physical-device evidence.
 
 ## Tests actually performed
 - Exact serialized interruption-recovery tip `1e5e311f`, same-process interrupted-generation tip `f7466524`, partial-output interruption-recovery tip `c7062500`, streamed-verification tip `048a7add`, installed-model corruption-guard tip `5f5081a6`, resolved-response download storage tip `88c48aab`, persistent LiteRT cache tip `a9359ae7`, incomplete-turn recovery tip `ce740ee1`, first-load storage-headroom tip `6855974d`, download-timeout tip `c218481c`, direct hardware-target rejection tip `43a6461c`, turn-aware history tip `cfe09b4e`, and atomic-cancellation tip `005c9643` passed the full Android CI pipeline including JVM tests, lint/debug APK build, emulator integration, and real Qwen LiteRT-LM E2E where applicable.
-- Focused JVM coverage exists for installed-length truncation, local digest fingerprint reuse/invalidation, interrupted download resume, cancellation/socket close, checksum mutation fallback, installed artifact identity, history recovery, load/decode memory admission, hardware-target exclusion, context inference, per-device artifact selection, thermal admission, first-load storage headroom, exclusion of explicitly interrupted partial assistant turns from native replay, preserving/marking visible partial assistant output as interrupted, and same-process interrupted-turn filtering before runtime replay.
+- Focused JVM coverage exists for installed-length truncation, local digest fingerprint reuse/invalidation, interrupted download resume, cancellation/socket close, checksum mutation fallback, installed artifact identity, history recovery, load/decode memory admission, hardware-target exclusion, context inference, per-device artifact selection, thermal admission, first-load storage headroom, exclusion of explicitly interrupted partial assistant turns from native replay, preserving/marking visible partial assistant output as interrupted, same-process interrupted-turn filtering before runtime replay, and preservation of vision attachment metadata through runtime history selection.
 
 ## Real benchmarks / performance improvements
 - CPU-emulator Qwen3-0.6B INT4 baseline: 20.64 prefill tok/s, 7.51 decode tok/s, 1.468 s TTFT, 3.955 s total, ~1.02 GiB app RAM.
@@ -34,7 +34,7 @@
 - No physical-device speed claim yet; emulator numbers are regression baselines only.
 
 ## Known problems / regressions
-- Historical vision turns currently restore their text but not the associated image media when LiteRT conversations are recreated.
+- Historical vision turns still restore their text but not the associated image media when LiteRT conversations are recreated; runtime metadata preservation is implemented, but the final UI/native reconstruction wiring is still pending.
 - Partial-output interruption recovery is CI-validated across persistence/reload and same-process replay but still needs representative physical-device cancellation/failure testing before weekly merge review.
 - GGUF remains intentionally unavailable; v1 currently relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU execution remains disabled until representative phones show a reliable net benefit.
