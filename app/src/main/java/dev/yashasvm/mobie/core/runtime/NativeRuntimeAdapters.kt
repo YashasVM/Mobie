@@ -305,11 +305,11 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     }
 
     private fun rememberInterruptedTurn(prompt: String, partialAnswer: String?) {
-        val turn = buildList {
-            add(RuntimeMessage(fromUser = true, text = prompt))
-            if (!partialAnswer.isNullOrBlank()) add(RuntimeMessage(fromUser = false, text = partialAnswer))
-        }
-        committedHistory = ConversationHistoryPolicy.select(committedHistory + turn)
+        committedHistory = ConversationHistoryPolicy.afterInterruptedTurn(
+            committedHistory = committedHistory,
+            prompt = prompt,
+            partialAnswer = partialAnswer,
+        )
         conversationDirty = true
     }
 
