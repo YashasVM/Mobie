@@ -121,9 +121,10 @@ internal fun inferArtifactContextWindow(fileName: String): Int? {
     val normalized = fileName.lowercase()
 
     // Context/KV markers are published both as raw token counts (ctx32768/ekv2048) and
-    // human-readable K suffixes (ctx32k/context-64k/kv128k). Missing the latter is unsafe:
-    // the runtime would fall back to 4K and materially under-estimate KV-cache RAM.
-    val explicitK = Regex("(?:^|[._-])(?:e?kv|ctx|context)[_-]?(\\d{1,3})k(?:[._-]|$)")
+    // human-readable K suffixes (ctx32k/context-64k/kv128k). Keep recognizing unusually large
+    // explicit windows instead of silently treating them as an unknown 4K model: admission can then
+    // account for the real KV-cache cost and reject an unsafe artifact before native initialization.
+    val explicitK = Regex("(?:^|[._-])(?:e?kv|ctx|context)[_-]?(\\d{1,4})k(?:[._-]|$)")
         .find(normalized)
         ?.groupValues
         ?.getOrNull(1)
@@ -132,7 +133,7 @@ internal fun inferArtifactContextWindow(fileName: String): Int? {
         ?.takeIf(::isPlausibleContextWindow)
     if (explicitK != null) return explicitK
 
-    val explicit = Regex("(?:^|[._-])(?:e?kv|ctx|context)[_-]?(\\d{3,6})(?:[._-]|$)")
+    val explicit = Regex("(?:^|[._-])(?:e?kv|ctx|context)[_-]?(\\d{3,7})(?:[._-]|$)")
         .find(normalized)
         ?.groupValues
         ?.getOrNull(1)
@@ -143,7 +144,7 @@ internal fun inferArtifactContextWindow(fileName: String): Int? {
     // LiteRT community artifacts also commonly encode cache/context as c1024, c32k, c64k, etc.
     // Missing these is dangerous: treating c64k as the 4096-token fallback underestimates KV-cache
     // memory by roughly 16x and can make an otherwise unsafe model look runnable on a phone.
-    val compactK = Regex("(?:^|[._-])c(\\d{1,3})k(?:[._-]|$)")
+    val compactK = Regex("(?:^|[._-])c(\\d{1,4})k(?:[._-]|$)")
         .find(normalized)
         ?.groupValues
         ?.getOrNull(1)
@@ -152,7 +153,7 @@ internal fun inferArtifactContextWindow(fileName: String): Int? {
         ?.takeIf(::isPlausibleContextWindow)
     if (compactK != null) return compactK
 
-    return Regex("(?:^|[._-])c(\\d{3,6})(?:[._-]|$)")
+    return Regex("(?:^|[._-])c(\\d{3,7})(?:[._-]|$)")
         .find(normalized)
         ?.groupValues
         ?.getOrNull(1)
@@ -160,7 +161,7 @@ internal fun inferArtifactContextWindow(fileName: String): Int? {
         ?.takeIf(::isPlausibleContextWindow)
 }
 
-private fun isPlausibleContextWindow(tokens: Int): Boolean = tokens in 128..131_072
+private fun isPlausibleContextWindow(tokens: Int): Boolean = tokens in 128..MAX_EXPLICIT_CONTEXT_TOKENS
 
 internal fun inferArtifactExecutionTarget(fileName: String): ArtifactExecutionTarget {
     val normalized = fileName.lowercase()
@@ -234,3 +235,4 @@ private const val MIB = 1024L * 1024L
 private const val DEFAULT_CONTEXT_TOKENS = 4_096
 private const val DEFAULT_KV_CACHE_BYTES = 256L * MIB
 private const val MIN_KV_CACHE_BYTES = 64L * MIB
+private const val MAX_EXPLICIT_CONTEXT_TOKENS = 1_048_576
