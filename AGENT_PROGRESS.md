@@ -18,6 +18,7 @@
 - Improved Hugging Face catalog caching, request cancellation, partial metadata failure handling, and LiteRT quantization/context-name parsing.
 
 ## In progress
+- Validate serialized interrupted-turn recovery ordering: cancellation/failure must update replay state before the generation mutex is released, while pre-generation admission/setup failures still surface as normal inference errors.
 - Continue auditing safe runtime/backend choices that improve TTFT/tokens-per-second without increasing crashes, RAM pressure, or thermal load; do not enable main-model GPU/NPU paths without representative physical-device evidence.
 
 ## Tests actually performed
@@ -32,6 +33,7 @@
 - No physical-device speed claim yet; emulator numbers are regression baselines only.
 
 ## Known problems / regressions
+- Serialized interrupted-turn recovery ordering is implemented but awaiting exact-tip Android CI/E2E validation.
 - Partial-output interruption recovery is CI-validated across persistence/reload and same-process replay but still needs representative physical-device cancellation/failure testing before weekly merge review.
 - GGUF remains intentionally unavailable; v1 currently relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU execution remains disabled until representative phones show a reliable net benefit.
