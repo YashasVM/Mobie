@@ -23,7 +23,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
@@ -125,7 +124,6 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         config: GenerationConfig,
     ): Flow<InferenceEvent> {
         val partialAnswer = StringBuilder()
-        var interruptedRecorded = false
         return flow {
             generation.withLock {
                 cancelRequested = false
@@ -183,47 +181,42 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                         }
                     }
                     if (cancelRequested) throw CancellationException("Generation cancelled")
+
+                    val generationFinishedAt = SystemClock.elapsedRealtime()
+                    val benchmark = activeConversation.getBenchmarkInfo()
+                    emit(
+                        InferenceEvent.Stats(
+                            InferenceStats(
+                                tokensPerSecond = benchmark.lastDecodeTokensPerSecond,
+                                ramBytes = currentAppRamBytes(),
+                                timeToFirstTokenMs = firstTokenAt?.minus(generationStartedAt) ?: 0,
+                                totalGenerationMs = generationFinishedAt - generationStartedAt,
+                                prefillTokensPerSecond = benchmark.lastPrefillTokensPerSecond,
+                                prefillTokenCount = benchmark.lastPrefillTokenCount,
+                                decodeTokenCount = benchmark.lastDecodeTokenCount,
+                            ),
+                        ),
+                    )
+                    if (!emittedVisibleOutput) {
+                        rememberInterruptedTurn(prompt, null)
+                        val message = if (emittedReasoning) {
+                            "The model used its output budget for reasoning before producing a final answer. Retry with a larger output limit or disable thinking for this prompt."
+                        } else {
+                            "The model completed without producing a response."
+                        }
+                        emit(InferenceEvent.Error(message))
+                        return@withLock
+                    }
+                    if (cancelRequested) throw CancellationException("Generation cancelled")
+                    rememberCompletedTurn(prompt, partialAnswer.toString())
+                    emit(InferenceEvent.Complete)
                 } catch (error: Throwable) {
                     activeConversation.cancelProcess()
                     rememberInterruptedTurn(prompt, partialAnswer.toString().takeIf { it.isNotBlank() })
-                    interruptedRecorded = true
-                    throw error
+                    rethrowCancellation(error)
+                    emit(InferenceEvent.Error(error.message ?: "Inference failed"))
                 }
-                val generationFinishedAt = SystemClock.elapsedRealtime()
-                val benchmark = activeConversation.getBenchmarkInfo()
-                emit(
-                    InferenceEvent.Stats(
-                        InferenceStats(
-                            tokensPerSecond = benchmark.lastDecodeTokensPerSecond,
-                            ramBytes = currentAppRamBytes(),
-                            timeToFirstTokenMs = firstTokenAt?.minus(generationStartedAt) ?: 0,
-                            totalGenerationMs = generationFinishedAt - generationStartedAt,
-                            prefillTokensPerSecond = benchmark.lastPrefillTokensPerSecond,
-                            prefillTokenCount = benchmark.lastPrefillTokenCount,
-                            decodeTokenCount = benchmark.lastDecodeTokenCount,
-                        ),
-                    ),
-                )
-                if (!emittedVisibleOutput) {
-                    rememberInterruptedTurn(prompt, null)
-                    val message = if (emittedReasoning) {
-                        "The model used its output budget for reasoning before producing a final answer. Retry with a larger output limit or disable thinking for this prompt."
-                    } else {
-                        "The model completed without producing a response."
-                    }
-                    emit(InferenceEvent.Error(message))
-                    return@withLock
-                }
-                if (cancelRequested) throw CancellationException("Generation cancelled")
-                rememberCompletedTurn(prompt, partialAnswer.toString())
-                emit(InferenceEvent.Complete)
             }
-        }.catch { error ->
-            if (!interruptedRecorded) {
-                rememberInterruptedTurn(prompt, partialAnswer.toString().takeIf { it.isNotBlank() })
-            }
-            rethrowCancellation(error)
-            emit(InferenceEvent.Error(error.message ?: "Inference failed"))
         }.flowOn(Dispatchers.Default)
     }
 
