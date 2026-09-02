@@ -120,10 +120,18 @@ internal fun inferArtifactQuantization(fileName: String): String? {
 internal fun inferArtifactContextWindow(fileName: String): Int? {
     val normalized = fileName.lowercase()
 
-    // Context/KV markers are published both as raw token counts (ctx32768/ekv2048) and
-    // human-readable K suffixes (ctx32k/context-64k/kv128k). Keep recognizing unusually large
-    // explicit windows instead of silently treating them as an unknown 4K model: admission can then
-    // account for the real KV-cache cost and reject an unsafe artifact before native initialization.
+    // Context/KV markers are published as raw token counts, K suffixes, and occasionally M
+    // suffixes (for example ctx1m). Preserve all explicit forms so admission never silently treats
+    // a very-large-context artifact as the conservative 4K fallback.
+    val explicitM = Regex("(?:^|[._-])(?:e?kv|ctx|context)[_-]?(\\d{1,2})m(?:[._-]|$)")
+        .find(normalized)
+        ?.groupValues
+        ?.getOrNull(1)
+        ?.toIntOrNull()
+        ?.let { it * 1024 * 1024 }
+        ?.takeIf(::isPlausibleContextWindow)
+    if (explicitM != null) return explicitM
+
     val explicitK = Regex("(?:^|[._-])(?:e?kv|ctx|context)[_-]?(\\d{1,4})k(?:[._-]|$)")
         .find(normalized)
         ?.groupValues
@@ -144,6 +152,15 @@ internal fun inferArtifactContextWindow(fileName: String): Int? {
     // LiteRT community artifacts also commonly encode cache/context as c1024, c32k, c64k, etc.
     // Missing these is dangerous: treating c64k as the 4096-token fallback underestimates KV-cache
     // memory by roughly 16x and can make an otherwise unsafe model look runnable on a phone.
+    val compactM = Regex("(?:^|[._-])c(\\d{1,2})m(?:[._-]|$)")
+        .find(normalized)
+        ?.groupValues
+        ?.getOrNull(1)
+        ?.toIntOrNull()
+        ?.let { it * 1024 * 1024 }
+        ?.takeIf(::isPlausibleContextWindow)
+    if (compactM != null) return compactM
+
     val compactK = Regex("(?:^|[._-])c(\\d{1,4})k(?:[._-]|$)")
         .find(normalized)
         ?.groupValues
