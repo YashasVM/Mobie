@@ -9,11 +9,11 @@ package dev.yashasvm.mobie.core.runtime
  * deterministic guard in addition to the message-count limit.
  *
  * Selection is turn-aware: a restored history never starts with an orphan assistant message,
- * never keeps only half of an older completed turn, and never replays a user-only interrupted turn.
- * User-only turns remain in the persisted UI transcript, but replaying one into LiteRT would leave
- * the native conversation ending on a user message immediately before the next user prompt. If the
- * newest complete turn alone is too large to fit, it is skipped so an oversized prompt cannot erase
- * all otherwise-restorable context after a cancellation/rebuild.
+ * never keeps only half of an older completed turn, and never replays an interrupted turn. User-only
+ * or partial-assistant turns remain visible in the persisted UI transcript, but replaying them into
+ * LiteRT would make cancelled/failed output silently influence the next response. If the newest
+ * complete turn alone is too large to fit, it is skipped so an oversized prompt cannot erase all
+ * otherwise-restorable context after a cancellation/rebuild.
  */
 internal object ConversationHistoryPolicy {
     const val MAX_RESTORED_MESSAGES = 20
@@ -28,10 +28,22 @@ internal object ConversationHistoryPolicy {
             if (text.isEmpty()) continue
 
             if (message.fromUser) {
-                turns += mutableListOf(RuntimeMessage(fromUser = true, text = text))
+                turns += mutableListOf(
+                    RuntimeMessage(
+                        fromUser = true,
+                        text = text,
+                        interrupted = message.interrupted,
+                    ),
+                )
             } else {
                 // Ignore assistant-only prefixes; LiteRT restoration must always be user-led.
-                turns.lastOrNull()?.add(RuntimeMessage(fromUser = false, text = text))
+                turns.lastOrNull()?.add(
+                    RuntimeMessage(
+                        fromUser = false,
+                        text = text,
+                        interrupted = message.interrupted,
+                    ),
+                )
             }
         }
         if (turns.isEmpty()) return emptyList()
@@ -42,10 +54,10 @@ internal object ConversationHistoryPolicy {
         var selectedAny = false
 
         for (turn in turns.asReversed()) {
-            // A stopped/failed generation can be persisted after the user prompt but before the
-            // first assistant token. Keep that visible in history, but do not seed LiteRT with an
-            // unfinished user turn that would be followed by another user message on the next send.
-            if (turn.none { !it.fromUser }) continue
+            // A stopped/failed generation may leave either a user-only turn or a partial assistant
+            // response. Keep both forms visible in history, but never seed LiteRT with unfinished
+            // output because the next response must continue from the last fully completed turn.
+            if (turn.none { !it.fromUser } || turn.any { it.interrupted }) continue
 
             val turnChars = turn.sumOf { it.text.length }
             val turnMessages = turn.size
