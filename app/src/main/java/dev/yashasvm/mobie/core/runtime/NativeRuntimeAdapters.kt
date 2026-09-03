@@ -149,6 +149,13 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                         "Vision initialization failed on this device. The model is still available for text-only chat.",
                     )
                 }
+                val safeMaxOutputTokens = GenerationContextPolicy.maxOutputTokens(
+                    contextWindowTokens = contextWindowTokens,
+                    history = committedHistory,
+                    prompt = prompt,
+                    requestedMaxOutputTokens = config.maxNewTokens,
+                    hasImage = imagePath != null,
+                )
                 val contents = if (imagePath == null) {
                     Contents.of(prompt)
                 } else {
@@ -160,7 +167,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                 var emittedVisibleOutput = false
                 var emittedReasoning = false
                 try {
-                    activeConversation.sendMessageAsync(contents, maxOutputToken = config.maxNewTokens).collect { chunk ->
+                    activeConversation.sendMessageAsync(contents, maxOutputToken = safeMaxOutputTokens).collect { chunk ->
                         currentCoroutineContext().ensureActive()
                         if (cancelRequested) throw CancellationException("Generation cancelled")
                         val now = SystemClock.elapsedRealtime()
