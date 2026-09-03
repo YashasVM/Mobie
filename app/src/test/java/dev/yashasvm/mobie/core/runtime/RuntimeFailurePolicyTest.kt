@@ -101,6 +101,58 @@ class RuntimeFailurePolicyTest {
     }
 
     @Test
+    fun multiCleanupContinuesAfterRecoverableFailure() {
+        val actions = mutableListOf<String>()
+
+        try {
+            runAllRuntimeCleanup(
+                {
+                    actions += "conversation"
+                    throw IllegalStateException("conversation close failed")
+                },
+                { actions += "engine" },
+            )
+            fail("Recoverable cleanup failure should propagate after all cleanup runs")
+        } catch (error: IllegalStateException) {
+            assertEquals("conversation close failed", error.message)
+        }
+
+        assertEquals(listOf("conversation", "engine"), actions)
+    }
+
+    @Test
+    fun multiCleanupPreservesAdditionalRecoverableFailuresAsSuppressed() {
+        try {
+            runAllRuntimeCleanup(
+                { throw IllegalStateException("conversation close failed") },
+                { throw IllegalArgumentException("engine close failed") },
+            )
+            fail("Cleanup failures should propagate")
+        } catch (error: IllegalStateException) {
+            assertEquals("conversation close failed", error.message)
+            assertEquals(1, error.suppressed.size)
+            assertEquals("engine close failed", error.suppressed.single().message)
+        }
+    }
+
+    @Test
+    fun multiCleanupStopsBeforeFurtherJniAfterFatalFailure() {
+        var engineCleanupRan = false
+
+        try {
+            runAllRuntimeCleanup(
+                { throw OutOfMemoryError("fatal conversation close") },
+                { engineCleanupRan = true },
+            )
+            fail("Fatal cleanup failure should propagate immediately")
+        } catch (error: OutOfMemoryError) {
+            assertEquals("fatal conversation close", error.message)
+        }
+
+        assertFalse(engineCleanupRan)
+    }
+
+    @Test
     fun generationBoundaryAllowsRecoverableExceptions() {
         rethrowNonRecoverableRuntimeFailure(IllegalStateException("recoverable"))
     }
