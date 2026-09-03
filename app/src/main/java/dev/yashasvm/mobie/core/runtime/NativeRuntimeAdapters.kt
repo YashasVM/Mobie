@@ -59,6 +59,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     private val appContext = context.applicationContext
     private val lifecycle = Mutex()
     private val generation = Mutex()
+    private val cancellationState = RuntimeCancellationState()
     private var engine: Engine? = null
     private var conversation: Conversation? = null
     private var visionReady = false
@@ -157,6 +158,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         return flow {
             generation.withLock {
                 cancelRequested = false
+                cancellationState.reset()
                 ensureGenerationMemoryHeadroom()
                 if (conversationDirty) rebuildConversationFromCommittedHistory()
                 val activeConversation = conversation
@@ -242,8 +244,11 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                     rememberCompletedTurn(prompt, partialAnswer.toString(), imagePath)
                     emit(InferenceEvent.Complete)
                 } catch (error: Throwable) {
-                    runRuntimeCleanupPreservingPrimary(error) {
-                        activeConversation.cancelProcess()
+                    rethrowFatalRuntimeFailure(error)
+                    if (cancellationState.shouldAttemptCleanup()) {
+                        cancellationState.attempt {
+                            activeConversation.cancelProcess()
+                        }?.let(error::addSuppressed)
                     }
                     rememberInterruptedTurn(prompt, partialAnswer.toString().takeIf { it.isNotBlank() }, imagePath)
                     rethrowNonRecoverableRuntimeFailure(error)
@@ -257,9 +262,8 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     }
 
     override suspend fun cancel() = withContext(Dispatchers.Default) {
-        cancelRequested = true
-        conversationDirty = true
-        conversation?.cancelProcess()
+        val cancellationFailure = requestCancellationForLifecycleTransition()
+        if (cancellationFailure != null) throw cancellationFailure
         Unit
     }
 
@@ -278,7 +282,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     private fun requestCancellationForLifecycleTransition(): Exception? {
         cancelRequested = true
         conversationDirty = true
-        return captureRecoverableRuntimeFailure {
+        return cancellationState.attempt {
             conversation?.cancelProcess()
         }
     }
@@ -460,6 +464,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         committedHistory = emptyList()
         conversationDirty = false
         cancelRequested = false
+        cancellationState.reset()
         runAllRuntimeCleanup(
             { previousConversation?.close() },
             { previousEngine?.close() },
