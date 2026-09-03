@@ -152,8 +152,14 @@ class ConversationHistoryPolicyTest {
         )
 
         assertTrue(replay.nativeConversationMustRebuild)
-        assertEquals(listOf("new-user-$chunk", "new-answer-$chunk"), replay.history.map { it.text })
-        assertTrue(replay.history.sumOf { it.text.toByteArray(Charsets.UTF_8).size } <= ConversationHistoryPolicy.MAX_RESTORED_UTF8_BYTES)
+        assertEquals(
+            listOf("mid-user-$chunk", "mid-answer-$chunk", "new-user-$chunk", "new-answer-$chunk"),
+            replay.history.map { it.text },
+        )
+        assertTrue(
+            replay.history.sumOf { it.text.toByteArray(Charsets.UTF_8).size } <=
+                ConversationHistoryPolicy.MAX_RESTORED_UTF8_BYTES,
+        )
     }
 
     @Test
