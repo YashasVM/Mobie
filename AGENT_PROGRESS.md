@@ -18,7 +18,7 @@
 - Recoverable LiteRT `cancelProcess()` failure before unload/model switching no longer skips teardown; the old conversation/engine are still released after the generation lock, then the original cancellation error is reported. Exact-tip full Android CI passed at `9917f16f`.
 
 ## In progress
-- Harden `resetConversation()` so a recoverable pre-reset `cancelProcess()` failure cannot abort conversation repair/replacement before the generation/lifecycle locks are acquired; preserve cancellation/fatal-error semantics and report the original recoverable cancellation failure only after safe state repair.
+- Validate reset cancellation hardening at `474269e0`: recoverable pre-reset `cancelProcess()` failure is now deferred until after the generation/lifecycle locks and conversation repair/replacement; coroutine cancellation and fatal failures still escape before further JNI work.
 - Continue auditing runtime lifecycle and backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
 
 ## Tests actually performed
@@ -34,7 +34,7 @@
 - No physical-device speed claim yet; emulator numbers are regression baselines only.
 
 ## Known problems / regressions
-- `resetConversation()` still calls native cancellation before acquiring generation/lifecycle locks; a recoverable `cancelProcess()` failure can currently abort reset before conversation repair/replacement begins.
+- Reset cancellation hardening is implemented but exact-tip full Android CI and a deliberately injected recoverable native cancellation failure are still pending validation.
 - Vision history and interrupted-generation recovery still need representative physical-device testing.
 - GGUF remains intentionally unavailable; v1 currently relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU execution remains disabled until representative phones show a reliable net benefit.
