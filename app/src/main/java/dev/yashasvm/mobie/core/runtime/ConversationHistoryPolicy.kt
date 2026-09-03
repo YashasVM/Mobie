@@ -28,6 +28,11 @@ internal object ConversationHistoryPolicy {
     private const val MAX_CONTEXT_SCALE = 8
     private const val MAX_SCALED_MESSAGES = 64
 
+    data class CompletedTurnReplay(
+        val history: List<RuntimeMessage>,
+        val nativeConversationMustRebuild: Boolean,
+    )
+
     fun select(
         history: List<RuntimeMessage>,
         contextWindowTokens: Int = DEFAULT_CONTEXT_WINDOW_TOKENS,
@@ -104,6 +109,31 @@ internal object ConversationHistoryPolicy {
         }
 
         return selectedNewestFirst.asReversed().flatten()
+    }
+
+    /**
+     * Commits a successful turn to the bounded replay history and reports whether the already-live
+     * native LiteRT conversation must be rebuilt before the next prompt. LiteRT keeps every turn
+     * sent to a Conversation; if replay selection evicts older turns but the native Conversation is
+     * left alive, later context admission would budget against less history than native inference
+     * actually retains. Rebuilding on the next turn keeps the native KV context and this policy in
+     * lockstep without paying a recreation cost on ordinary short conversations.
+     */
+    fun afterCompletedTurn(
+        committedHistory: List<RuntimeMessage>,
+        prompt: String,
+        answer: String,
+        imagePath: String? = null,
+        contextWindowTokens: Int = DEFAULT_CONTEXT_WINDOW_TOKENS,
+    ): CompletedTurnReplay {
+        val extended = committedHistory +
+            RuntimeMessage(fromUser = true, text = prompt, imagePath = imagePath) +
+            RuntimeMessage(fromUser = false, text = answer)
+        val selected = select(extended, contextWindowTokens)
+        return CompletedTurnReplay(
+            history = selected,
+            nativeConversationMustRebuild = selected != extended,
+        )
     }
 
     /**
