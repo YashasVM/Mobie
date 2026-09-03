@@ -15,16 +15,17 @@
 - Unknown-size LiteRT artifacts remain discoverable with a warning but are excluded from automatic device recommendations until RAM/storage/cache fit can be measured from a concrete artifact size.
 - Recheck free storage immediately before LiteRT model initialization so a model downloaded under healthy storage cannot enter native first-load cache generation after other files consume the reserved space.
 - LiteRT load/reset and streaming generation boundaries now preserve cancellation and VM-fatal errors instead of converting them into ordinary recoverable failures; exact-tip Android CI including real Qwen E2E passed.
+- Fail closed before native LiteRT initialization when the installed model is missing/empty or free storage cannot be measured; exact-tip Android CI including real Qwen E2E passed.
 
 ## In progress
-- Fail closed before native LiteRT initialization when the installed model is missing/empty or free storage cannot be measured; focused JVM regression coverage is committed and exact-tip Android CI is pending.
+- Tighten fatal generation failure ordering so VM-fatal/native-fatal errors are classified before any follow-up JNI `cancelProcess()` cleanup call; recoverable failures still need normal cancellation/history repair.
 - Continue auditing runtime cleanup/failure ordering and backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
 
 ## Tests actually performed
+- Missing-model/unverifiable-storage preflight tip `787c8753` passed Android CI: JVM tests, lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E path.
 - Fatal streaming-generation lifecycle tip `abdfaa4d` passed Android CI: JVM tests, lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E path.
 - Fatal LiteRT load/reset lifecycle tip `0a5bf00a` passed Android CI: JVM tests, lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E path.
 - First-load storage admission tip `6f5c2cf5` passed Android CI: JVM tests, lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E path.
-- Fail-closed missing-model/unverifiable-storage preflight has focused JVM coverage committed; exact-tip Android CI is pending.
 - Earlier interruption recovery, vision-history restoration, backend/platform filtering, persistent LiteRT cache, resumable download, storage admission, corruption detection, thermal safeguards, context-window wiring, replacement-load memory handling, stop-generation ordering, conversation lifecycle, and context-bound generation fixes passed the same Android CI pipeline at their validated tips where applicable.
 
 ## Real benchmarks / performance improvements
@@ -34,7 +35,7 @@
 - No physical-device speed claim yet; emulator numbers are regression baselines only.
 
 ## Known problems / regressions
-- Fail-closed missing-model/unverifiable-storage load preflight is not yet exact-tip CI validated.
+- Fatal generation failures are rethrown, but the current catch path still invokes native cancellation before classifying the failure; this cleanup ordering should be hardened before relying on fatal-error behavior on physical devices.
 - Vision history and interrupted-generation recovery still need representative physical-device testing.
 - GGUF remains intentionally unavailable; v1 currently relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU execution remains disabled until representative phones show a reliable net benefit.
@@ -42,8 +43,8 @@
 - First-load cache sizing, thermal behavior, LMK admission, image-slot behavior, and long-conversation context pressure still need physical-device validation.
 
 ## Inspect before merging
+- Force an actual low-memory/native fatal failure during LiteRT generation and verify no additional native cancellation/cleanup call is attempted before the fatal error escapes; repeat during load/reset where applicable.
 - Delete or truncate an installed model file and verify Mobie blocks before native LiteRT initialization with a recovery message; repeat with a storage location whose free-space stat cannot be read.
-- Force an actual low-memory/native fatal failure during LiteRT generation and verify it escapes the recoverable inference-error path instead of being surfaced as an ordinary chat failure; repeat during load/reset.
 - Fill internal storage after downloading a model but before its first load; verify Mobie blocks before native LiteRT initialization and succeeds after enough storage is freed.
 - Force a recoverable vision-backend initialization failure and verify Mobie still falls back GPU → CPU → text-only; under genuine OOM/fatal runtime failure, verify it does not launch further fallback engine attempts.
 - Drive a 4K conversation through enough completed turns to trigger replay eviction; verify the next prompt rebuilds from bounded recent history instead of retaining stale native KV context.
