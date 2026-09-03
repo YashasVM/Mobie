@@ -83,6 +83,22 @@ class CompatibilityResolverTest {
     }
 
     @Test
+    fun `device selector never auto recommends an artifact with unknown size`() {
+        val model = AiModel(
+            id = "example/model",
+            title = "Example",
+            author = "example",
+            description = "",
+            artifacts = listOf(artifact(size = 0, name = "unknown-size.litertlm")),
+        )
+
+        assertNull(resolver.selectBestArtifact(model, device))
+        val directResult = resolver.resolve(model.artifacts.single(), device)
+        assertEquals(Compatibility.WARNING, directResult.status)
+        assertTrue(directResult.reason.contains("cannot safely estimate RAM or storage"))
+    }
+
+    @Test
     fun `device selector does not recommend artifacts that cannot fit storage`() {
         val model = AiModel(
             id = "example/model",
