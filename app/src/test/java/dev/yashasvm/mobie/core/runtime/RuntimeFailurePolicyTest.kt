@@ -101,6 +101,85 @@ class RuntimeFailurePolicyTest {
     }
 
     @Test
+    fun capturesRecoverableCancellationFailureForLaterTeardown() {
+        val failure = captureRecoverableRuntimeFailure {
+            throw IllegalStateException("cancelProcess failed")
+        }
+
+        assertEquals("cancelProcess failed", failure?.message)
+    }
+
+    @Test
+    fun captureBoundaryRethrowsCancellation() {
+        try {
+            captureRecoverableRuntimeFailure {
+                throw CancellationException("scope cancelled")
+            }
+            fail("CancellationException should propagate")
+        } catch (error: CancellationException) {
+            assertEquals("scope cancelled", error.message)
+        }
+    }
+
+    @Test
+    fun captureBoundaryRethrowsFatalVmErrors() {
+        try {
+            captureRecoverableRuntimeFailure {
+                throw OutOfMemoryError("fatal cancel")
+            }
+            fail("OutOfMemoryError should propagate")
+        } catch (error: OutOfMemoryError) {
+            assertEquals("fatal cancel", error.message)
+        }
+    }
+
+    @Test
+    fun deferredFailureRunsTeardownBeforeRethrowingPrimaryFailure() {
+        var cleanedUp = false
+        val primary = IllegalStateException("cancelProcess failed")
+
+        try {
+            rethrowAfterRuntimeCleanup(primary) {
+                cleanedUp = true
+            }
+            fail("Primary failure should propagate after teardown")
+        } catch (error: IllegalStateException) {
+            assertTrue(cleanedUp)
+            assertEquals("cancelProcess failed", error.message)
+        }
+    }
+
+    @Test
+    fun deferredFailurePreservesRecoverableCleanupFailureAsSuppressed() {
+        val primary = IllegalStateException("cancelProcess failed")
+
+        try {
+            rethrowAfterRuntimeCleanup(primary) {
+                throw IllegalArgumentException("close failed")
+            }
+            fail("Primary failure should propagate")
+        } catch (error: IllegalStateException) {
+            assertEquals("cancelProcess failed", error.message)
+            assertEquals(1, error.suppressed.size)
+            assertEquals("close failed", error.suppressed.single().message)
+        }
+    }
+
+    @Test
+    fun deferredFailureStopsOnFatalCleanupFailure() {
+        val primary = IllegalStateException("cancelProcess failed")
+
+        try {
+            rethrowAfterRuntimeCleanup(primary) {
+                throw OutOfMemoryError("fatal close")
+            }
+            fail("Fatal cleanup failure should take precedence")
+        } catch (error: OutOfMemoryError) {
+            assertEquals("fatal close", error.message)
+        }
+    }
+
+    @Test
     fun multiCleanupContinuesAfterRecoverableFailure() {
         val actions = mutableListOf<String>()
 
