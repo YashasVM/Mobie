@@ -19,12 +19,14 @@
 - Reset cancellation hardening at `474269e0` is full-CI validated: recoverable pre-reset `cancelProcess()` failure is deferred until after generation/lifecycle locks and conversation repair/replacement; cancellation and fatal failures preserve their required ordering.
 - Generation cleanup ordering at `9458e0d8` is full-CI validated: periodic low-memory/thermal guard failures use the single outer cleanup boundary, recoverable `cancelProcess()` cleanup failures stay suppressed behind the primary failure, and duplicate JNI cancellation is avoided.
 - Dirty-conversation rebuild replacement ordering is full-CI validated at `4e6e511a`: replacement is installed before stale `Conversation.close()`, so a recoverable close failure cannot remove the usable conversation.
+- Explicit reset replacement ordering is full-CI validated at `ddbce7f9`: reset installs the replacement before closing the stale conversation, and recoverable pre-reset cancellation failure remains primary while reset/close cleanup errors stay diagnostic.
 
 ## In progress
-- Apply the same replacement-before-close safety to explicit `resetConversation()`. A recoverable close failure must leave the new conversation installed; if pre-reset cancellation also failed, keep that original cancellation failure primary and attach replacement/close failure diagnostics.
+- Harden LiteRT model-load and engine-initialization failure cleanup so a recoverable cleanup/JNI failure cannot mask the real load error or prevent stale runtime state from being cleared after failed conversation creation.
 - Continue auditing runtime lifecycle and backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
 
 ## Tests actually performed
+- Explicit-reset replacement tip `ddbce7f9` passed full Android CI: JVM tests, lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E path.
 - Dirty-conversation rebuild tip `4e6e511a` passed full Android CI: JVM tests, lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E path.
 - Generation cleanup-ordering tip `9458e0d8`, reset-cancellation code tip `474269e0`, cancellation-safe teardown tip `9917f16f`, and teardown-hardening tip `07c87115` passed the same full Android CI pipeline.
 - Fatal load/init cleanup-ordering tip `4c6830a1`, fatal generation cleanup-ordering tip `51c43100`, missing-model/storage preflight tip `787c8753`, streaming fatal lifecycle tip `abdfaa4d`, load/reset fatal lifecycle tip `0a5bf00a`, and first-load storage admission tip `6f5c2cf5` passed the same full Android CI pipeline.
@@ -38,7 +40,7 @@
 - No physical-device speed claim yet; emulator numbers are regression baselines only.
 
 ## Known problems / regressions
-- Explicit reset replacement ordering is implemented at the current tip but still needs exact-tip full CI validation.
+- Load/init cleanup failure preservation is being hardened at the current tip and still needs exact-tip full CI validation.
 - Vision history and interrupted-generation recovery still need representative physical-device testing.
 - GGUF remains intentionally unavailable; v1 currently relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU execution remains disabled until representative phones show a reliable net benefit.
@@ -46,6 +48,7 @@
 - First-load cache sizing, thermal behavior, LMK admission, image-slot behavior, and long-conversation context pressure still need physical-device validation.
 
 ## Inspect before merging
+- Force recoverable `Engine.close()`/cleanup failure after `Engine.initialize()` or model-load `createConversation()` fails; verify the original load failure remains primary, cleanup failure is suppressed diagnostic context, and failed conversation setup still clears stale engine/conversation state.
 - Force a recoverable `Conversation.close()` failure during explicit reset and verify the replacement remains installed and usable; if `cancelProcess()` also failed recoverably, verify that cancellation error remains primary and reset/close failure is suppressed.
 - Force a recoverable `Conversation.close()` failure while rebuilding after interrupted/cancelled generation; verify the replacement conversation remains installed and usable even though the close error is surfaced, and verify replacement-creation failure leaves the prior reference available for another repair attempt.
 - Force a low-memory/thermal stop during generation while making `cancelProcess()` throw a recoverable JNI exception; verify the user-visible failure remains the memory/thermal cause and cancellation is attempted once.
