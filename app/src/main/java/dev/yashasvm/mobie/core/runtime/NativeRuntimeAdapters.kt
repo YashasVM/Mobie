@@ -326,12 +326,17 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         val activeEngine = engine
             ?: throw IllegalStateException("Load a model before rebuilding the conversation")
         val previous = conversation
-        conversation = null
-        previous?.close()
-        conversationDirty = true
-        val replacement = activeEngine.createConversation(conversationConfig(committedHistory))
-        conversation = replacement
-        conversationDirty = false
+        replaceRuntimeResourceBeforeClosingPrevious(
+            previous = previous,
+            createReplacement = {
+                activeEngine.createConversation(conversationConfig(committedHistory))
+            },
+            installReplacement = { replacement ->
+                conversation = replacement
+                conversationDirty = false
+            },
+            closePrevious = { stale -> stale.close() },
+        )
     }
 
     private fun rememberCompletedTurn(prompt: String, answer: String, imagePath: String?) {
