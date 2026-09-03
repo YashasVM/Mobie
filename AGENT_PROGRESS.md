@@ -16,12 +16,14 @@
 - Recheck free storage immediately before LiteRT model initialization so a model downloaded under healthy storage cannot enter native first-load cache generation after other files consume the reserved space.
 - LiteRT load/reset and streaming generation boundaries now preserve cancellation and VM-fatal errors instead of converting them into ordinary recoverable failures; exact-tip Android CI including real Qwen E2E passed.
 - Fail closed before native LiteRT initialization when the installed model is missing/empty or free storage cannot be measured; exact-tip Android CI including real Qwen E2E passed.
+- Fatal streaming-generation failures are now classified before JNI cancellation cleanup, so VM-fatal/native-fatal errors escape without a follow-up `cancelProcess()` call; exact-tip Android CI including real Qwen E2E passed.
 
 ## In progress
-- Tighten fatal generation failure ordering so VM-fatal/native-fatal errors are classified before any follow-up JNI `cancelProcess()` cleanup call; recoverable failures still need normal cancellation/history repair.
+- Extend the no-JNI-after-fatal rule to model-load conversation setup and engine-initialization cleanup so `Engine.close()` / `isInitialized()` are not called after a VM-fatal failure; recoverable errors and cancellation still perform normal cleanup.
 - Continue auditing runtime cleanup/failure ordering and backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
 
 ## Tests actually performed
+- Fatal generation cleanup-ordering tip `51c43100` passed Android CI: JVM tests, lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E path.
 - Missing-model/unverifiable-storage preflight tip `787c8753` passed Android CI: JVM tests, lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E path.
 - Fatal streaming-generation lifecycle tip `abdfaa4d` passed Android CI: JVM tests, lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E path.
 - Fatal LiteRT load/reset lifecycle tip `0a5bf00a` passed Android CI: JVM tests, lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E path.
@@ -35,7 +37,7 @@
 - No physical-device speed claim yet; emulator numbers are regression baselines only.
 
 ## Known problems / regressions
-- Fatal generation failures are rethrown, but the current catch path still invokes native cancellation before classifying the failure; this cleanup ordering should be hardened before relying on fatal-error behavior on physical devices.
+- Load/setup fatal cleanup ordering is being hardened now; exact-tip CI for the new policy has not yet completed.
 - Vision history and interrupted-generation recovery still need representative physical-device testing.
 - GGUF remains intentionally unavailable; v1 currently relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU execution remains disabled until representative phones show a reliable net benefit.
@@ -43,7 +45,7 @@
 - First-load cache sizing, thermal behavior, LMK admission, image-slot behavior, and long-conversation context pressure still need physical-device validation.
 
 ## Inspect before merging
-- Force an actual low-memory/native fatal failure during LiteRT generation and verify no additional native cancellation/cleanup call is attempted before the fatal error escapes; repeat during load/reset where applicable.
+- Force an actual low-memory/native fatal failure during LiteRT model initialization and conversation creation; verify no `isInitialized()`, `Engine.close()`, or other cleanup JNI call is attempted after the fatal failure escapes.
 - Delete or truncate an installed model file and verify Mobie blocks before native LiteRT initialization with a recovery message; repeat with a storage location whose free-space stat cannot be read.
 - Fill internal storage after downloading a model but before its first load; verify Mobie blocks before native LiteRT initialization and succeeds after enough storage is freed.
 - Force a recoverable vision-backend initialization failure and verify Mobie still falls back GPU → CPU → text-only; under genuine OOM/fatal runtime failure, verify it does not launch further fallback engine attempts.

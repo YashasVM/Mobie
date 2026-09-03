@@ -14,6 +14,11 @@ internal fun rethrowFatalRuntimeFailure(error: Throwable) {
     if (error !is Exception) throw error
 }
 
+internal inline fun runRuntimeCleanupUnlessFatal(error: Throwable, cleanup: () -> Unit) {
+    rethrowFatalRuntimeFailure(error)
+    cleanup()
+}
+
 internal fun rethrowNonRecoverableRuntimeFailure(error: Throwable) {
     if (error is CancellationException) throw error
     rethrowFatalRuntimeFailure(error)

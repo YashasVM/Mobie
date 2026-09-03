@@ -2,6 +2,7 @@ package dev.yashasvm.mobie.core.runtime
 
 import kotlinx.coroutines.CancellationException
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -59,6 +60,44 @@ class RuntimeFailurePolicyTest {
         } catch (error: OutOfMemoryError) {
             assertEquals("fatal before cleanup", error.message)
         }
+    }
+
+    @Test
+    fun cleanupBoundaryRunsForRecoverableExceptions() {
+        var cleanedUp = false
+
+        runRuntimeCleanupUnlessFatal(IllegalStateException("recoverable")) {
+            cleanedUp = true
+        }
+
+        assertTrue(cleanedUp)
+    }
+
+    @Test
+    fun cleanupBoundaryRunsForCancellation() {
+        var cleanedUp = false
+
+        runRuntimeCleanupUnlessFatal(CancellationException("cancelled")) {
+            cleanedUp = true
+        }
+
+        assertTrue(cleanedUp)
+    }
+
+    @Test
+    fun cleanupBoundarySkipsFatalVmErrors() {
+        var cleanedUp = false
+
+        try {
+            runRuntimeCleanupUnlessFatal(OutOfMemoryError("fatal before JNI cleanup")) {
+                cleanedUp = true
+            }
+            fail("OutOfMemoryError should propagate before cleanup")
+        } catch (error: OutOfMemoryError) {
+            assertEquals("fatal before JNI cleanup", error.message)
+        }
+
+        assertFalse(cleanedUp)
     }
 
     @Test
