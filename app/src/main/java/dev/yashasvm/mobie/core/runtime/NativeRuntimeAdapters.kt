@@ -122,15 +122,26 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                             ?: throw IllegalStateException("Load a model before resetting the conversation")
                         val restored = ConversationHistoryPolicy.select(history, contextWindowTokens)
                         val previous = conversation
-                        conversation = null
-                        previous?.close()
                         conversationDirty = true
-                        val replacement = activeEngine.createConversation(conversationConfig(restored))
-                        conversation = replacement
-                        committedHistory = restored
-                        conversationDirty = false
-                        cancelRequested = false
-                        if (cancellationFailure != null) throw cancellationFailure
+                        val replaceConversation = {
+                            replaceRuntimeResourceBeforeClosingPrevious(
+                                previous = previous,
+                                createReplacement = {
+                                    activeEngine.createConversation(conversationConfig(restored))
+                                },
+                                installReplacement = { replacement ->
+                                    conversation = replacement
+                                    committedHistory = restored
+                                    conversationDirty = false
+                                    cancelRequested = false
+                                },
+                                closePrevious = { stale -> stale.close() },
+                            )
+                        }
+                        if (cancellationFailure != null) {
+                            rethrowAfterRuntimeCleanup(cancellationFailure, replaceConversation)
+                        }
+                        replaceConversation()
                         Unit
                     }
                 }
