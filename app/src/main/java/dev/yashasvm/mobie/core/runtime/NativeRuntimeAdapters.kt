@@ -75,7 +75,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         cancel()
         generation.withLock {
             lifecycle.withLock {
-                runCatching {
+                recoverableRuntimeResult {
                     // Replacement loads must be admitted after the previous native engine is gone.
                     // Keeping the old engine alive here can falsely reject the next model and strand stale RAM.
                     closeRuntime()
@@ -102,7 +102,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                         cancelRequested = false
                         throw error
                     }
-                }.onFailure(::rethrowCancellation)
+                }
             }
         }
     }
@@ -112,7 +112,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
             cancel()
             generation.withLock {
                 lifecycle.withLock {
-                    runCatching {
+                    recoverableRuntimeResult {
                         val activeEngine = engine
                             ?: throw IllegalStateException("Load a model before resetting the conversation")
                         val restored = ConversationHistoryPolicy.select(history, contextWindowTokens)
@@ -126,7 +126,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                         conversationDirty = false
                         cancelRequested = false
                         Unit
-                    }.onFailure(::rethrowCancellation)
+                    }
                 }
             }
         }
