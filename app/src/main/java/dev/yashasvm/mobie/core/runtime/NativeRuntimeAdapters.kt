@@ -230,6 +230,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                     rememberCompletedTurn(prompt, partialAnswer.toString(), imagePath)
                     emit(InferenceEvent.Complete)
                 } catch (error: Throwable) {
+                    rethrowFatalRuntimeFailure(error)
                     activeConversation.cancelProcess()
                     rememberInterruptedTurn(prompt, partialAnswer.toString().takeIf { it.isNotBlank() }, imagePath)
                     rethrowNonRecoverableRuntimeFailure(error)
