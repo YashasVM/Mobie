@@ -114,7 +114,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
 
     override suspend fun resetConversation(history: List<RuntimeMessage>): Result<Unit> =
         withContext(Dispatchers.Default) {
-            cancel()
+            val cancellationFailure = requestCancellationForLifecycleTransition()
             generation.withLock {
                 lifecycle.withLock {
                     recoverableRuntimeResult {
@@ -130,6 +130,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                         committedHistory = restored
                         conversationDirty = false
                         cancelRequested = false
+                        if (cancellationFailure != null) throw cancellationFailure
                         Unit
                     }
                 }
