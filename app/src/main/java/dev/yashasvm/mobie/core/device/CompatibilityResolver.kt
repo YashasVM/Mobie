@@ -15,7 +15,12 @@ class CompatibilityResolver {
         .asSequence()
         .filter {
             it.format == ModelFormat.LITERT_LM &&
-                it.executionTarget == ArtifactExecutionTarget.GENERIC
+                it.executionTarget == ArtifactExecutionTarget.GENERIC &&
+                // Automatic recommendations must be measurable. A missing publisher size means
+                // Mobie cannot estimate RAM, storage, or first-load cache headroom safely; keep the
+                // artifact visible as a warning for manual inspection, but never label it the best
+                // download for this device until Hugging Face returns a concrete size.
+                it.sizeBytes > 0
         }
         .map { artifact -> artifact to resolve(artifact, device) }
         .filter { (_, result) ->
@@ -24,13 +29,9 @@ class CompatibilityResolver {
         .minWithOrNull(
             compareBy<Pair<ModelArtifact, CompatibilityResult>>(
                 { (_, result) -> if (result.status == Compatibility.COMPATIBLE) 0 else 1 },
-                // Unknown publisher size yields zero RAM/storage estimates. Never let that missing
-                // metadata make an unmeasurable warning artifact look cheaper than a warning artifact
-                // whose actual footprint we can estimate.
-                { (artifact, result) -> if (artifact.sizeBytes > 0 && result.estimatedRamBytes > 0) 0 else 1 },
                 { (_, result) -> result.estimatedRamBytes.takeIf { it > 0 } ?: Long.MAX_VALUE },
                 { (_, result) -> result.requiredStorageBytes.takeIf { it > 0 } ?: Long.MAX_VALUE },
-                { (artifact, _) -> artifact.sizeBytes.takeIf { it > 0 } ?: Long.MAX_VALUE },
+                { (artifact, _) -> artifact.sizeBytes },
             ),
         )
         ?.first
@@ -56,7 +57,7 @@ class CompatibilityResolver {
         if (artifact.sizeBytes <= 0) {
             return CompatibilityResult(
                 Compatibility.WARNING,
-                "The publisher did not provide an artifact size. Check storage before downloading.",
+                "The publisher did not provide an artifact size, so Mobie cannot safely estimate RAM or storage for an automatic recommendation.",
                 0,
             )
         }
