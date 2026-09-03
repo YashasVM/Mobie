@@ -315,12 +315,15 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     }
 
     private fun rememberCompletedTurn(prompt: String, answer: String, imagePath: String?) {
-        committedHistory = ConversationHistoryPolicy.select(
-            committedHistory + RuntimeMessage(fromUser = true, text = prompt, imagePath = imagePath) +
-                RuntimeMessage(fromUser = false, text = answer),
-            contextWindowTokens,
+        val replay = ConversationHistoryPolicy.afterCompletedTurn(
+            committedHistory = committedHistory,
+            prompt = prompt,
+            answer = answer,
+            imagePath = imagePath,
+            contextWindowTokens = contextWindowTokens,
         )
-        conversationDirty = false
+        committedHistory = replay.history
+        conversationDirty = replay.nativeConversationMustRebuild
     }
 
     private fun rememberInterruptedTurn(prompt: String, partialAnswer: String?, imagePath: String?) {
