@@ -20,7 +20,7 @@
 - Generation cleanup ordering at `9458e0d8` is full-CI validated: periodic low-memory/thermal guard failures use the single outer cleanup boundary, recoverable `cancelProcess()` cleanup failures stay suppressed behind the primary failure, and duplicate JNI cancellation is avoided.
 
 ## In progress
-- Harden dirty-conversation rebuild after interrupted/cancelled generation so a recoverable `Conversation.close()` failure cannot drop the active reference and abort before a replacement conversation is installed.
+- Dirty-conversation rebuild now creates and installs the replacement before closing the stale native conversation, so recoverable close failure cannot leave Mobie without an active conversation; exact-tip Android CI validation is pending.
 - Continue auditing runtime lifecycle and backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
 
 ## Tests actually performed
@@ -38,7 +38,7 @@
 - No physical-device speed claim yet; emulator numbers are regression baselines only.
 
 ## Known problems / regressions
-- Dirty-conversation rebuild currently clears the conversation reference before calling native `Conversation.close()`; a recoverable close failure can abort that repair attempt before replacement creation, leaving recovery deferred to another prompt.
+- Dirty-conversation rebuild ordering fix is implemented but not yet full-CI validated at the current branch tip.
 - Vision history and interrupted-generation recovery still need representative physical-device testing.
 - GGUF remains intentionally unavailable; v1 currently relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU execution remains disabled until representative phones show a reliable net benefit.
@@ -46,7 +46,7 @@
 - First-load cache sizing, thermal behavior, LMK admission, image-slot behavior, and long-conversation context pressure still need physical-device validation.
 
 ## Inspect before merging
-- Force a recoverable `Conversation.close()` failure while rebuilding after an interrupted/cancelled generation; verify Mobie reaches a safe replacement conversation state and preserves useful diagnostics without masking any replacement failure.
+- Force a recoverable `Conversation.close()` failure while rebuilding after an interrupted/cancelled generation; verify the replacement conversation remains installed and usable even though the close error is surfaced, and verify replacement-creation failure leaves the prior reference available for another repair attempt.
 - Force a low-memory/thermal stop during generation while making `cancelProcess()` throw a recoverable JNI exception; verify the user-visible failure remains the memory/thermal cause, cleanup failure is only suppressed diagnostic context, and cancellation is attempted once rather than twice.
 - Force a recoverable `cancelProcess()` failure during `resetConversation()` and verify reset still reaches a safe repaired/replaced conversation state before returning the original cancellation error; verify coroutine cancellation and fatal failure trigger no extra JNI cleanup.
 - Force recoverable `cancelProcess()` failure during unload/model switching and verify the old conversation/engine still close after active generation exits, the original cancellation error is returned, and a retry can load cleanly; verify fatal cancellation failure triggers no further JNI cleanup.
