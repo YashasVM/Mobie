@@ -76,10 +76,10 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         generation.withLock {
             lifecycle.withLock {
                 runCatching {
-                    // Replacement loads must be admitted against RAM after the previous native engine is gone.
+                    // Replacement loads must be admitted after the previous native engine is gone.
                     // Keeping the old engine alive here can falsely reject the next model and strand stale RAM.
                     closeRuntime()
-                    ensureLoadMemoryHeadroom(modelPath)
+                    ensureLoadHeadroom(modelPath)
                     ExperimentalFlags.enableBenchmark = true
                     val configuredContextWindowTokens = runtimeContextWindowTokens(modelPath)
                     val loadedEngine = initializeEngineWithVisionFallback(modelPath, vision)
@@ -371,12 +371,12 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         )
     }
 
-    private fun ensureLoadMemoryHeadroom(modelPath: String) {
+    private fun ensureLoadHeadroom(modelPath: String) {
         val manager = appContext.getSystemService(ActivityManager::class.java)
         val memory = ActivityManager.MemoryInfo().also(manager::getMemoryInfo)
         val modelFile = File(modelPath)
         val contextWindowTokens = runtimeContextWindowTokens(modelPath)
-        val reason = RuntimeLoadMemoryPolicy.blockReason(
+        val memoryReason = RuntimeLoadMemoryPolicy.blockReason(
             modelWeightsBytes = modelFile.length(),
             totalRamBytes = memory.totalMem,
             availableRamBytes = memory.availMem,
@@ -386,7 +386,13 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
             thermalStatus = currentThermalStatus(),
             contextWindowTokens = contextWindowTokens,
         )
-        if (reason != null) throw IllegalStateException(reason)
+        if (memoryReason != null) throw IllegalStateException(memoryReason)
+
+        val storageReason = RuntimeLoadStoragePolicy.blockReason(
+            modelWeightsBytes = modelFile.length(),
+            availableStorageBytes = modelFile.absoluteFile.parentFile?.usableSpace ?: -1,
+        )
+        if (storageReason != null) throw IllegalStateException(storageReason)
     }
 
     private fun ensureGenerationMemoryHeadroom() {
