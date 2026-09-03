@@ -15,11 +15,13 @@
 - Unknown-size LiteRT artifacts remain discoverable with a warning but are excluded from automatic device recommendations until RAM/storage/cache fit can be measured from a concrete artifact size.
 
 ## In progress
+- Recheck free storage immediately before LiteRT model initialization so a model downloaded under healthy storage cannot enter native first-load cache generation after other files consume the reserved space; focused JVM boundary coverage is committed and exact-tip Android CI is pending.
 - Continue auditing runtime fatal-error handling and backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
 
 ## Tests actually performed
 - Merged baseline `ac5ffe3c` passed Android CI on `main`: JVM tests, lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E path.
 - Unknown-size recommendation safety has focused JVM regression coverage and was included in the exact merged baseline that passed the full Android CI pipeline.
+- First-load storage admission has focused JVM tests covering insufficient cache headroom, healthy headroom, the minimum cache reserve, and zero-free-space behavior; exact-tip Android CI is pending.
 - Earlier interruption recovery, vision-history restoration, backend/platform filtering, persistent LiteRT cache, resumable download, storage admission, corruption detection, thermal safeguards, context-window wiring, replacement-load memory handling, stop-generation ordering, conversation lifecycle, and context-bound generation fixes passed the same Android CI pipeline at their validated tips where applicable.
 
 ## Real benchmarks / performance improvements
@@ -29,6 +31,7 @@
 - No physical-device speed claim yet; emulator numbers are regression baselines only.
 
 ## Known problems / regressions
+- First-load runtime storage recheck is not yet exact-tip CI validated.
 - Vision history and interrupted-generation recovery still need representative physical-device testing.
 - GGUF remains intentionally unavailable; v1 currently relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU execution remains disabled until representative phones show a reliable net benefit.
@@ -36,6 +39,7 @@
 - First-load cache sizing, thermal behavior, LMK admission, image-slot behavior, and long-conversation context pressure still need physical-device validation.
 
 ## Inspect before merging
+- Fill internal storage after downloading a model but before its first load; verify Mobie blocks before native LiteRT initialization and succeeds after enough storage is freed.
 - Force a recoverable vision-backend initialization failure and verify Mobie still falls back GPU → CPU → text-only; under genuine OOM/fatal runtime failure, verify it does not launch further fallback engine attempts.
 - Drive a 4K conversation through enough completed turns to trigger replay eviction; verify the next prompt rebuilds from bounded recent history instead of retaining stale native KV context.
 - Drive a 4K conversation close to its context limit and verify Mobie clamps the output budget or asks for a shorter/new chat instead of entering native inference at the KV-cache boundary.
