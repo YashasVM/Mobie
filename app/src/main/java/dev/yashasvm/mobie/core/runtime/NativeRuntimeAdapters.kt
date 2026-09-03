@@ -232,12 +232,12 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                 } catch (error: Throwable) {
                     activeConversation.cancelProcess()
                     rememberInterruptedTurn(prompt, partialAnswer.toString().takeIf { it.isNotBlank() }, imagePath)
-                    rethrowCancellation(error)
+                    rethrowNonRecoverableRuntimeFailure(error)
                     emit(InferenceEvent.Error(error.message ?: "Inference failed"))
                 }
             }
         }.catch { error ->
-            rethrowCancellation(error)
+            rethrowNonRecoverableRuntimeFailure(error)
             emit(InferenceEvent.Error(error.message ?: "Inference failed"))
         }.flowOn(Dispatchers.Default)
     }
