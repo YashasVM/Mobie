@@ -19,6 +19,25 @@ internal inline fun runRuntimeCleanupUnlessFatal(error: Throwable, cleanup: () -
     cleanup()
 }
 
+internal fun runAllRuntimeCleanup(vararg cleanup: () -> Unit) {
+    var firstFailure: Exception? = null
+    for (action in cleanup) {
+        try {
+            action()
+        } catch (error: Throwable) {
+            rethrowFatalRuntimeFailure(error)
+            val recoverable = error as Exception
+            val previous = firstFailure
+            if (previous == null) {
+                firstFailure = recoverable
+            } else {
+                previous.addSuppressed(recoverable)
+            }
+        }
+    }
+    firstFailure?.let { throw it }
+}
+
 internal fun rethrowNonRecoverableRuntimeFailure(error: Throwable) {
     if (error is CancellationException) throw error
     rethrowFatalRuntimeFailure(error)
