@@ -11,15 +11,16 @@
 - K-suffixed context/KV markers, large explicit 256K/512K/1M windows, and million-token aliases are exact-tip CI validated.
 - Context-bound generation preflight is exact-tip CI validated: restored text, prompt, template/vision reserve, and requested output are budgeted before native inference.
 - Native LiteRT conversation/replay synchronization after automatic history eviction is exact-tip CI validated.
+- Vision initialization fallback now retries only recoverable backend exceptions; fatal JVM/runtime errors such as `OutOfMemoryError` no longer trigger additional GPU→CPU→text-only engine initialization attempts, and exact-tip Android CI passed.
 
 ## In progress
-- Harden vision initialization fallback so recoverable GPU/CPU backend failures can fall back normally, while fatal JVM/native errors such as `OutOfMemoryError` do not trigger additional expensive engine initialization attempts.
-- Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
+- Prevent automatic device recommendations when Hugging Face does not provide a concrete artifact size; such artifacts remain visible with a warning for manual inspection, but are no longer eligible to be selected as the device's best download because RAM/storage/cache fit cannot be measured safely.
+- Continue auditing runtime fatal-error handling and backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
 
 ## Tests actually performed
-- Latest validated tip `f27feed8` passed Android CI: JVM tests, lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E path.
+- Latest validated tip `99a9fa97` passed Android CI: JVM tests, lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E path.
 - Earlier interruption recovery, vision-history restoration, backend/platform filtering, persistent LiteRT cache, resumable download, storage admission, corruption detection, thermal safeguards, context-window wiring, replacement-load memory handling, stop-generation ordering, conversation lifecycle, and context-bound generation fixes passed the same Android CI pipeline at their validated tips where applicable.
-- Vision fallback fatal-error hardening is committed; exact-tip CI is pending.
+- Unknown-size recommendation safety has focused JVM regression coverage committed; exact-tip Android CI is pending.
 
 ## Real benchmarks / performance improvements
 - CPU-emulator Qwen3-0.6B INT4 baseline: 20.64 prefill tok/s, 7.51 decode tok/s, 1.468 s TTFT, 3.955 s total, ~1.02 GiB app RAM.
@@ -28,7 +29,7 @@
 - No physical-device speed claim yet; emulator numbers are regression baselines only.
 
 ## Known problems / regressions
-- Vision fallback fatal-error hardening is not yet exact-tip CI validated.
+- Unknown-size artifact auto-recommendation hardening is not yet exact-tip CI validated.
 - Vision history and interrupted-generation recovery still need representative physical-device testing.
 - GGUF remains intentionally unavailable; v1 currently relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU execution remains disabled until representative phones show a reliable net benefit.
@@ -36,6 +37,7 @@
 - First-load cache sizing, thermal behavior, LMK admission, image-slot behavior, and long-conversation context pressure still need physical-device validation.
 
 ## Inspect before merging
+- Verify a model whose LiteRT artifact has no published size remains discoverable with a warning but is not auto-selected as the recommended download until a concrete size is available.
 - Force a recoverable vision-backend initialization failure and verify Mobie still falls back GPU → CPU → text-only; under genuine OOM/fatal runtime failure, verify it does not launch further fallback engine attempts.
 - Drive a 4K conversation through enough completed turns to trigger replay eviction; verify the next prompt rebuilds from bounded recent history instead of retaining stale native KV context.
 - Drive a 4K conversation close to its context limit and verify Mobie clamps the output budget or asks for a shorter/new chat instead of entering native inference at the KV-cache boundary.
