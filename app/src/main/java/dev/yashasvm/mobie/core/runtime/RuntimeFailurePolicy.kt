@@ -67,6 +67,17 @@ internal fun runAllRuntimeCleanup(vararg cleanup: () -> Unit) {
     firstFailure?.let { throw it }
 }
 
+internal inline fun <T : Any> replaceRuntimeResourceBeforeClosingPrevious(
+    previous: T?,
+    createReplacement: () -> T,
+    installReplacement: (T) -> Unit,
+    closePrevious: (T) -> Unit,
+) {
+    val replacement = createReplacement()
+    installReplacement(replacement)
+    previous?.let(closePrevious)
+}
+
 internal fun rethrowNonRecoverableRuntimeFailure(error: Throwable) {
     if (error is CancellationException) throw error
     rethrowFatalRuntimeFailure(error)
