@@ -1,6 +1,7 @@
 package dev.yashasvm.mobie.core.runtime
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -115,6 +116,44 @@ class ConversationHistoryPolicyTest {
         val selected = ConversationHistoryPolicy.select(history)
 
         assertEquals(listOf("older user", "older answer"), selected.map { it.text })
+    }
+
+    @Test
+    fun `completed turn keeps native conversation when replay history does not trim`() {
+        val committed = listOf(
+            RuntimeMessage(true, "hello"),
+            RuntimeMessage(false, "hi"),
+        )
+
+        val replay = ConversationHistoryPolicy.afterCompletedTurn(
+            committedHistory = committed,
+            prompt = "how are you",
+            answer = "good",
+        )
+
+        assertEquals(listOf("hello", "hi", "how are you", "good"), replay.history.map { it.text })
+        assertFalse(replay.nativeConversationMustRebuild)
+    }
+
+    @Test
+    fun `completed turn requests native rebuild when replay selection evicts old context`() {
+        val chunk = "x".repeat(700)
+        val committed = listOf(
+            RuntimeMessage(true, "old-user-$chunk"),
+            RuntimeMessage(false, "old-answer-$chunk"),
+            RuntimeMessage(true, "mid-user-$chunk"),
+            RuntimeMessage(false, "mid-answer-$chunk"),
+        )
+
+        val replay = ConversationHistoryPolicy.afterCompletedTurn(
+            committedHistory = committed,
+            prompt = "new-user-$chunk",
+            answer = "new-answer-$chunk",
+        )
+
+        assertTrue(replay.nativeConversationMustRebuild)
+        assertEquals(listOf("new-user-$chunk", "new-answer-$chunk"), replay.history.map { it.text })
+        assertTrue(replay.history.sumOf { it.text.toByteArray(Charsets.UTF_8).size } <= ConversationHistoryPolicy.MAX_RESTORED_UTF8_BYTES)
     }
 
     @Test
