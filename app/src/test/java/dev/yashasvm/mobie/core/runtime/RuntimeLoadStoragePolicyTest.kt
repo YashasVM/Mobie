@@ -53,6 +53,28 @@ class RuntimeLoadStoragePolicyTest {
         )
     }
 
+    @Test
+    fun blocksMissingOrEmptyInstalledModelBeforeNativeInitialization() {
+        val reason = RuntimeLoadStoragePolicy.blockReason(
+            modelWeightsBytes = 0,
+            availableStorageBytes = 2L * GIB,
+        )
+
+        assertNotNull(reason)
+        assertTrue(reason!!.contains("missing or empty"))
+    }
+
+    @Test
+    fun blocksWhenFreeStorageCannotBeMeasured() {
+        val reason = RuntimeLoadStoragePolicy.blockReason(
+            modelWeightsBytes = 350L * MIB,
+            availableStorageBytes = -1,
+        )
+
+        assertNotNull(reason)
+        assertTrue(reason!!.contains("Could not verify free storage"))
+    }
+
     private companion object {
         const val MIB = 1024L * 1024L
         const val GIB = 1024L * MIB
