@@ -72,10 +72,13 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         vision: Boolean,
         history: List<RuntimeMessage>,
     ): Result<Unit> = withContext(Dispatchers.Default) {
-        cancel()
+        val cancellationFailure = requestCancellationForLifecycleTransition()
         generation.withLock {
             lifecycle.withLock {
                 recoverableRuntimeResult {
+                    if (cancellationFailure != null) {
+                        rethrowAfterRuntimeCleanup(cancellationFailure) { closeRuntime() }
+                    }
                     // Replacement loads must be admitted after the previous native engine is gone.
                     // Keeping the old engine alive here can falsely reject the next model and strand stale RAM.
                     closeRuntime()
@@ -254,8 +257,23 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     }
 
     override suspend fun unload() = withContext(Dispatchers.Default) {
-        cancel()
-        generation.withLock { lifecycle.withLock { closeRuntime() } }
+        val cancellationFailure = requestCancellationForLifecycleTransition()
+        generation.withLock {
+            lifecycle.withLock {
+                if (cancellationFailure != null) {
+                    rethrowAfterRuntimeCleanup(cancellationFailure) { closeRuntime() }
+                }
+                closeRuntime()
+            }
+        }
+    }
+
+    private fun requestCancellationForLifecycleTransition(): Exception? {
+        cancelRequested = true
+        conversationDirty = true
+        return captureRecoverableRuntimeFailure {
+            conversation?.cancelProcess()
+        }
     }
 
     private fun initializeEngineWithVisionFallback(modelPath: String, vision: Boolean): LoadedEngine {
