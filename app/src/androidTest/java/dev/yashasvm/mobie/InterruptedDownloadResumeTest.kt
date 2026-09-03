@@ -14,6 +14,7 @@ import java.io.InputStreamReader
 import java.net.ServerSocket
 import java.net.Socket
 import java.security.MessageDigest
+import java.util.Properties
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
@@ -89,6 +90,12 @@ class InterruptedDownloadResumeTest {
             assertEquals("bytes=$splitAt-", observedRange.get())
             val downloaded = File(checkNotNull(result.localPath))
             assertArrayEquals(payload, downloaded.readBytes())
+
+            val metadata = Properties().apply {
+                File(downloaded.parentFile, DownloadFilePolicy.METADATA_FILE).inputStream().use(::load)
+            }
+            assertEquals(downloaded.length().toString(), metadata.getProperty("verifiedLength"))
+            assertEquals(downloaded.lastModified().toString(), metadata.getProperty("verifiedLastModified"))
 
             downloaded.parentFile?.deleteRecursively()
         }

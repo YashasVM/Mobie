@@ -2,6 +2,8 @@ package dev.yashasvm.mobie.core.runtime
 
 import android.app.ActivityManager
 import android.content.Context
+import android.os.Build
+import android.os.PowerManager
 import android.os.SystemClock
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Content
@@ -15,6 +17,7 @@ import com.google.ai.edge.litertlm.ExperimentalFlags
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.SamplerConfig
 import dev.yashasvm.mobie.core.model.ModelFormat
+import dev.yashasvm.mobie.core.model.inferArtifactContextWindow
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +31,9 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+
+internal fun runtimeContextWindowTokens(modelPath: String): Int =
+    inferArtifactContextWindow(File(modelPath).name) ?: DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS
 
 /**
  * Deliberately explicit placeholders for the native bridges. Shipping a fake inference path would
@@ -56,6 +62,10 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     private var engine: Engine? = null
     private var conversation: Conversation? = null
     private var visionReady = false
+    private var contextWindowTokens = DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS
+    private var committedHistory: List<RuntimeMessage> = emptyList()
+    private var conversationDirty = false
+    @Volatile private var cancelRequested = false
 
     override suspend fun load(
         modelPath: String,
@@ -66,18 +76,30 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         generation.withLock {
             lifecycle.withLock {
                 runCatching {
-                    ensureLoadMemoryHeadroom(modelPath)
+                    // Replacement loads must be admitted against RAM after the previous native engine is gone.
+                    // Keeping the old engine alive here can falsely reject the next model and strand stale RAM.
                     closeRuntime()
+                    ensureLoadMemoryHeadroom(modelPath)
                     ExperimentalFlags.enableBenchmark = true
+                    val configuredContextWindowTokens = runtimeContextWindowTokens(modelPath)
                     val loadedEngine = initializeEngineWithVisionFallback(modelPath, vision)
                     try {
+                        contextWindowTokens = configuredContextWindowTokens
+                        val restored = ConversationHistoryPolicy.select(history, contextWindowTokens)
                         engine = loadedEngine.engine
                         visionReady = loadedEngine.visionReady
-                        conversation = loadedEngine.engine.createConversation(conversationConfig(history))
+                        conversation = loadedEngine.engine.createConversation(conversationConfig(restored))
+                        committedHistory = restored
+                        conversationDirty = false
+                        cancelRequested = false
                     } catch (error: Throwable) {
                         loadedEngine.engine.close()
                         engine = null
                         visionReady = false
+                        contextWindowTokens = DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS
+                        committedHistory = emptyList()
+                        conversationDirty = false
+                        cancelRequested = false
                         throw error
                     }
                 }.onFailure(::rethrowCancellation)
@@ -93,10 +115,16 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                     runCatching {
                         val activeEngine = engine
                             ?: throw IllegalStateException("Load a model before resetting the conversation")
-                        val replacement = activeEngine.createConversation(conversationConfig(history))
+                        val restored = ConversationHistoryPolicy.select(history, contextWindowTokens)
                         val previous = conversation
-                        conversation = replacement
+                        conversation = null
                         previous?.close()
+                        conversationDirty = true
+                        val replacement = activeEngine.createConversation(conversationConfig(restored))
+                        conversation = replacement
+                        committedHistory = restored
+                        conversationDirty = false
+                        cancelRequested = false
                         Unit
                     }.onFailure(::rethrowCancellation)
                 }
@@ -107,89 +135,116 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         prompt: String,
         imagePath: String?,
         config: GenerationConfig,
-    ): Flow<InferenceEvent> = flow {
-        generation.withLock {
-            ensureGenerationMemoryHeadroom()
-            val activeConversation = conversation
-                ?: throw IllegalStateException("Load a model before starting a conversation")
-            if (imagePath != null && !visionReady) {
-                throw IllegalStateException(
-                    "Vision initialization failed on this device. The model is still available for text-only chat.",
+    ): Flow<InferenceEvent> {
+        val partialAnswer = StringBuilder()
+        return flow {
+            generation.withLock {
+                cancelRequested = false
+                ensureGenerationMemoryHeadroom()
+                if (conversationDirty) rebuildConversationFromCommittedHistory()
+                val activeConversation = conversation
+                    ?: throw IllegalStateException("Load a model before starting a conversation")
+                if (imagePath != null && !visionReady) {
+                    throw IllegalStateException(
+                        "Vision initialization failed on this device. The model is still available for text-only chat.",
+                    )
+                }
+                val safeMaxOutputTokens = GenerationContextPolicy.maxOutputTokens(
+                    contextWindowTokens = contextWindowTokens,
+                    history = committedHistory,
+                    prompt = prompt,
+                    requestedMaxOutputTokens = config.maxNewTokens,
+                    hasImage = imagePath != null,
                 )
-            }
-            val contents = if (imagePath == null) {
-                Contents.of(prompt)
-            } else {
-                // LiteRT-LM's multimodal guidance expects text before media content.
-                Contents.of(Content.Text(prompt), Content.ImageFile(imagePath))
-            }
-            val generationStartedAt = SystemClock.elapsedRealtime()
-            var lastMemoryCheckAt = generationStartedAt
-            var firstTokenAt: Long? = null
-            var emittedVisibleOutput = false
-            var emittedReasoning = false
-            activeConversation.sendMessageAsync(contents, maxOutputToken = config.maxNewTokens).collect { chunk ->
-                currentCoroutineContext().ensureActive()
-                val now = SystemClock.elapsedRealtime()
-                if (RuntimeLoadMemoryPolicy.shouldRecheckGenerationMemory(lastMemoryCheckAt, now)) {
-                    lastMemoryCheckAt = now
-                    try {
-                        ensureGenerationMemoryHeadroom()
-                    } catch (error: IllegalStateException) {
-                        activeConversation.cancelProcess()
-                        throw error
-                    }
-                }
-                val reasoning = chunk.channels.entries
-                    .filter { (name, _) -> name.lowercase() in REASONING_CHANNELS }
-                    .joinToString("") { it.value }
-                val visibleChannels = chunk.channels.entries
-                    .filterNot { (name, _) -> name.lowercase() in REASONING_CHANNELS }
-                    .joinToString("") { it.value }
-                val answer = visibleChannels.ifEmpty { if (reasoning.isEmpty()) chunk.toString() else "" }
-                if (reasoning.isNotEmpty()) {
-                    if (firstTokenAt == null) firstTokenAt = SystemClock.elapsedRealtime()
-                    emittedReasoning = true
-                    emit(InferenceEvent.Token(reasoning, thinking = true))
-                }
-                if (answer.isNotEmpty()) {
-                    if (firstTokenAt == null) firstTokenAt = SystemClock.elapsedRealtime()
-                    emittedVisibleOutput = true
-                    emit(InferenceEvent.Token(answer))
-                }
-            }
-            val generationFinishedAt = SystemClock.elapsedRealtime()
-            val benchmark = activeConversation.getBenchmarkInfo()
-            emit(
-                InferenceEvent.Stats(
-                    InferenceStats(
-                        tokensPerSecond = benchmark.lastDecodeTokensPerSecond,
-                        ramBytes = currentAppRamBytes(),
-                        timeToFirstTokenMs = firstTokenAt?.minus(generationStartedAt) ?: 0,
-                        totalGenerationMs = generationFinishedAt - generationStartedAt,
-                        prefillTokensPerSecond = benchmark.lastPrefillTokensPerSecond,
-                        prefillTokenCount = benchmark.lastPrefillTokenCount,
-                        decodeTokenCount = benchmark.lastDecodeTokenCount,
-                    ),
-                ),
-            )
-            if (!emittedVisibleOutput) {
-                val message = if (emittedReasoning) {
-                    "The model used its output budget for reasoning before producing a final answer. Retry with a larger output limit or disable thinking for this prompt."
+                val contents = if (imagePath == null) {
+                    Contents.of(prompt)
                 } else {
-                    "The model completed without producing a response."
+                    Contents.of(Content.Text(prompt), Content.ImageFile(imagePath))
                 }
-                emit(InferenceEvent.Error(message))
-                return@withLock
+                val generationStartedAt = SystemClock.elapsedRealtime()
+                var lastMemoryCheckAt = generationStartedAt
+                var firstTokenAt: Long? = null
+                var emittedVisibleOutput = false
+                var emittedReasoning = false
+                try {
+                    activeConversation.sendMessageAsync(contents, maxOutputToken = safeMaxOutputTokens).collect { chunk ->
+                        currentCoroutineContext().ensureActive()
+                        if (cancelRequested) throw CancellationException("Generation cancelled")
+                        val now = SystemClock.elapsedRealtime()
+                        if (RuntimeLoadMemoryPolicy.shouldRecheckGenerationMemory(lastMemoryCheckAt, now)) {
+                            lastMemoryCheckAt = now
+                            try {
+                                ensureGenerationMemoryHeadroom()
+                            } catch (error: IllegalStateException) {
+                                activeConversation.cancelProcess()
+                                throw error
+                            }
+                        }
+                        val reasoning = chunk.channels.entries
+                            .filter { (name, _) -> name.lowercase() in REASONING_CHANNELS }
+                            .joinToString("") { it.value }
+                        val visibleChannels = chunk.channels.entries
+                            .filterNot { (name, _) -> name.lowercase() in REASONING_CHANNELS }
+                            .joinToString("") { it.value }
+                        val answer = visibleChannels.ifEmpty { if (reasoning.isEmpty()) chunk.toString() else "" }
+                        if (reasoning.isNotEmpty()) {
+                            if (firstTokenAt == null) firstTokenAt = SystemClock.elapsedRealtime()
+                            emittedReasoning = true
+                            emit(InferenceEvent.Token(reasoning, thinking = true))
+                        }
+                        if (answer.isNotEmpty()) {
+                            if (firstTokenAt == null) firstTokenAt = SystemClock.elapsedRealtime()
+                            emittedVisibleOutput = true
+                            partialAnswer.append(answer)
+                            emit(InferenceEvent.Token(answer))
+                        }
+                    }
+                    if (cancelRequested) throw CancellationException("Generation cancelled")
+
+                    val generationFinishedAt = SystemClock.elapsedRealtime()
+                    val benchmark = activeConversation.getBenchmarkInfo()
+                    emit(
+                        InferenceEvent.Stats(
+                            InferenceStats(
+                                tokensPerSecond = benchmark.lastDecodeTokensPerSecond,
+                                ramBytes = currentAppRamBytes(),
+                                timeToFirstTokenMs = firstTokenAt?.minus(generationStartedAt) ?: 0,
+                                totalGenerationMs = generationFinishedAt - generationStartedAt,
+                                prefillTokensPerSecond = benchmark.lastPrefillTokensPerSecond,
+                                prefillTokenCount = benchmark.lastPrefillTokenCount,
+                                decodeTokenCount = benchmark.lastDecodeTokenCount,
+                            ),
+                        ),
+                    )
+                    if (!emittedVisibleOutput) {
+                        rememberInterruptedTurn(prompt, null, imagePath)
+                        val message = if (emittedReasoning) {
+                            "The model used its output budget for reasoning before producing a final answer. Retry with a larger output limit or disable thinking for this prompt."
+                        } else {
+                            "The model completed without producing a response."
+                        }
+                        emit(InferenceEvent.Error(message))
+                        return@withLock
+                    }
+                    if (cancelRequested) throw CancellationException("Generation cancelled")
+                    rememberCompletedTurn(prompt, partialAnswer.toString(), imagePath)
+                    emit(InferenceEvent.Complete)
+                } catch (error: Throwable) {
+                    activeConversation.cancelProcess()
+                    rememberInterruptedTurn(prompt, partialAnswer.toString().takeIf { it.isNotBlank() }, imagePath)
+                    rethrowCancellation(error)
+                    emit(InferenceEvent.Error(error.message ?: "Inference failed"))
+                }
             }
-            emit(InferenceEvent.Complete)
-        }
-    }.catch { error ->
-        rethrowCancellation(error)
-        emit(InferenceEvent.Error(error.message ?: "Inference failed"))
-    }.flowOn(Dispatchers.Default)
+        }.catch { error ->
+            rethrowCancellation(error)
+            emit(InferenceEvent.Error(error.message ?: "Inference failed"))
+        }.flowOn(Dispatchers.Default)
+    }
 
     override suspend fun cancel() = withContext(Dispatchers.Default) {
+        cancelRequested = true
+        conversationDirty = true
         conversation?.cancelProcess()
         Unit
     }
@@ -203,41 +258,106 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         if (!vision) return LoadedEngine(initializeEngine(modelPath, visionBackend = null), visionReady = false)
 
         return try {
-            LoadedEngine(initializeEngine(modelPath, visionBackend = Backend.CPU()), visionReady = true)
-        } catch (multimodalError: Throwable) {
-            rethrowCancellation(multimodalError)
+            LoadedEngine(initializeEngine(modelPath, visionBackend = Backend.GPU()), visionReady = true)
+        } catch (gpuVisionError: Exception) {
+            rethrowCancellation(gpuVisionError)
             try {
-                LoadedEngine(initializeEngine(modelPath, visionBackend = null), visionReady = false)
-            } catch (textOnlyError: Throwable) {
-                rethrowCancellation(textOnlyError)
-                textOnlyError.addSuppressed(multimodalError)
-                throw textOnlyError
+                LoadedEngine(initializeEngine(modelPath, visionBackend = Backend.CPU()), visionReady = true)
+            } catch (cpuVisionError: Exception) {
+                rethrowCancellation(cpuVisionError)
+                try {
+                    LoadedEngine(initializeEngine(modelPath, visionBackend = null), visionReady = false)
+                } catch (textOnlyError: Exception) {
+                    rethrowCancellation(textOnlyError)
+                    textOnlyError.addSuppressed(gpuVisionError)
+                    textOnlyError.addSuppressed(cpuVisionError)
+                    throw textOnlyError
+                }
             }
         }
     }
 
     private fun initializeEngine(modelPath: String, visionBackend: Backend?): Engine {
+        val cacheDirectory = File(File(modelPath).absoluteFile.parentFile, LITERT_CACHE_DIRECTORY).apply {
+            if (!isDirectory && !mkdirs()) {
+                throw IllegalStateException("Could not create LiteRT cache directory beside the installed model.")
+            }
+        }
         val createdEngine = Engine(
             EngineConfig(
                 modelPath = modelPath,
                 backend = Backend.CPU(),
                 visionBackend = visionBackend,
-                cacheDir = appContext.cacheDir.absolutePath,
+                maxNumTokens = runtimeContextWindowTokens(modelPath),
+                maxNumImages = if (visionBackend != null) 1 else null,
+                cacheDir = cacheDirectory.absolutePath,
             ),
         )
         try {
             createdEngine.initialize()
             return createdEngine
         } catch (error: Throwable) {
-            // Engine.close() requires successful initialization, so only close initialized engines.
             if (createdEngine.isInitialized()) createdEngine.close()
             throw error
         }
     }
 
+    private fun rebuildConversationFromCommittedHistory() {
+        val activeEngine = engine
+            ?: throw IllegalStateException("Load a model before rebuilding the conversation")
+        val previous = conversation
+        conversation = null
+        previous?.close()
+        conversationDirty = true
+        val replacement = activeEngine.createConversation(conversationConfig(committedHistory))
+        conversation = replacement
+        conversationDirty = false
+    }
+
+    private fun rememberCompletedTurn(prompt: String, answer: String, imagePath: String?) {
+        val replay = ConversationHistoryPolicy.afterCompletedTurn(
+            committedHistory = committedHistory,
+            prompt = prompt,
+            answer = answer,
+            imagePath = imagePath,
+            contextWindowTokens = contextWindowTokens,
+        )
+        committedHistory = replay.history
+        conversationDirty = replay.nativeConversationMustRebuild
+    }
+
+    private fun rememberInterruptedTurn(prompt: String, partialAnswer: String?, imagePath: String?) {
+        committedHistory = ConversationHistoryPolicy.afterInterruptedTurn(
+            committedHistory = committedHistory,
+            prompt = prompt,
+            partialAnswer = partialAnswer,
+            imagePath = imagePath,
+            contextWindowTokens = contextWindowTokens,
+        )
+        conversationDirty = true
+    }
+
     private fun conversationConfig(history: List<RuntimeMessage>): ConversationConfig {
-        val restored = ConversationHistoryPolicy.select(history).map {
-            if (it.fromUser) Message.user(it.text) else Message.model(it.text)
+        val selected = ConversationHistoryPolicy.select(history, contextWindowTokens)
+        val restoredImageIndex = VisionHistoryPolicy.latestUsableImageIndex(
+            history = selected,
+            visionReady = visionReady,
+        ) { path ->
+            File(path).let { it.isFile && it.canRead() }
+        }
+        val restored = selected.mapIndexed { index, message ->
+            if (!message.fromUser) {
+                Message.model(message.text)
+            } else if (index == restoredImageIndex && message.imagePath != null) {
+                Message.user(
+                    Contents.of(
+                        Content.Text(message.text),
+                        Content.ImageFile(message.imagePath),
+                    ),
+                )
+            } else {
+                Message.user(message.text)
+            }
         }
         return ConversationConfig(
             initialMessages = restored,
@@ -254,13 +374,17 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     private fun ensureLoadMemoryHeadroom(modelPath: String) {
         val manager = appContext.getSystemService(ActivityManager::class.java)
         val memory = ActivityManager.MemoryInfo().also(manager::getMemoryInfo)
+        val modelFile = File(modelPath)
+        val contextWindowTokens = runtimeContextWindowTokens(modelPath)
         val reason = RuntimeLoadMemoryPolicy.blockReason(
-            modelWeightsBytes = File(modelPath).length(),
+            modelWeightsBytes = modelFile.length(),
             totalRamBytes = memory.totalMem,
             availableRamBytes = memory.availMem,
             lowMemoryThresholdBytes = memory.threshold,
             isLowMemory = memory.lowMemory,
             isLowRamDevice = manager.isLowRamDevice,
+            thermalStatus = currentThermalStatus(),
+            contextWindowTokens = contextWindowTokens,
         )
         if (reason != null) throw IllegalStateException(reason)
     }
@@ -268,8 +392,20 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     private fun ensureGenerationMemoryHeadroom() {
         val manager = appContext.getSystemService(ActivityManager::class.java)
         val memory = ActivityManager.MemoryInfo().also(manager::getMemoryInfo)
-        val reason = RuntimeLoadMemoryPolicy.generationBlockReason(memory.lowMemory)
+        val reason = RuntimeLoadMemoryPolicy.generationBlockReason(
+            isLowMemory = memory.lowMemory,
+            thermalStatus = currentThermalStatus(),
+            availableRamBytes = memory.availMem,
+            lowMemoryThresholdBytes = memory.threshold,
+            totalRamBytes = memory.totalMem,
+        )
         if (reason != null) throw IllegalStateException(reason)
+    }
+
+    private fun currentThermalStatus(): Int = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        appContext.getSystemService(PowerManager::class.java).currentThermalStatus
+    } else {
+        PowerManager.THERMAL_STATUS_NONE
     }
 
     private fun closeRuntime() {
@@ -278,6 +414,10 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         engine?.close()
         engine = null
         visionReady = false
+        contextWindowTokens = DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS
+        committedHistory = emptyList()
+        conversationDirty = false
+        cancelRequested = false
     }
 
     private fun currentAppRamBytes(): Long {
@@ -297,9 +437,12 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
 
     private companion object {
         const val DEFAULT_MAX_OUTPUT_TOKENS = 256
+        const val LITERT_CACHE_DIRECTORY = ".litert-cache"
         val REASONING_CHANNELS = setOf(
             "analysis", "thinking", "reasoning", "reasoning_content", "thought", "thoughts",
             "deliberation", "scratchpad", "chain_of_thought", "chain-of-thought", "cot",
         )
     }
 }
+
+private const val DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS = 4_096

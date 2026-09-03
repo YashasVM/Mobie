@@ -31,4 +31,7 @@ internal object DownloadFilePolicy {
 
     fun remainingBytes(expectedSize: Long, partialSize: Long): Long =
         (expectedSize - partialSize).coerceAtLeast(0)
+
+    fun hasSpaceForRemaining(totalBytes: Long, downloadedBytes: Long, usableSpaceBytes: Long): Boolean =
+        totalBytes <= 0 || remainingBytes(totalBytes, downloadedBytes) <= usableSpaceBytes
 }

@@ -1,18 +1,53 @@
 package dev.yashasvm.mobie.core.device
 
+import dev.yashasvm.mobie.core.model.AiModel
+import dev.yashasvm.mobie.core.model.ArtifactExecutionTarget
 import dev.yashasvm.mobie.core.model.Compatibility
 import dev.yashasvm.mobie.core.model.CompatibilityResult
 import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
+import dev.yashasvm.mobie.core.model.estimateLiteRtRuntimeMemory
 import kotlin.math.max
 
 class CompatibilityResolver {
+    fun selectBestArtifact(model: AiModel, device: DeviceProfile): ModelArtifact? = model.artifacts
+        .asSequence()
+        .filter {
+            it.format == ModelFormat.LITERT_LM &&
+                it.executionTarget == ArtifactExecutionTarget.GENERIC &&
+                // Automatic recommendations must be measurable. A missing publisher size means
+                // Mobie cannot estimate RAM, storage, or first-load cache headroom safely; keep the
+                // artifact visible as a warning for manual inspection, but never label it the best
+                // download for this device until Hugging Face returns a concrete size.
+                it.sizeBytes > 0
+        }
+        .map { artifact -> artifact to resolve(artifact, device) }
+        .filter { (_, result) ->
+            result.status == Compatibility.COMPATIBLE || result.status == Compatibility.WARNING
+        }
+        .minWithOrNull(
+            compareBy<Pair<ModelArtifact, CompatibilityResult>>(
+                { (_, result) -> if (result.status == Compatibility.COMPATIBLE) 0 else 1 },
+                { (_, result) -> result.estimatedRamBytes.takeIf { it > 0 } ?: Long.MAX_VALUE },
+                { (_, result) -> result.requiredStorageBytes.takeIf { it > 0 } ?: Long.MAX_VALUE },
+                { (artifact, _) -> artifact.sizeBytes },
+            ),
+        )
+        ?.first
+
     fun resolve(artifact: ModelArtifact?, device: DeviceProfile): CompatibilityResult {
         if (artifact == null || artifact.format != ModelFormat.LITERT_LM) {
             return CompatibilityResult(
                 Compatibility.CONVERSION_REQUIRED,
                 "Mobie v1 runs published LiteRT-LM artifacts only.",
+                0,
+            )
+        }
+        if (artifact.executionTarget != ArtifactExecutionTarget.GENERIC) {
+            return CompatibilityResult(
+                Compatibility.INCOMPATIBLE,
+                "This package targets device-specific acceleration that Mobie's current runtime does not support yet.",
                 0,
             )
         }
@@ -22,16 +57,14 @@ class CompatibilityResolver {
         if (artifact.sizeBytes <= 0) {
             return CompatibilityResult(
                 Compatibility.WARNING,
-                "The publisher did not provide an artifact size. Check storage before downloading.",
+                "The publisher did not provide an artifact size, so Mobie cannot safely estimate RAM or storage for an automatic recommendation.",
                 0,
             )
         }
 
-        // Conservative fixed KV allowance until published LiteRT metadata exposes architecture dimensions.
-        val kvCache = 256L * MIB
-        val runtimeOverhead = max((artifact.sizeBytes * 0.4).toLong(), 512L * MIB)
-        val estimatedRam = artifact.sizeBytes + runtimeOverhead + kvCache
-        val requiredStorage = artifact.sizeBytes + max(artifact.sizeBytes / 20, 64L * MIB)
+        val memoryEstimate = requireNotNull(estimateLiteRtRuntimeMemory(artifact))
+        val estimatedRam = memoryEstimate.estimatedRamBytes
+        val requiredStorage = requiredStorageBytes(artifact.sizeBytes)
         val memoryReserve = max(device.lowMemoryThresholdBytes, device.totalRamBytes / 20)
         val availableFraction = if (device.isLowRamDevice) 0.75 else 0.85
         val totalFraction = if (device.isLowRamDevice) 0.70 else 0.80
@@ -41,13 +74,16 @@ class CompatibilityResolver {
             reason = reason,
             estimatedRamBytes = estimatedRam,
             modelWeightsBytes = artifact.sizeBytes,
-            runtimeOverheadBytes = runtimeOverhead,
-            kvCacheBytes = kvCache,
-            contextWindowTokens = 4_096,
+            runtimeOverheadBytes = memoryEstimate.runtimeOverheadBytes,
+            kvCacheBytes = memoryEstimate.kvCacheBytes,
+            contextWindowTokens = memoryEstimate.contextWindowTokens,
             requiredStorageBytes = requiredStorage,
         )
         if (requiredStorage > device.availableStorageBytes) {
-            return result(Compatibility.INCOMPATIBLE, "Not enough free storage, including download headroom.")
+            return result(
+                Compatibility.INCOMPATIBLE,
+                "Not enough free storage for the model, download headroom, and LiteRT's first-load optimized cache.",
+            )
         }
         if (estimatedRam > device.totalRamBytes * totalFraction) {
             val reason = if (device.isLowRamDevice) {
@@ -63,6 +99,12 @@ class CompatibilityResolver {
                 "Android reports active memory pressure. Free memory before loading this model.",
             )
         }
+        if (device.thermalStatus >= THERMAL_STATUS_SEVERE) {
+            return result(
+                Compatibility.WARNING,
+                "Android reports severe thermal pressure. Let the device cool before loading a local model.",
+            )
+        }
         if (estimatedRam > safeAvailableRam) {
             val reason = if (device.isLowRamDevice) {
                 "The model may fit, but this low-RAM device needs extra Android memory headroom. Close other apps first."
@@ -74,5 +116,21 @@ class CompatibilityResolver {
         return result(Compatibility.COMPATIBLE, "Expected to fit this device with Android memory headroom reserved.")
     }
 
-    private companion object { const val MIB = 1024L * 1024L }
+    /**
+     * LiteRT-LM optimizes model weights for the current device on first load and stores those
+     * artifacts in the configured cache directory. Reserve persistent cache space in addition to
+     * the model and download margin so a download is not recommended when first inference is
+     * likely to exhaust storage. The cache allowance is intentionally conservative until Mobie can
+     * measure per-model cache growth on representative physical devices.
+     */
+    internal fun requiredStorageBytes(modelWeightsBytes: Long): Long {
+        val downloadHeadroom = max(modelWeightsBytes / 20, 64L * MIB)
+        val optimizedCacheHeadroom = max(modelWeightsBytes * 3 / 10, 256L * MIB)
+        return modelWeightsBytes + downloadHeadroom + optimizedCacheHeadroom
+    }
+
+    private companion object {
+        const val MIB = 1024L * 1024L
+        const val THERMAL_STATUS_SEVERE = 3
+    }
 }

@@ -26,8 +26,10 @@ import dev.yashasvm.mobie.ui.RuntimeState
 import dev.yashasvm.mobie.ui.theme.MobieTheme
 import java.io.File
 import java.io.FileOutputStream
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertTrue
@@ -42,6 +44,8 @@ class LiteRtEndToEndTest {
         const val TAG = "MobieRuntimeE2E"
         const val PROMPT = "Hey, who are you? Reply briefly."
         const val FOLLOW_UP_PROMPT = "Reply with one short sentence confirming you can answer a second prompt."
+        const val CANCEL_PROMPT = "Write a long numbered list of 100 different practical uses for a local AI model on a phone."
+        const val RECOVERY_PROMPT = "Reply with one short sentence confirming generation recovered after cancellation."
         const val RESET_PROMPT = "Reply with one short sentence confirming a fresh conversation works."
         const val RELOAD_PROMPT = "Reply with one short sentence confirming the model was reloaded."
     }
@@ -50,7 +54,7 @@ class LiteRtEndToEndTest {
     val composeRule = createComposeRule()
 
     @Test
-    fun downloadsLoadsGeneratesResetsConversationAndReloadsRealLiteRtModel() = runBlocking {
+    fun downloadsLoadsGeneratesRecoversFromCancellationResetsAndReloadsRealLiteRtModel() = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("litertE2E") == "true")
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
@@ -84,6 +88,28 @@ class LiteRtEndToEndTest {
         Log.i(TAG, "Follow-up response: ${followUpEvents.visibleOutput()}")
         logStats("second prompt", followUpEvents)
 
+        val cancelledEvents = mutableListOf<InferenceEvent>()
+        val firstCancelledToken = CompletableDeferred<Unit>()
+        val cancellationJob = launch {
+            runCatching {
+                runtime.generate(CANCEL_PROMPT, config = GenerationConfig(maxNewTokens = 512)).collect { event ->
+                    cancelledEvents += event
+                    if (event is InferenceEvent.Token) firstCancelledToken.complete(Unit)
+                }
+            }
+        }
+        withTimeout(2 * 60 * 1000L) { firstCancelledToken.await() }
+        runtime.cancel()
+        withTimeout(2 * 60 * 1000L) { cancellationJob.join() }
+        assertTrue(
+            "Cancelled generation was incorrectly committed as complete",
+            cancelledEvents.none { it is InferenceEvent.Complete },
+        )
+        val recoveryEvents = generate(runtime, RECOVERY_PROMPT, maxNewTokens = 64)
+        assertSuccessfulGeneration("post-cancellation prompt", recoveryEvents)
+        Log.i(TAG, "Recovery response: ${recoveryEvents.visibleOutput()}")
+        logStats("post-cancellation prompt", recoveryEvents)
+
         val resetStartedNs = SystemClock.elapsedRealtimeNanos()
         runtime.resetConversation(
             listOf(
@@ -114,6 +140,7 @@ class LiteRtEndToEndTest {
             artifact = artifact,
             first = firstEvents.stats(),
             followUp = followUpEvents.stats(),
+            recovery = recoveryEvents.stats(),
             reset = resetEvents.stats(),
             reload = reloadEvents.stats(),
             resetSetupMs = resetSetupMs,
@@ -192,6 +219,7 @@ class LiteRtEndToEndTest {
         artifact: ModelArtifact,
         first: InferenceStats,
         followUp: InferenceStats,
+        recovery: InferenceStats,
         reset: InferenceStats,
         reload: InferenceStats,
         resetSetupMs: Double,
@@ -207,6 +235,7 @@ class LiteRtEndToEndTest {
                 appendLine("full_unload_reload_ms=$fullReloadSetupMs")
                 appendLine(metricsLine("first", first))
                 appendLine(metricsLine("second", followUp))
+                appendLine(metricsLine("post_cancel", recovery))
                 appendLine(metricsLine("reset", reset))
                 appendLine(metricsLine("reload", reload))
             },

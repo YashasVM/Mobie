@@ -6,22 +6,26 @@ import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkManager
 import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import dev.yashasvm.mobie.core.model.AiModel
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
 import dev.yashasvm.mobie.core.model.ModelType
-import java.util.UUID
 import java.io.File
-import java.util.Properties
-import java.util.concurrent.TimeUnit
 import java.io.FileInputStream
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
+import java.util.Properties
+import java.util.UUID
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
+
 
 data class DownloadProgress(
     val state: WorkInfo.State,
@@ -43,13 +47,15 @@ class ModelDownloadManager(context: Context) {
 
     suspend fun completedFile(modelId: String, artifact: ModelArtifact): File? = kotlinx.coroutines.withContext(Dispatchers.IO) {
         val directory = File(File(appContext.filesDir, "models"), DownloadFilePolicy.storageKey(modelId))
+        val metadataFile = File(directory, DownloadFilePolicy.METADATA_FILE)
+        val metadata = metadataFile.takeIf(File::isFile)?.let(::readProperties)
         listOf(DownloadFilePolicy.storageFileName(artifact.fileName), DownloadFilePolicy.safeFileName(artifact.fileName))
             .asSequence()
             .map { File(directory, it) }
             .firstOrNull { file ->
                 file.isFile &&
                     (artifact.sizeBytes <= 0 || file.length() == artifact.sizeBytes) &&
-                    (artifact.sha256.isNullOrBlank() || sha256(file) == artifact.sha256.lowercase())
+                    verifiedOrValid(file, artifact.sha256, metadata, metadataFile)
             }
     }
 
@@ -110,15 +116,16 @@ class ModelDownloadManager(context: Context) {
         .listFiles(File::isDirectory)
         .orEmpty()
         .mapNotNull { directory ->
-            val metadata = File(directory, DownloadFilePolicy.METADATA_FILE).takeIf(File::isFile)
+            val metadataFile = File(directory, DownloadFilePolicy.METADATA_FILE).takeIf(File::isFile)
                 ?: return@mapNotNull null
-            val properties = Properties().apply { metadata.inputStream().use(::load) }
-            val file = File(directory, properties.getProperty("fileName") ?: return@mapNotNull null)
-                .takeIf(File::isFile) ?: return@mapNotNull null
+            val properties = readProperties(metadataFile)
+            val storedFileName = properties.getProperty("fileName") ?: return@mapNotNull null
+            val file = File(directory, storedFileName).takeIf(File::isFile) ?: return@mapNotNull null
             val expectedSha = properties.getProperty("sha256")?.ifBlank { null }
-            if (expectedSha != null && sha256(file) != expectedSha.lowercase()) return@mapNotNull null
+            if (!verifiedOrValid(file, expectedSha, properties, metadataFile)) return@mapNotNull null
+            val sourceFileName = properties.getProperty("sourceFileName")?.ifBlank { null } ?: storedFileName
             val artifact = ModelArtifact(
-                fileName = file.name,
+                fileName = sourceFileName,
                 downloadUrl = "",
                 sizeBytes = file.length(),
                 sha256 = expectedSha,
@@ -152,6 +159,51 @@ class ModelDownloadManager(context: Context) {
             Properties().apply { load(input) }.getProperty("modelId")
         }
         storedId == model.id && directory.deleteRecursively()
+    }
+
+    private fun verifiedOrValid(
+        file: File,
+        expectedSha: String?,
+        properties: Properties?,
+        metadataFile: File,
+    ): Boolean {
+        if (!ModelFileVerification.matchesInstalledLength(properties, file)) return false
+        val remoteSha = expectedSha?.trim()?.lowercase()?.takeIf(String::isNotBlank)
+        val localSha = ModelFileVerification.localSha256(properties)
+        val trustedSha = remoteSha ?: localSha ?: return true
+        if (properties != null) {
+            val fingerprintMatches = if (remoteSha != null) {
+                ModelFileVerification.canReuseShaVerification(properties, file, remoteSha)
+            } else {
+                ModelFileVerification.canReuseLocalVerification(properties, file)
+            }
+            if (fingerprintMatches) return true
+        }
+        if (sha256(file) != trustedSha) return false
+        if (properties != null && metadataFile.isFile) {
+            ModelFileVerification.stamp(properties, file, trustedSha)
+            writePropertiesAtomically(metadataFile, properties)
+        }
+        return true
+    }
+
+    private fun readProperties(file: File): Properties = Properties().apply {
+        file.inputStream().use(::load)
+    }
+
+    private fun writePropertiesAtomically(destination: File, properties: Properties) {
+        val partial = File(destination.path + ".part")
+        partial.outputStream().use { properties.store(it, null) }
+        try {
+            Files.move(
+                partial.toPath(),
+                destination.toPath(),
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        } catch (_: AtomicMoveNotSupportedException) {
+            Files.move(partial.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
     }
 
     private fun sha256(file: File): String {

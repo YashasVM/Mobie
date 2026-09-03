@@ -9,6 +9,7 @@ import dev.yashasvm.mobie.core.model.AiModel
 import dev.yashasvm.mobie.core.model.Compatibility
 import dev.yashasvm.mobie.core.model.CompatibilityResult
 import dev.yashasvm.mobie.core.model.DeviceProfile
+import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.runtime.InferenceEvent
 import dev.yashasvm.mobie.core.runtime.InferenceStats
 import dev.yashasvm.mobie.core.runtime.RuntimeMessage
@@ -18,6 +19,7 @@ import dev.yashasvm.mobie.data.history.ChatHistorySession
 import dev.yashasvm.mobie.data.history.HistoryMessage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,7 +30,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 
-enum class RuntimeState { IDLE, LOADING, READY, GENERATING, ERROR }
+enum class RuntimeState { IDLE, LOADING, READY, GENERATING, STOPPING, ERROR }
 
 data class ChatMessage(
     val fromUser: Boolean,
@@ -36,6 +38,7 @@ data class ChatMessage(
     val imagePath: String? = null,
     val thinking: String = "",
     val rawText: String? = null,
+    val interrupted: Boolean = false,
 )
 
 data class MobieUiState(
@@ -43,6 +46,7 @@ data class MobieUiState(
     val recentModels: List<AiModel> = emptyList(),
     val installedModels: List<InstalledModelEntry> = emptyList(),
     val selected: AiModel? = null,
+    val selectedArtifact: ModelArtifact? = null,
     val compatibility: CompatibilityResult? = null,
     val device: DeviceProfile? = null,
     val query: String = "",
@@ -120,15 +124,17 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                     if (expectedQuery == null || state.value.query == expectedQuery) {
                         val device = container.deviceProfile.current()
                         val compatible = models
+                            .map { model -> model.preferArtifact(artifactForDevice(model, device)) }
                             .sortedWith(
-                                compareBy<AiModel> {
-                                    when (container.compatibility.resolve(it.bestArtifact, device).status) {
+                                compareBy<AiModel> { model ->
+                                    val artifact = model.bestArtifact
+                                    when (container.compatibility.resolve(artifact, device).status) {
                                         Compatibility.COMPATIBLE -> 0
                                         Compatibility.WARNING -> 1
                                         else -> 2
                                     }
                                 }
-                                    .thenBy { it.bestArtifact?.sizeBytes ?: Long.MAX_VALUE }
+                                    .thenBy { model -> model.bestArtifact?.sizeBytes ?: Long.MAX_VALUE }
                                     .thenByDescending { it.downloads },
                             )
                         mutableState.update { it.copy(models = compatible, device = device, loading = false) }
@@ -148,21 +154,23 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         inferenceJob?.cancel()
         if (model == null) viewModelScope.launch { unloadRuntime() }
         val device = container.deviceProfile.current()
-        val artifact = model?.bestArtifact
-        val sessions = model?.let { container.chatHistory.sessions(it.id) }.orEmpty()
+        val artifact = model?.let { artifactForDevice(it, device) }
+        val presentedModel = model?.preferArtifact(artifact)
+        val sessions = presentedModel?.let { container.chatHistory.sessions(it.id) }.orEmpty()
         val currentSessionId = sessions.firstOrNull()?.id
         mutableState.update {
             it.copy(
-                selected = model,
-                recentModels = if (model == null) it.recentModels else {
-                    (listOf(model) + it.recentModels.filterNot { recent -> recent.id == model.id }).take(5)
+                selected = presentedModel,
+                selectedArtifact = artifact,
+                recentModels = if (presentedModel == null) it.recentModels else {
+                    (listOf(presentedModel) + it.recentModels.filterNot { recent -> recent.id == presentedModel.id }).take(5)
                 },
                 compatibility = artifact?.let { candidate -> container.compatibility.resolve(candidate, device) },
                 download = null,
                 downloadedPath = null,
                 chatting = false,
                 runtimeState = RuntimeState.IDLE,
-                messages = model?.let(::readHistory).orEmpty(),
+                messages = presentedModel?.let(::readHistory).orEmpty(),
                 history = sessions,
                 sessionId = currentSessionId,
                 stats = null,
@@ -170,11 +178,15 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 device = device,
             )
         }
-        if (model != null && artifact != null) {
-            observeDownload(model, artifact)
+        if (presentedModel != null && artifact != null) {
+            observeDownload(presentedModel, artifact)
             viewModelScope.launch(Dispatchers.IO) {
-                val downloaded = container.downloads.completedFile(model.id, artifact)?.absolutePath
-                if (downloaded != null && state.value.selected?.id == model.id) {
+                val downloaded = container.downloads.completedFile(presentedModel.id, artifact)?.absolutePath
+                if (
+                    downloaded != null &&
+                    state.value.selected?.id == presentedModel.id &&
+                    state.value.selectedArtifact == artifact
+                ) {
                     mutableState.update { it.copy(downloadedPath = downloaded) }
                 }
             }
@@ -182,8 +194,9 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun download(allowWarning: Boolean = false) {
-        val model = state.value.selected ?: return
-        val artifact = model.bestArtifact ?: return
+        val current = state.value
+        val model = current.selected ?: return
+        val artifact = current.selectedArtifact ?: return
         val device = container.deviceProfile.current()
         val compatibility = container.compatibility.resolve(artifact, device)
         mutableState.update { it.copy(device = device, compatibility = compatibility, error = null) }
@@ -202,8 +215,9 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun cancelDownload() {
-        val model = state.value.selected ?: return
-        val artifact = model.bestArtifact ?: return
+        val current = state.value
+        val model = current.selected ?: return
+        val artifact = current.selectedArtifact ?: return
         container.downloads.cancel(model, artifact)
     }
 
@@ -223,7 +237,9 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     private fun openChat(path: String) {
-        val model = state.value.selected ?: return
+        val current = state.value
+        val model = current.selected ?: return
+        val artifact = current.selectedArtifact ?: return
         val history = readHistory(model)
         val sessions = container.chatHistory.sessions(model.id)
         mutableState.update {
@@ -239,22 +255,30 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         }
         inferenceJob?.cancel()
         inferenceJob = viewModelScope.launch {
-            loadRuntimeConversation(model, path, history, preferReset = false)
+            loadRuntimeConversation(model, artifact, path, history, preferReset = false)
         }
     }
 
     private suspend fun loadRuntimeConversation(
         model: AiModel,
+        artifact: ModelArtifact,
         path: String,
         history: List<ChatMessage>,
         preferReset: Boolean,
     ) {
-        val adapter = container.runtimes.adapterFor(model.bestArtifact?.format ?: return)
+        val adapter = container.runtimes.adapterFor(artifact.format)
         if (adapter == null) {
             mutableState.update { it.copy(runtimeState = RuntimeState.ERROR, error = "No runtime for this model") }
             return
         }
-        val restored = history.map { RuntimeMessage(it.fromUser, it.text) }
+        val restored = history.map {
+            RuntimeMessage(
+                fromUser = it.fromUser,
+                text = it.text,
+                interrupted = it.interrupted,
+                imagePath = it.imagePath,
+            )
+        }
         val result = runtimeLifecycle.withLock {
             if (preferReset) {
                 val reset = adapter.resetConversation(restored)
@@ -274,10 +298,12 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun sendMessage(prompt: String, imagePath: String? = null) {
-        val model = state.value.selected ?: return
-        if (prompt.isBlank() || state.value.runtimeState != RuntimeState.READY) return
+        val current = state.value
+        val model = current.selected ?: return
+        val artifact = current.selectedArtifact ?: return
+        if (prompt.isBlank() || current.runtimeState != RuntimeState.READY) return
         if (imagePath != null && !model.supportsVision) return
-        val adapter = container.runtimes.adapterFor(model.bestArtifact?.format ?: return) ?: return
+        val adapter = container.runtimes.adapterFor(artifact.format) ?: return
         mutableState.update {
             it.copy(
                 runtimeState = RuntimeState.GENERATING,
@@ -290,12 +316,12 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         inferenceJob = viewModelScope.launch {
             adapter.generate(prompt.trim(), imagePath).collect { event ->
                 when (event) {
-                    is InferenceEvent.Token -> mutableState.update { current ->
-                        current.copy(messages = current.messages.updateLastAssistant(event.text, event.thinking))
+                    is InferenceEvent.Token -> mutableState.update { currentState ->
+                        currentState.copy(messages = currentState.messages.updateLastAssistant(event.text, event.thinking))
                     }
                     is InferenceEvent.Stats -> mutableState.update { it.copy(stats = event.value) }
                     is InferenceEvent.Error -> {
-                        val messages = state.value.messages.removeBlankAssistant()
+                        val messages = state.value.messages.removeBlankAssistant().markLastAssistantInterrupted()
                         persistHistory(model.id, messages)
                         mutableState.update {
                             it.copy(
@@ -318,19 +344,41 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun stopGeneration() {
-        if (state.value.runtimeState != RuntimeState.GENERATING) return
-        inferenceJob?.cancel()
-        val model = state.value.selected
-        val messages = state.value.messages.removeBlankAssistant()
-        if (model != null) persistHistory(model.id, messages)
-        mutableState.update { it.copy(runtimeState = RuntimeState.READY, messages = messages, error = null) }
-        viewModelScope.launch { container.runtimes.all().forEach { it.cancel() } }
+        val current = state.value
+        if (current.runtimeState != RuntimeState.GENERATING) return
+        val activeInference = inferenceJob
+        val modelId = current.selected?.id
+        val sessionId = current.sessionId
+        val messages = current.messages.removeBlankAssistant().markLastAssistantInterrupted()
+        if (modelId != null) persistHistory(modelId, messages)
+        mutableState.update {
+            it.copy(runtimeState = RuntimeState.STOPPING, messages = messages, error = null)
+        }
+        viewModelScope.launch {
+            activeInference?.cancelAndJoin()
+            mutableState.update { latest ->
+                if (
+                    latest.runtimeState == RuntimeState.STOPPING &&
+                    latest.selected?.id == modelId &&
+                    latest.sessionId == sessionId
+                ) {
+                    latest.copy(
+                        runtimeState = RuntimeState.READY,
+                        history = modelId?.let { container.chatHistory.sessions(it) }.orEmpty(),
+                    )
+                } else {
+                    latest
+                }
+            }
+        }
     }
 
     fun newChat() {
-        val model = state.value.selected ?: return
-        val path = state.value.downloadedPath ?: return
-        val canReuseLoadedModel = state.value.runtimeState == RuntimeState.READY
+        val current = state.value
+        val model = current.selected ?: return
+        val artifact = current.selectedArtifact ?: return
+        val path = current.downloadedPath ?: return
+        val canReuseLoadedModel = current.runtimeState == RuntimeState.READY
         inferenceJob?.cancel()
         container.chatHistory.startNewSession(model.id)
         mutableState.update {
@@ -344,7 +392,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             )
         }
         inferenceJob = viewModelScope.launch {
-            loadRuntimeConversation(model, path, emptyList(), preferReset = canReuseLoadedModel)
+            loadRuntimeConversation(model, artifact, path, emptyList(), preferReset = canReuseLoadedModel)
         }
     }
 
@@ -380,9 +428,11 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun selectHistory(sessionId: String) {
-        val model = state.value.selected ?: return
-        val path = state.value.downloadedPath ?: return
-        val canReuseLoadedModel = state.value.runtimeState == RuntimeState.READY
+        val current = state.value
+        val model = current.selected ?: return
+        val artifact = current.selectedArtifact ?: return
+        val path = current.downloadedPath ?: return
+        val canReuseLoadedModel = current.runtimeState == RuntimeState.READY
         container.chatHistory.activate(model.id, sessionId)
         val history = readHistory(model)
         inferenceJob?.cancel()
@@ -397,7 +447,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             )
         }
         inferenceJob = viewModelScope.launch {
-            loadRuntimeConversation(model, path, history, preferReset = canReuseLoadedModel)
+            loadRuntimeConversation(model, artifact, path, history, preferReset = canReuseLoadedModel)
         }
     }
 
@@ -406,11 +456,15 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         mutableState.update { it.copy(tokenConfigured = token.isNotBlank()) }
     }
 
-    private fun observeDownload(model: AiModel, artifact: dev.yashasvm.mobie.core.model.ModelArtifact) {
+    private fun observeDownload(model: AiModel, artifact: ModelArtifact) {
         downloadObserverJob?.cancel()
         downloadObserverJob = viewModelScope.launch {
             container.downloads.observe(model.id, artifact).collect { progress ->
-                if (state.value.selected?.id != model.id || progress == null) return@collect
+                if (
+                    state.value.selected?.id != model.id ||
+                    state.value.selectedArtifact != artifact ||
+                    progress == null
+                ) return@collect
                 val completedPath = if (progress.state == WorkInfo.State.SUCCEEDED) {
                     withContext(Dispatchers.IO) {
                         container.downloads.completedFile(model.id, artifact)?.absolutePath
@@ -440,14 +494,19 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    private fun artifactForDevice(model: AiModel, device: DeviceProfile): ModelArtifact? =
+        container.compatibility.selectBestArtifact(model, device) ?: model.bestArtifact
+
     private fun readHistory(model: AiModel): List<ChatMessage> = container.chatHistory.read(model.id).map {
-        ChatMessage(it.fromUser, it.text, it.imagePath, it.thinking)
+        ChatMessage(it.fromUser, it.text, it.imagePath, it.thinking, interrupted = it.interrupted)
     }
 
     private fun persistHistory(modelId: String, messages: List<ChatMessage>) {
         container.chatHistory.write(
             modelId,
-            messages.map { HistoryMessage(it.fromUser, it.text, it.imagePath, it.thinking) },
+            messages.map {
+                HistoryMessage(it.fromUser, it.text, it.imagePath, it.thinking, it.interrupted)
+            },
         )
     }
 
@@ -486,6 +545,14 @@ internal fun List<ChatMessage>.updateLastAssistant(chunk: String, thinkingChunk:
             else -> (raw.substring(0, open) + raw.substring(close + tag!!.first.length + 3)).trim()
         }
         this[index] = message.copy(text = answer, thinking = thinking, rawText = raw)
+    }
+}
+
+internal fun List<ChatMessage>.markLastAssistantInterrupted(): List<ChatMessage> {
+    val index = indexOfLast { !it.fromUser }
+    if (index < 0) return this
+    return toMutableList().apply {
+        this[index] = this[index].copy(interrupted = true)
     }
 }
 
