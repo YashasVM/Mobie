@@ -12,7 +12,12 @@ import kotlin.math.max
  */
 internal object RuntimeLoadStoragePolicy {
     fun blockReason(modelWeightsBytes: Long, availableStorageBytes: Long): String? {
-        if (modelWeightsBytes <= 0 || availableStorageBytes < 0) return null
+        if (modelWeightsBytes <= 0) {
+            return "The installed model file is missing or empty. Verify or download the model again before loading it."
+        }
+        if (availableStorageBytes < 0) {
+            return "Could not verify free storage for LiteRT initialization. Check model storage access and try again."
+        }
 
         val optimizedCacheHeadroom = max(modelWeightsBytes / 10 * 3, 256L * MIB)
         val filesystemReserve = max(modelWeightsBytes / 20, 64L * MIB)
