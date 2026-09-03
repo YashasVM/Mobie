@@ -16,7 +16,12 @@ internal fun rethrowFatalRuntimeFailure(error: Throwable) {
 
 internal inline fun runRuntimeCleanupUnlessFatal(error: Throwable, cleanup: () -> Unit) {
     rethrowFatalRuntimeFailure(error)
-    cleanup()
+    try {
+        cleanup()
+    } catch (cleanupError: Throwable) {
+        rethrowFatalRuntimeFailure(cleanupError)
+        error.addSuppressed(cleanupError)
+    }
 }
 
 internal inline fun runRuntimeCleanupPreservingPrimary(primary: Throwable, cleanup: () -> Unit) {
