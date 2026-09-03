@@ -40,4 +40,29 @@ class RuntimeFailurePolicyTest {
             assertEquals("fatal", error.message)
         }
     }
+
+    @Test
+    fun generationBoundaryAllowsRecoverableExceptions() {
+        rethrowNonRecoverableRuntimeFailure(IllegalStateException("recoverable"))
+    }
+
+    @Test
+    fun generationBoundaryRethrowsCancellation() {
+        try {
+            rethrowNonRecoverableRuntimeFailure(CancellationException("cancelled"))
+            fail("CancellationException should propagate")
+        } catch (error: CancellationException) {
+            assertEquals("cancelled", error.message)
+        }
+    }
+
+    @Test
+    fun generationBoundaryRethrowsFatalVmErrors() {
+        try {
+            rethrowNonRecoverableRuntimeFailure(OutOfMemoryError("fatal generation"))
+            fail("OutOfMemoryError should propagate")
+        } catch (error: OutOfMemoryError) {
+            assertEquals("fatal generation", error.message)
+        }
+    }
 }
