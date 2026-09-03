@@ -8,27 +8,21 @@
 - Preserved compatible vision history through LiteRT recreation with newest-readable-image restoration and safe text-only fallback.
 - Improved recommendations using RAM, current pressure, storage headroom, quantization, artifact size, inferred context/KV cache, runtime-memory estimates, supported backend, and platform-target filtering.
 - Aligned inferred context windows with recommendation memory estimates, load admission, native LiteRT `EngineConfig.maxNumTokens`, bounded history replay, and generation-time context admission.
-- K-suffixed context/KV markers, large explicit 256K/512K/1M windows, and million-token aliases are exact-tip CI validated.
-- Context-bound generation preflight is exact-tip CI validated: restored text, prompt, template/vision reserve, and requested output are budgeted before native inference.
-- Native LiteRT conversation/replay synchronization after automatic history eviction is exact-tip CI validated.
-- Vision initialization fallback retries only recoverable backend exceptions; fatal JVM/runtime errors such as `OutOfMemoryError` no longer trigger additional GPU→CPU→text-only engine initialization attempts.
-- Unknown-size LiteRT artifacts remain discoverable with a warning but are excluded from automatic device recommendations until RAM/storage/cache fit can be measured from a concrete artifact size.
-- Recheck free storage immediately before LiteRT model initialization so a model downloaded under healthy storage cannot enter native first-load cache generation after other files consume the reserved space.
-- LiteRT load/reset and streaming generation boundaries now preserve cancellation and VM-fatal errors instead of converting them into ordinary recoverable failures; exact-tip Android CI including real Qwen E2E passed.
-- Fail closed before native LiteRT initialization when the installed model is missing/empty or free storage cannot be measured; exact-tip Android CI including real Qwen E2E passed.
-- Fatal streaming-generation failures are now classified before JNI cancellation cleanup, so VM-fatal/native-fatal errors escape without a follow-up `cancelProcess()` call; exact-tip Android CI including real Qwen E2E passed.
+- Context-bound generation preflight and native replay synchronization after history eviction are exact-tip CI validated.
+- Vision initialization fallback retries only recoverable backend exceptions; fatal JVM/runtime errors no longer trigger additional GPU→CPU→text-only attempts.
+- Unknown-size LiteRT artifacts remain discoverable with a warning but are excluded from automatic recommendations until size-dependent RAM/storage/cache fit can be measured.
+- Recheck free storage immediately before LiteRT initialization and fail closed when the installed model is missing/empty or storage cannot be measured.
+- LiteRT load/reset/generation boundaries preserve cancellation and VM-fatal errors instead of converting them into ordinary recoverable failures.
+- Fatal generation, model-load conversation setup, and engine-initialization failures now escape before follow-up JNI cleanup; exact-tip Android CI including real Qwen E2E passed at `4c6830a1`.
 
 ## In progress
-- Extend the no-JNI-after-fatal rule to model-load conversation setup and engine-initialization cleanup so `Engine.close()` / `isInitialized()` are not called after a VM-fatal failure; recoverable errors and cancellation still perform normal cleanup.
-- Continue auditing runtime cleanup/failure ordering and backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
+- Make ordinary LiteRT unload/model-switch teardown resilient when one native close call fails recoverably: clear stale references first, still attempt both conversation and engine release, preserve subsequent cleanup failures as suppressed, and stop before further JNI after a fatal close failure.
+- Continue auditing runtime lifecycle and backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
 
 ## Tests actually performed
-- Fatal generation cleanup-ordering tip `51c43100` passed Android CI: JVM tests, lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E path.
-- Missing-model/unverifiable-storage preflight tip `787c8753` passed Android CI: JVM tests, lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E path.
-- Fatal streaming-generation lifecycle tip `abdfaa4d` passed Android CI: JVM tests, lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E path.
-- Fatal LiteRT load/reset lifecycle tip `0a5bf00a` passed Android CI: JVM tests, lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E path.
-- First-load storage admission tip `6f5c2cf5` passed Android CI: JVM tests, lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E path.
-- Earlier interruption recovery, vision-history restoration, backend/platform filtering, persistent LiteRT cache, resumable download, storage admission, corruption detection, thermal safeguards, context-window wiring, replacement-load memory handling, stop-generation ordering, conversation lifecycle, and context-bound generation fixes passed the same Android CI pipeline at their validated tips where applicable.
+- Fatal load/init cleanup-ordering tip `4c6830a1` passed Android CI: JVM tests, lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E path.
+- Fatal generation cleanup-ordering tip `51c43100`, missing-model/storage preflight tip `787c8753`, streaming fatal lifecycle tip `abdfaa4d`, load/reset fatal lifecycle tip `0a5bf00a`, and first-load storage admission tip `6f5c2cf5` passed the same full Android CI pipeline.
+- New teardown regression tests cover continuing to engine cleanup after a recoverable conversation-close failure, preserving multiple recoverable failures, and stopping before further cleanup after a fatal VM error; exact-tip Android CI is pending.
 
 ## Real benchmarks / performance improvements
 - CPU-emulator Qwen3-0.6B INT4 baseline: 20.64 prefill tok/s, 7.51 decode tok/s, 1.468 s TTFT, 3.955 s total, ~1.02 GiB app RAM.
@@ -37,7 +31,7 @@
 - No physical-device speed claim yet; emulator numbers are regression baselines only.
 
 ## Known problems / regressions
-- Load/setup fatal cleanup ordering is being hardened now; exact-tip CI for the new policy has not yet completed.
+- Resilient unload/model-switch teardown is implemented but not yet exact-tip CI validated.
 - Vision history and interrupted-generation recovery still need representative physical-device testing.
 - GGUF remains intentionally unavailable; v1 currently relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU execution remains disabled until representative phones show a reliable net benefit.
@@ -45,14 +39,12 @@
 - First-load cache sizing, thermal behavior, LMK admission, image-slot behavior, and long-conversation context pressure still need physical-device validation.
 
 ## Inspect before merging
-- Force an actual low-memory/native fatal failure during LiteRT model initialization and conversation creation; verify no `isInitialized()`, `Engine.close()`, or other cleanup JNI call is attempted after the fatal failure escapes.
-- Delete or truncate an installed model file and verify Mobie blocks before native LiteRT initialization with a recovery message; repeat with a storage location whose free-space stat cannot be read.
-- Fill internal storage after downloading a model but before its first load; verify Mobie blocks before native LiteRT initialization and succeeds after enough storage is freed.
-- Force a recoverable vision-backend initialization failure and verify Mobie still falls back GPU → CPU → text-only; under genuine OOM/fatal runtime failure, verify it does not launch further fallback engine attempts.
-- Drive a 4K conversation through enough completed turns to trigger replay eviction; verify the next prompt rebuilds from bounded recent history instead of retaining stale native KV context.
-- Drive a 4K conversation close to its context limit and verify Mobie clamps the output budget or asks for a shorter/new chat instead of entering native inference at the KV-cache boundary.
-- Repeat the near-limit test with vision input; verify the extra media reserve prevents unstable multi-turn behavior without blocking ordinary image prompts.
-- Switch directly between two installed LiteRT models under constrained RAM and verify the old engine is released before the next load admission.
-- Heat representative phones through MODERATE → SEVERE and verify inference blocks/stops cleanly without ANR or corrupting conversation state.
-- Interrupt/resume a large real download under low storage and verify final checksum/local fingerprint behavior.
-- Run a real vision-capable `.litertlm` model on representative Adreno/Mali/Tensor phones and verify repeated/restored image turns plus GPU→CPU/text-only fallback.
+- Force a recoverable `Conversation.close()` failure during unload/model switching and verify engine cleanup still runs, stale runtime references are cleared, and a retry can load cleanly; verify a fatal close failure triggers no subsequent JNI cleanup.
+- Force an actual low-memory/native fatal failure during LiteRT initialization/conversation creation and verify no cleanup JNI call is attempted after the fatal failure escapes.
+- Delete/truncate an installed model and fill storage after download but before first load; verify Mobie blocks before native initialization and recovers after the condition is fixed.
+- Force a recoverable vision-backend initialization failure and verify GPU → CPU → text-only fallback; under genuine OOM/fatal failure, verify no further fallback initialization runs.
+- Drive a 4K conversation through replay eviction and near its context boundary, including vision input, and verify bounded history/output admission remains stable.
+- Switch directly between two installed LiteRT models under constrained RAM and verify the old engine is released before next-load admission.
+- Heat representative phones through MODERATE → SEVERE and verify inference blocks/stops cleanly without ANR or conversation corruption.
+- Interrupt/resume a large real download under low storage and verify final checksum/fingerprint behavior.
+- Run a real vision-capable `.litertlm` model on representative Adreno/Mali/Tensor phones and verify repeated/restored image turns plus GPU→CPU→text-only fallback.
