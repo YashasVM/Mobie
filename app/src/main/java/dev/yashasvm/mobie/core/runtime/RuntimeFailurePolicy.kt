@@ -9,3 +9,8 @@ internal inline fun <T> recoverableRuntimeResult(block: () -> T): Result<T> = tr
 } catch (error: Exception) {
     Result.failure(error)
 }
+
+internal fun rethrowNonRecoverableRuntimeFailure(error: Throwable) {
+    if (error is CancellationException) throw error
+    if (error !is Exception) throw error
+}
