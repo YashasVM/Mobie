@@ -421,15 +421,19 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     }
 
     private fun closeRuntime() {
-        conversation?.close()
+        val previousConversation = conversation
+        val previousEngine = engine
         conversation = null
-        engine?.close()
         engine = null
         visionReady = false
         contextWindowTokens = DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS
         committedHistory = emptyList()
         conversationDirty = false
         cancelRequested = false
+        runAllRuntimeCleanup(
+            { previousConversation?.close() },
+            { previousEngine?.close() },
+        )
     }
 
     private fun currentAppRamBytes(): Long {
