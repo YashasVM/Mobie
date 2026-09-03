@@ -179,12 +179,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                         val now = SystemClock.elapsedRealtime()
                         if (RuntimeLoadMemoryPolicy.shouldRecheckGenerationMemory(lastMemoryCheckAt, now)) {
                             lastMemoryCheckAt = now
-                            try {
-                                ensureGenerationMemoryHeadroom()
-                            } catch (error: IllegalStateException) {
-                                activeConversation.cancelProcess()
-                                throw error
-                            }
+                            ensureGenerationMemoryHeadroom()
                         }
                         val reasoning = chunk.channels.entries
                             .filter { (name, _) -> name.lowercase() in REASONING_CHANNELS }
@@ -236,7 +231,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                     rememberCompletedTurn(prompt, partialAnswer.toString(), imagePath)
                     emit(InferenceEvent.Complete)
                 } catch (error: Throwable) {
-                    runRuntimeCleanupUnlessFatal(error) {
+                    runRuntimeCleanupPreservingPrimary(error) {
                         activeConversation.cancelProcess()
                     }
                     rememberInterruptedTurn(prompt, partialAnswer.toString().takeIf { it.isNotBlank() }, imagePath)
