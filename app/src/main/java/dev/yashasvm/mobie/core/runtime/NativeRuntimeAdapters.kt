@@ -259,15 +259,15 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
 
         return try {
             LoadedEngine(initializeEngine(modelPath, visionBackend = Backend.GPU()), visionReady = true)
-        } catch (gpuVisionError: Throwable) {
+        } catch (gpuVisionError: Exception) {
             rethrowCancellation(gpuVisionError)
             try {
                 LoadedEngine(initializeEngine(modelPath, visionBackend = Backend.CPU()), visionReady = true)
-            } catch (cpuVisionError: Throwable) {
+            } catch (cpuVisionError: Exception) {
                 rethrowCancellation(cpuVisionError)
                 try {
                     LoadedEngine(initializeEngine(modelPath, visionBackend = null), visionReady = false)
-                } catch (textOnlyError: Throwable) {
+                } catch (textOnlyError: Exception) {
                     rethrowCancellation(textOnlyError)
                     textOnlyError.addSuppressed(gpuVisionError)
                     textOnlyError.addSuppressed(cpuVisionError)
