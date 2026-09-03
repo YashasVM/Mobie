@@ -101,6 +101,62 @@ class RuntimeFailurePolicyTest {
     }
 
     @Test
+    fun preservingCleanupKeepsRecoverablePrimaryAndSuppressesCleanupFailure() {
+        val primary = IllegalStateException("memory pressure")
+
+        runRuntimeCleanupPreservingPrimary(primary) {
+            throw IllegalArgumentException("cancelProcess failed")
+        }
+
+        assertEquals("memory pressure", primary.message)
+        assertEquals(1, primary.suppressed.size)
+        assertEquals("cancelProcess failed", primary.suppressed.single().message)
+    }
+
+    @Test
+    fun preservingCleanupRunsForCancellationWithoutReplacingIt() {
+        val primary = CancellationException("generation cancelled")
+        var cleanedUp = false
+
+        runRuntimeCleanupPreservingPrimary(primary) {
+            cleanedUp = true
+        }
+
+        assertTrue(cleanedUp)
+        assertEquals("generation cancelled", primary.message)
+    }
+
+    @Test
+    fun preservingCleanupSkipsJniAfterFatalPrimary() {
+        var cleanedUp = false
+
+        try {
+            runRuntimeCleanupPreservingPrimary(OutOfMemoryError("fatal generation")) {
+                cleanedUp = true
+            }
+            fail("Fatal primary failure should escape before cleanup")
+        } catch (error: OutOfMemoryError) {
+            assertEquals("fatal generation", error.message)
+        }
+
+        assertFalse(cleanedUp)
+    }
+
+    @Test
+    fun preservingCleanupLetsFatalCleanupTakePrecedence() {
+        val primary = IllegalStateException("memory pressure")
+
+        try {
+            runRuntimeCleanupPreservingPrimary(primary) {
+                throw OutOfMemoryError("fatal cancel")
+            }
+            fail("Fatal cleanup failure should take precedence")
+        } catch (error: OutOfMemoryError) {
+            assertEquals("fatal cancel", error.message)
+        }
+    }
+
+    @Test
     fun capturesRecoverableCancellationFailureForLaterTeardown() {
         val failure = captureRecoverableRuntimeFailure {
             throw IllegalStateException("cancelProcess failed")
