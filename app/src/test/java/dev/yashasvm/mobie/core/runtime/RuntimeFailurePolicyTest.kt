@@ -42,6 +42,26 @@ class RuntimeFailurePolicyTest {
     }
 
     @Test
+    fun fatalBoundaryAllowsRecoverableExceptions() {
+        rethrowFatalRuntimeFailure(IllegalStateException("recoverable"))
+    }
+
+    @Test
+    fun fatalBoundaryAllowsCancellationForOrderedCleanup() {
+        rethrowFatalRuntimeFailure(CancellationException("cancelled"))
+    }
+
+    @Test
+    fun fatalBoundaryRethrowsFatalVmErrors() {
+        try {
+            rethrowFatalRuntimeFailure(OutOfMemoryError("fatal before cleanup"))
+            fail("OutOfMemoryError should propagate before cleanup")
+        } catch (error: OutOfMemoryError) {
+            assertEquals("fatal before cleanup", error.message)
+        }
+    }
+
+    @Test
     fun generationBoundaryAllowsRecoverableExceptions() {
         rethrowNonRecoverableRuntimeFailure(IllegalStateException("recoverable"))
     }
