@@ -8,16 +8,16 @@
 - Aligned inferred context windows across recommendation memory estimates, load admission, LiteRT `maxNumTokens`, history replay, and generation-time admission.
 - Hardened LiteRT load/reset/generation/unload lifecycle ordering so recoverable native cleanup failures do not hide primary failures or strand stale engine/conversation state.
 - Dirty/interrupted conversation rebuild and explicit reset now install replacements before closing stale native conversations.
-- Duplicate cancellation suppression at `9608b185` passed full Android CI; successful explicit/lifecycle cancellation is not retried by generation cleanup, while a recoverable first JNI cancellation failure remains retryable.
+- Cancellation suppression and its Stop-vs-unwind concurrency race are validated through full Android CI and real Qwen E2E.
 
 ## Important work in progress
-- Close the remaining concurrency race between explicit Stop/lifecycle cancellation and generation-unwind cleanup by making the cancellation state check + native call atomic. Implementation and focused concurrency regression coverage are in the current commit pending full Android CI.
+- Skip `cancelProcess()` entirely when no generation is active, while preserving lifecycle-transition gating so a generation cannot slip in between the idle-state check and load/reset/unload. Implementation and focused state tests are in the current commit pending exact-tip CI.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
 
 ## Tests actually performed
-- `9608b185` passed JVM tests, lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E job.
-- Earlier validated runtime hardening tips include `0b2d07a7`, `ddbce7f9`, `4e6e511a`, `9458e0d8`, `474269e0`, `9917f16f`, and `07c87115`, each through the same full Android CI pipeline.
-- Current focused tests additionally exercise concurrent cancellation attempts to verify only one successful native cancellation call can occur.
+- `ec577e6b` passed JVM tests, lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E job.
+- Earlier validated runtime hardening tips include `9608b185`, `0b2d07a7`, `ddbce7f9`, `4e6e511a`, `9458e0d8`, `474269e0`, `9917f16f`, and `07c87115` through the same full Android CI pipeline.
+- Current focused tests cover idle cancellation suppression, generation begin/end state, recoverable retry, duplicate suppression, fatal/coroutine failure, and concurrent cancellation serialization.
 
 ## Real benchmarks / performance improvements
 - CPU-emulator Qwen3-0.6B INT4 baseline: 20.64 prefill tok/s, 7.51 decode tok/s, 1.468 s TTFT, 3.955 s total, ~1.02 GiB app RAM.
@@ -26,14 +26,15 @@
 - No physical-device speed claim yet; emulator numbers are regression baselines only.
 
 ## Known problems / regressions
-- Current atomic cancellation-race fix still needs exact-tip full CI and a real stop-path regression check.
+- Idle-cancellation suppression still needs exact-tip full CI and a real idle reset/load/unload regression check.
 - Vision history, thermal/LMK behavior, first-load cache sizing, long-context pressure, and interrupted-generation recovery still need representative physical-device testing.
 - GGUF remains intentionally unavailable; v1 relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU execution remains disabled until representative phones show a reliable net benefit.
 - Backend/context constraints hidden only in model metadata cannot yet be inferred when filenames omit them; unknown context uses a conservative 4K cap.
 
 ## Items to inspect before merging
-- Stop an active real generation while generation cleanup is also unwinding; verify only one successful `cancelProcess()` reaches JNI. Force the first cancellation to fail recoverably and verify exactly one cleanup retry occurs.
+- Call Stop/reset/load/unload while idle and verify no `cancelProcess()` JNI call occurs; then race a new generation against reset/load/unload and verify the generation is gated rather than escaping the lifecycle transition.
+- Stop an active real generation and force the first cancellation to fail recoverably; verify exactly one cleanup retry occurs and no duplicate successful JNI cancellation reaches LiteRT.
 - Switch directly between two installed LiteRT models under constrained RAM and verify the old engine is released before next-load admission.
 - Delete/truncate an installed model or fill storage before first load and verify Mobie blocks before native initialization and recovers after correction.
 - Exercise a near-4K conversation including vision and history eviction; verify bounded replay/output admission stays stable.

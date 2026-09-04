@@ -13,15 +13,31 @@ import org.junit.Test
 
 class RuntimeCancellationStateTest {
     @Test
-    fun cleanupIsNeededBeforeAnyNativeCancellationAttempt() {
+    fun idleStateSkipsNativeCancellationAttempt() {
+        val state = RuntimeCancellationState()
+        var calls = 0
+
+        val failure = state.attempt { calls++ }
+
+        assertEquals(0, calls)
+        assertEquals(null, failure)
+        assertFalse(state.shouldAttemptCleanup())
+    }
+
+    @Test
+    fun beginGenerationEnablesCancellationCleanup() {
         val state = RuntimeCancellationState()
 
+        state.beginGeneration()
+
+        assertTrue(state.isGenerationActive())
         assertTrue(state.shouldAttemptCleanup())
     }
 
     @Test
     fun successfulCancellationSuppressesDuplicateCleanupAttempt() {
         val state = RuntimeCancellationState()
+        state.beginGeneration()
         var calls = 0
 
         val failure = state.attempt { calls++ }
@@ -36,6 +52,7 @@ class RuntimeCancellationStateTest {
     @Test
     fun recoverableCancellationFailureAllowsCleanupRetry() {
         val state = RuntimeCancellationState()
+        state.beginGeneration()
         val expected = IllegalStateException("cancel failed")
 
         val failure = state.attempt { throw expected }
@@ -47,6 +64,7 @@ class RuntimeCancellationStateTest {
     @Test
     fun successfulRetryStopsFurtherCleanupAttempts() {
         val state = RuntimeCancellationState()
+        state.beginGeneration()
         var calls = 0
 
         state.attempt {
@@ -63,6 +81,7 @@ class RuntimeCancellationStateTest {
     @Test
     fun concurrentAttemptsSerializeAndIssueOnlyOneSuccessfulNativeCancellation() {
         val state = RuntimeCancellationState()
+        state.beginGeneration()
         val calls = AtomicInteger(0)
         val firstEntered = CountDownLatch(1)
         val releaseFirst = CountDownLatch(1)
@@ -93,8 +112,25 @@ class RuntimeCancellationStateTest {
     }
 
     @Test
+    fun endGenerationReturnsStateToIdleAndSkipsLaterCancellation() {
+        val state = RuntimeCancellationState()
+        var calls = 0
+        state.beginGeneration()
+        state.attempt { calls++ }
+
+        state.endGeneration()
+        val idleFailure = state.attempt { calls++ }
+
+        assertFalse(state.isGenerationActive())
+        assertFalse(state.shouldAttemptCleanup())
+        assertEquals(null, idleFailure)
+        assertEquals(1, calls)
+    }
+
+    @Test
     fun coroutineCancellationPreventsFurtherNativeCleanup() {
         val state = RuntimeCancellationState()
+        state.beginGeneration()
 
         try {
             state.attempt { throw CancellationException("cancelled") }
@@ -107,6 +143,7 @@ class RuntimeCancellationStateTest {
     @Test
     fun fatalFailurePreventsFurtherNativeCleanup() {
         val state = RuntimeCancellationState()
+        state.beginGeneration()
 
         try {
             state.attempt { throw OutOfMemoryError("fatal") }
@@ -117,12 +154,14 @@ class RuntimeCancellationStateTest {
     }
 
     @Test
-    fun resetAllowsCancellationForNextGeneration() {
+    fun resetReturnsStateToIdle() {
         val state = RuntimeCancellationState()
-
+        state.beginGeneration()
         state.attempt { Unit }
+
         state.reset()
 
-        assertTrue(state.shouldAttemptCleanup())
+        assertFalse(state.isGenerationActive())
+        assertFalse(state.shouldAttemptCleanup())
     }
 }

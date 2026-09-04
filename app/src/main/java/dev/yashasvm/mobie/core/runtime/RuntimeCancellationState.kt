@@ -3,28 +3,44 @@ package dev.yashasvm.mobie.core.runtime
 import kotlinx.coroutines.CancellationException
 
 /**
- * Tracks whether LiteRT cancellation has already reached JNI successfully for the current
- * generation/lifecycle transition. This avoids calling cancelProcess() a second time while the
- * cancelled generation unwinds, while still allowing one cleanup retry after a recoverable JNI
- * failure.
- *
- * attempt() serializes the state check and JNI call so explicit Stop/lifecycle cancellation cannot
- * race generation-unwind cleanup into issuing duplicate native cancellation requests.
+ * Tracks native cancellation state for the current generation. Cancellation requests are ignored
+ * while no generation is active, preventing idle load/reset/unload operations from making an
+ * irrelevant cancelProcess() JNI call. attempt() still serializes the state check and JNI call so
+ * concurrent Stop/lifecycle/unwind paths cannot issue duplicate successful cancellation requests.
  */
 internal class RuntimeCancellationState {
+    @Volatile
+    private var generationActive = false
+
     @Volatile
     private var outcome = Outcome.NOT_REQUESTED
 
     @Synchronized
-    fun reset() {
+    fun beginGeneration() {
+        generationActive = true
         outcome = Outcome.NOT_REQUESTED
     }
 
+    @Synchronized
+    fun endGeneration() {
+        generationActive = false
+        outcome = Outcome.NOT_REQUESTED
+    }
+
+    @Synchronized
+    fun reset() {
+        generationActive = false
+        outcome = Outcome.NOT_REQUESTED
+    }
+
+    fun isGenerationActive(): Boolean = generationActive
+
     fun shouldAttemptCleanup(): Boolean =
-        outcome == Outcome.NOT_REQUESTED || outcome == Outcome.RECOVERABLE_FAILURE
+        generationActive && (outcome == Outcome.NOT_REQUESTED || outcome == Outcome.RECOVERABLE_FAILURE)
 
     @Synchronized
     fun attempt(block: () -> Unit): Exception? {
+        if (!generationActive) return null
         if (outcome == Outcome.SUCCEEDED || outcome == Outcome.NON_RECOVERABLE_FAILURE) return null
 
         return try {
