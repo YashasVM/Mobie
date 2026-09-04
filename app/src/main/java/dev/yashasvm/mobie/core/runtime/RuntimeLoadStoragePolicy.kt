@@ -7,12 +7,16 @@ import kotlin.math.max
  *
  * Real Qwen3-0.6B E2E measurements showed LiteRT's cold optimized cache can be nearly as large as
  * the published model artifact itself (339,216,776 bytes of cache for 347,251,840 bytes of model
- * weights). Reserve a full model-sized cache plus a safety margin instead of the previous 30%
- * estimate so first inference does not fail deep in native initialization on storage-constrained
- * devices.
+ * weights), while a validated unload/reload added 0 bytes. Cold loads therefore reserve a full
+ * model-sized cache plus safety margin. Warm loads may use only the filesystem reserve, but only
+ * after LiteRtCacheState proves the existing cache belongs to the exact installed artifact/runtime.
  */
 internal object RuntimeLoadStoragePolicy {
-    fun blockReason(modelWeightsBytes: Long, availableStorageBytes: Long): String? {
+    fun blockReason(
+        modelWeightsBytes: Long,
+        availableStorageBytes: Long,
+        reusableCache: Boolean = false,
+    ): String? {
         if (modelWeightsBytes <= 0) {
             return "The installed model file is missing or empty. Verify or download the model again before loading it."
         }
@@ -20,12 +24,19 @@ internal object RuntimeLoadStoragePolicy {
             return "Could not verify free storage for LiteRT initialization. Check model storage access and try again."
         }
 
-        val requiredFreeBytes = requiredColdLoadFreeBytes(modelWeightsBytes)
+        val requiredFreeBytes = requiredLoadFreeBytes(modelWeightsBytes, reusableCache)
         if (availableStorageBytes < requiredFreeBytes) {
-            return "Not enough free storage to safely initialize this model and build LiteRT's optimized cache. Free storage and try again."
+            return if (reusableCache) {
+                "Not enough free storage to safely reload this model with its validated LiteRT cache. Free storage and try again."
+            } else {
+                "Not enough free storage to safely initialize this model and build LiteRT's optimized cache. Free storage and try again."
+            }
         }
         return null
     }
+
+    internal fun requiredLoadFreeBytes(modelWeightsBytes: Long, reusableCache: Boolean): Long =
+        if (reusableCache) filesystemReserveBytes(modelWeightsBytes) else requiredColdLoadFreeBytes(modelWeightsBytes)
 
     internal fun requiredColdLoadFreeBytes(modelWeightsBytes: Long): Long =
         firstLoadCacheHeadroomBytes(modelWeightsBytes) + filesystemReserveBytes(modelWeightsBytes)
