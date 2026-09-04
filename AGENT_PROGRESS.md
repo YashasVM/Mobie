@@ -11,9 +11,9 @@
 - Rejected an 8K unknown-context fallback after verifying LiteRT-LM does not expose package max context publicly and current Qwen3-0.6B LiteRT artifacts are published at 2K/4K context; unknown artifacts remain on the conservative 4K fallback.
 
 ## Important work in progress
-- Validate the larger response/context-selection change through exact-tip Android CI and the real Qwen LiteRT-LM E2E path before merging.
+- Audit first-load LiteRT cache admission so Mobie reserves enough storage for initial optimization without falsely blocking later reloads after a valid per-model cache already exists. Current cache directories are per installed model, so reuse can be measured safely once cache-growth behavior is validated.
+- Improve authoritative context-capacity discovery. Current Hugging Face model cards can publish per-artifact context even when filenames do not (for example Qwen3-0.6B mixed INT4 at 2048 tokens), while Mobie currently relies on filename inference/fallbacks.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
-- Find an authoritative way to obtain `.litertlm` context capacity before increasing unknown-model context defaults.
 
 ## Tests actually performed
 - `f6811a21` passed JVM tests, lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E job.
@@ -41,5 +41,6 @@
 - Queue generation around reset/load/unload transitions and verify stale requests are rejected while post-transition generation runs.
 - Switch directly between installed LiteRT models under constrained RAM and verify the old engine is released before next-load admission.
 - Delete/truncate an installed model or fill storage before first load and verify Mobie blocks before native initialization and recovers after correction.
+- Measure `.litert-cache` growth for first load versus subsequent reloads on a real model before allowing existing cache bytes to reduce storage admission headroom.
 - Exercise a near-4K conversation including vision/history eviction and verify bounded replay/output admission stays stable.
 - Heat representative phones through MODERATE → SEVERE and verify inference blocks/stops cleanly without ANR or conversation corruption.
