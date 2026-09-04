@@ -297,18 +297,19 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         }
     }
 
-    private fun requestExplicitCancellation(): Exception? {
-        if (!cancellationState.isGenerationActive()) return null
-        cancelRequested = true
-        conversationDirty = true
-        return cancellationState.attempt { conversation?.cancelProcess() }
-    }
+    private fun requestExplicitCancellation(): Exception? = cancellationState.attempt(
+        onActive = {
+            cancelRequested = true
+            conversationDirty = true
+        },
+    ) { conversation?.cancelProcess() }
 
-    private fun requestCancellationForLifecycleTransition(): Exception? {
-        cancelRequested = true
-        conversationDirty = true
-        return cancellationState.attempt { conversation?.cancelProcess() }
-    }
+    private fun requestCancellationForLifecycleTransition(): Exception? = cancellationState.attempt(
+        onActive = {
+            cancelRequested = true
+            conversationDirty = true
+        },
+    ) { conversation?.cancelProcess() }
 
     private fun initializeEngineWithVisionFallback(modelPath: String, vision: Boolean): LoadedEngine {
         if (!vision) return LoadedEngine(initializeEngine(modelPath, visionBackend = null), visionReady = false)

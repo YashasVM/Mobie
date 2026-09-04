@@ -25,6 +25,54 @@ class RuntimeCancellationStateTest {
     }
 
     @Test
+    fun idleStateDoesNotArmCancellationRequest() {
+        val state = RuntimeCancellationState()
+        var armed = 0
+        var calls = 0
+
+        val failure = state.attempt(
+            onActive = { armed++ },
+        ) { calls++ }
+
+        assertEquals(0, armed)
+        assertEquals(0, calls)
+        assertEquals(null, failure)
+    }
+
+    @Test
+    fun activeRequestIsArmedExactlyOnceWithSuccessfulCancellation() {
+        val state = RuntimeCancellationState()
+        state.beginGeneration()
+        var armed = 0
+        var calls = 0
+
+        state.attempt(onActive = { armed++ }) { calls++ }
+        state.attempt(onActive = { armed++ }) { calls++ }
+
+        assertEquals(1, armed)
+        assertEquals(1, calls)
+        assertFalse(state.shouldAttemptCleanup())
+    }
+
+    @Test
+    fun generationEndBeforeAttemptPreventsStaleRequestArming() {
+        val state = RuntimeCancellationState()
+        state.beginGeneration()
+        state.endGeneration()
+        var armed = false
+        var calls = 0
+
+        val failure = state.attempt(
+            onActive = { armed = true },
+        ) { calls++ }
+
+        assertFalse(armed)
+        assertEquals(0, calls)
+        assertEquals(null, failure)
+        assertFalse(state.shouldAttemptCleanup())
+    }
+
+    @Test
     fun beginGenerationEnablesCancellationCleanup() {
         val state = RuntimeCancellationState()
 

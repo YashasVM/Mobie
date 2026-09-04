@@ -6,8 +6,9 @@ import kotlinx.coroutines.CancellationException
  * Tracks native cancellation state for the current generation and lifecycle-transition epochs.
  * Cancellation requests are ignored while no generation is active, preventing idle
  * load/reset/unload operations from making an irrelevant cancelProcess() JNI call. attempt() still
- * serializes the state check and JNI call so concurrent Stop/lifecycle/unwind paths cannot issue
- * duplicate successful cancellation requests.
+ * serializes the active-state check, request arming, and JNI call so concurrent Stop/lifecycle/
+ * unwind paths cannot issue duplicate successful cancellation requests or arm a stale request after
+ * generation teardown wins the race.
  *
  * Generation permits make lifecycle admission monotonic: a generation captured before or during a
  * load/reset/unload transition stays stale even if that transition clears cancelRequested before
@@ -73,11 +74,15 @@ internal class RuntimeCancellationState {
         generationActive && (outcome == Outcome.NOT_REQUESTED || outcome == Outcome.RECOVERABLE_FAILURE)
 
     @Synchronized
-    fun attempt(block: () -> Unit): Exception? {
+    fun attempt(
+        onActive: () -> Unit = {},
+        block: () -> Unit,
+    ): Exception? {
         if (!generationActive) return null
         if (outcome == Outcome.SUCCEEDED || outcome == Outcome.NON_RECOVERABLE_FAILURE) return null
 
         return try {
+            onActive()
             block()
             outcome = Outcome.SUCCEEDED
             null
