@@ -30,7 +30,7 @@ class CompatibilityResolverTest {
         assertEquals(2 * gib, result.modelWeightsBytes)
         assertTrue(result.runtimeOverheadBytes > 0)
         assertTrue(result.kvCacheBytes > 0)
-        assertEquals(4_096, result.contextWindowTokens)
+        assertEquals(8_192, result.contextWindowTokens)
         assertTrue(result.requiredStorageBytes > result.modelWeightsBytes)
     }
 
