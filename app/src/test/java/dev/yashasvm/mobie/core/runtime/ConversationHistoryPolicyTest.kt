@@ -17,8 +17,8 @@ class ConversationHistoryPolicyTest {
 
         val selected = ConversationHistoryPolicy.select(history)
 
-        assertEquals(30, selected.size)
-        assertEquals("user-1", selected.first().text)
+        assertEquals(20, selected.size)
+        assertEquals("user-6", selected.first().text)
         assertEquals("assistant-15", selected.last().text)
         assertTrue(selected.first().fromUser)
     }
@@ -30,7 +30,7 @@ class ConversationHistoryPolicyTest {
             RuntimeMessage(false, "a test image"),
         )
 
-        val selected = ConversationHistoryPolicy.select(history, contextWindowTokens = 4_096)
+        val selected = ConversationHistoryPolicy.select(history)
 
         assertEquals("/tmp/vision.jpg", selected.first().imagePath)
     }
@@ -45,7 +45,7 @@ class ConversationHistoryPolicyTest {
             RuntimeMessage(false, "recent answer"),
         )
 
-        val selected = ConversationHistoryPolicy.select(history, contextWindowTokens = 4_096)
+        val selected = ConversationHistoryPolicy.select(history)
 
         assertEquals(listOf("recent user", "recent answer"), selected.map { it.text })
         assertTrue(selected.first().fromUser)
@@ -58,7 +58,7 @@ class ConversationHistoryPolicyTest {
             listOf(RuntimeMessage(true, chunk), RuntimeMessage(false, chunk))
         }
 
-        val selected = ConversationHistoryPolicy.select(history, contextWindowTokens = 4_096)
+        val selected = ConversationHistoryPolicy.select(history)
 
         assertTrue(selected.sumOf { it.text.length } <= ConversationHistoryPolicy.MAX_RESTORED_CHARS)
         assertTrue(
@@ -96,7 +96,7 @@ class ConversationHistoryPolicyTest {
             listOf(RuntimeMessage(true, unicodeChunk), RuntimeMessage(false, unicodeChunk))
         }
 
-        val selected = ConversationHistoryPolicy.select(history, contextWindowTokens = 4_096)
+        val selected = ConversationHistoryPolicy.select(history)
         val restoredBytes = selected.sumOf { it.text.toByteArray(Charsets.UTF_8).size }
 
         assertTrue(restoredBytes <= ConversationHistoryPolicy.MAX_RESTORED_UTF8_BYTES)
@@ -113,7 +113,7 @@ class ConversationHistoryPolicyTest {
             RuntimeMessage(false, "latest answer"),
         )
 
-        val selected = ConversationHistoryPolicy.select(history, contextWindowTokens = 4_096)
+        val selected = ConversationHistoryPolicy.select(history)
 
         assertEquals(listOf("older user", "older answer"), selected.map { it.text })
     }
@@ -129,7 +129,6 @@ class ConversationHistoryPolicyTest {
             committedHistory = committed,
             prompt = "how are you",
             answer = "good",
-            contextWindowTokens = 4_096,
         )
 
         assertEquals(listOf("hello", "hi", "how are you", "good"), replay.history.map { it.text })
@@ -150,7 +149,6 @@ class ConversationHistoryPolicyTest {
             committedHistory = committed,
             prompt = "new-user-$chunk",
             answer = "new-answer-$chunk",
-            contextWindowTokens = 4_096,
         )
 
         assertTrue(replay.nativeConversationMustRebuild)

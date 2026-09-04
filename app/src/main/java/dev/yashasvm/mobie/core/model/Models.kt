@@ -89,7 +89,7 @@ internal fun estimateLiteRtRuntimeMemory(artifact: ModelArtifact): LiteRtRuntime
     val contextWindow = artifact.contextWindowTokens ?: DEFAULT_CONTEXT_TOKENS
     val kvCache = max(
         MIN_KV_CACHE_BYTES,
-        DEFAULT_KV_CACHE_BYTES * contextWindow / KV_CACHE_BASE_CONTEXT_TOKENS,
+        DEFAULT_KV_CACHE_BYTES * contextWindow / DEFAULT_CONTEXT_TOKENS,
     )
     val runtimeOverhead = max((artifact.sizeBytes * 0.4).toLong(), 512L * MIB)
     return LiteRtRuntimeMemoryEstimate(
@@ -249,8 +249,7 @@ data class CompatibilityResult(
 enum class ConversionStatus { REQUESTED, REVIEWING, CONVERTING, TESTING, READY, UNSUPPORTED }
 
 private const val MIB = 1024L * 1024L
-private const val DEFAULT_CONTEXT_TOKENS = 8_192
-private const val KV_CACHE_BASE_CONTEXT_TOKENS = 4_096
+private const val DEFAULT_CONTEXT_TOKENS = 4_096
 private const val DEFAULT_KV_CACHE_BYTES = 256L * MIB
 private const val MIN_KV_CACHE_BYTES = 64L * MIB
 private const val MAX_EXPLICIT_CONTEXT_TOKENS = 1_048_576

@@ -26,7 +26,7 @@ internal object RuntimeLoadMemoryPolicy {
         val safeContextWindow = contextWindowTokens.coerceAtLeast(MIN_CONTEXT_TOKENS)
         val kvCacheBytes = max(
             MIN_KV_CACHE_BYTES,
-            DEFAULT_KV_CACHE_BYTES * safeContextWindow / KV_CACHE_BASE_CONTEXT_TOKENS,
+            DEFAULT_KV_CACHE_BYTES * safeContextWindow / DEFAULT_CONTEXT_TOKENS,
         )
         val estimatedRam = modelWeightsBytes + runtimeOverhead + kvCacheBytes
         val totalFraction = if (isLowRamDevice) 0.70 else 0.80
@@ -69,13 +69,6 @@ internal object RuntimeLoadMemoryPolicy {
         return null
     }
 
-    fun thermalOutputTokenLimit(thermalStatus: Int, requestedMaxOutputTokens: Int): Int =
-        if (thermalStatus >= THERMAL_STATUS_MODERATE) {
-            minOf(requestedMaxOutputTokens, MODERATE_THERMAL_MAX_OUTPUT_TOKENS)
-        } else {
-            requestedMaxOutputTokens
-        }
-
     /** Avoid querying Android system services for every streamed token while reacting quickly to pressure. */
     fun shouldRecheckGenerationMemory(lastCheckAtMs: Long, nowMs: Long): Boolean =
         nowMs - lastCheckAtMs >= GENERATION_MEMORY_RECHECK_MS
@@ -85,11 +78,8 @@ internal object RuntimeLoadMemoryPolicy {
     private const val MIN_GENERATION_HEADROOM_BYTES = 128L * MIB
     private const val MIN_KV_CACHE_BYTES = 64L * MIB
     private const val DEFAULT_KV_CACHE_BYTES = 256L * MIB
-    private const val DEFAULT_CONTEXT_TOKENS = 8_192
-    private const val KV_CACHE_BASE_CONTEXT_TOKENS = 4_096
+    private const val DEFAULT_CONTEXT_TOKENS = 4_096
     private const val MIN_CONTEXT_TOKENS = 128
     private const val THERMAL_STATUS_NONE = 0
-    private const val THERMAL_STATUS_MODERATE = 2
     private const val THERMAL_STATUS_SEVERE = 3
-    private const val MODERATE_THERMAL_MAX_OUTPUT_TOKENS = 128
 }

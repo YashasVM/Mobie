@@ -182,10 +182,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                         contextWindowTokens = contextWindowTokens,
                         history = committedHistory,
                         prompt = prompt,
-                        requestedMaxOutputTokens = RuntimeLoadMemoryPolicy.thermalOutputTokenLimit(
-                            thermalStatus = currentThermalStatus(),
-                            requestedMaxOutputTokens = config.maxNewTokens,
-                        ),
+                        requestedMaxOutputTokens = config.maxNewTokens,
                         hasImage = imagePath != null,
                     )
                     val contents = if (imagePath == null) {
@@ -519,4 +516,4 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     }
 }
 
-private const val DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS = 8_192
+private const val DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS = 4_096

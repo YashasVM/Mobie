@@ -58,7 +58,7 @@ class RuntimeLoadMemoryPolicyTest {
 
     @Test
     fun usesConservativeRuntimeContextWhenArtifactHasNoMarker() {
-        assertEquals(8_192, runtimeContextWindowTokens("/models/qwen3-int4.litertlm"))
+        assertEquals(4_096, runtimeContextWindowTokens("/models/qwen3-int4.litertlm"))
     }
 
     @Test
@@ -160,13 +160,6 @@ class RuntimeLoadMemoryPolicyTest {
     @Test
     fun allowsGenerationWhenAndroidIsNotUnderLowMemoryPressure() {
         assertNull(RuntimeLoadMemoryPolicy.generationBlockReason(isLowMemory = false))
-    }
-
-    @Test
-    fun capsOutputAtModerateThermalPressure() {
-        assertEquals(128, RuntimeLoadMemoryPolicy.thermalOutputTokenLimit(2, 256))
-        assertEquals(64, RuntimeLoadMemoryPolicy.thermalOutputTokenLimit(2, 64))
-        assertEquals(256, RuntimeLoadMemoryPolicy.thermalOutputTokenLimit(1, 256))
     }
 
     @Test

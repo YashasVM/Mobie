@@ -6,7 +6,7 @@ package dev.yashasvm.mobie.core.runtime
  * The UI/history store keeps the full transcript. This policy only controls what is re-prefilled
  * into LiteRT-LM when a conversation is recreated. LiteRT-LM does not currently expose a cheap
  * tokenizer count before conversation creation, so we bound both characters and UTF-8 bytes.
- * The default byte cap is deliberately conservative for an 8K runtime context: byte-fallback
+ * The default byte cap is deliberately conservative for a 4K runtime context: byte-fallback
  * tokenizers cannot require more tokens than the number of input bytes, leaving roughly 1K tokens
  * for the next prompt, output budget, and prompt-template overhead even for token-dense Unicode.
  * Larger explicitly configured contexts receive a proportionally larger replay budget, capped to
@@ -24,8 +24,7 @@ internal object ConversationHistoryPolicy {
     const val MAX_RESTORED_CHARS = 12 * 1024
     const val MAX_RESTORED_UTF8_BYTES = 3 * 1024
 
-    private const val DEFAULT_CONTEXT_WINDOW_TOKENS = 8_192
-    private const val CONTEXT_SCALE_BASE_TOKENS = 4_096
+    private const val DEFAULT_CONTEXT_WINDOW_TOKENS = 4_096
     private const val MAX_CONTEXT_SCALE = 8
     private const val MAX_SCALED_MESSAGES = 64
 
@@ -159,8 +158,8 @@ internal object ConversationHistoryPolicy {
     }
 
     private fun replayBudget(contextWindowTokens: Int): ReplayBudget {
-        val safeContextTokens = contextWindowTokens.coerceAtLeast(CONTEXT_SCALE_BASE_TOKENS)
-        val scale = (safeContextTokens / CONTEXT_SCALE_BASE_TOKENS).coerceIn(1, MAX_CONTEXT_SCALE)
+        val safeContextTokens = contextWindowTokens.coerceAtLeast(DEFAULT_CONTEXT_WINDOW_TOKENS)
+        val scale = (safeContextTokens / DEFAULT_CONTEXT_WINDOW_TOKENS).coerceIn(1, MAX_CONTEXT_SCALE)
         return ReplayBudget(
             maxMessages = (MAX_RESTORED_MESSAGES * scale).coerceAtMost(MAX_SCALED_MESSAGES),
             maxChars = MAX_RESTORED_CHARS * scale,
