@@ -164,4 +164,69 @@ class RuntimeCancellationStateTest {
         assertFalse(state.isGenerationActive())
         assertFalse(state.shouldAttemptCleanup())
     }
+
+    @Test
+    fun permitRemainsValidWithoutLifecycleTransition() {
+        val state = RuntimeCancellationState()
+        val permit = state.captureGenerationPermit()
+
+        assertTrue(state.isGenerationPermitValid(permit))
+    }
+
+    @Test
+    fun permitCapturedBeforeTransitionStaysInvalidAfterTransitionCompletes() {
+        val state = RuntimeCancellationState()
+        val permit = state.captureGenerationPermit()
+
+        val transition = state.beginLifecycleTransition()
+        state.endLifecycleTransition(transition)
+
+        assertFalse(state.isGenerationPermitValid(permit))
+        assertTrue(state.isGenerationPermitValid(state.captureGenerationPermit()))
+    }
+
+    @Test
+    fun permitCapturedDuringTransitionStaysInvalidAfterTransitionCompletes() {
+        val state = RuntimeCancellationState()
+        val transition = state.beginLifecycleTransition()
+        val permit = state.captureGenerationPermit()
+
+        state.endLifecycleTransition(transition)
+
+        assertFalse(state.isGenerationPermitValid(permit))
+        assertTrue(state.isGenerationPermitValid(state.captureGenerationPermit()))
+    }
+
+    @Test
+    fun overlappingLifecycleTransitionsKeepAdmissionClosedUntilAllComplete() {
+        val state = RuntimeCancellationState()
+        val beforeTransitions = state.captureGenerationPermit()
+        val first = state.beginLifecycleTransition()
+        val second = state.beginLifecycleTransition()
+
+        state.endLifecycleTransition(first)
+
+        assertFalse(state.isGenerationPermitValid(beforeTransitions))
+        assertFalse(state.isGenerationPermitValid(state.captureGenerationPermit()))
+
+        state.endLifecycleTransition(second)
+
+        assertTrue(state.isGenerationPermitValid(state.captureGenerationPermit()))
+    }
+
+    @Test
+    fun generationResetDoesNotClearLifecycleTransition() {
+        val state = RuntimeCancellationState()
+        val transition = state.beginLifecycleTransition()
+        state.beginGeneration()
+
+        state.reset()
+        val permitDuringTransition = state.captureGenerationPermit()
+
+        assertFalse(state.isGenerationActive())
+        assertFalse(state.isGenerationPermitValid(permitDuringTransition))
+
+        state.endLifecycleTransition(transition)
+        assertTrue(state.isGenerationPermitValid(state.captureGenerationPermit()))
+    }
 }
