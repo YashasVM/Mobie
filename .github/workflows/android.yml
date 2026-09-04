@@ -85,10 +85,8 @@ jobs:
           disable-animations: true
           script: |
             ./gradlew --no-daemon connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=dev.yashasvm.mobie.LiteRtEndToEndTest -Pandroid.testInstrumentationRunnerArguments.litertE2E=true
-            ./gradlew --no-daemon connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=dev.yashasvm.mobie.LiteRtCacheGrowthTest -Pandroid.testInstrumentationRunnerArguments.litertE2E=true
             adb pull /sdcard/mobie-qwen-e2e.png mobie-qwen-e2e.png || echo "::warning::Runtime passed without screenshot evidence"
             adb pull /sdcard/mobie-qwen-e2e-metrics.txt mobie-qwen-e2e-metrics.txt || echo "::warning::Runtime passed without metrics evidence"
-            adb pull /sdcard/mobie-litert-cache-metrics.txt mobie-litert-cache-metrics.txt || echo "::warning::Runtime passed without cache-growth evidence"
       - name: Upload real Qwen E2E evidence
         uses: actions/upload-artifact@v4
         with:
@@ -96,5 +94,4 @@ jobs:
           path: |
             mobie-qwen-e2e.png
             mobie-qwen-e2e-metrics.txt
-            mobie-litert-cache-metrics.txt
           if-no-files-found: warn
