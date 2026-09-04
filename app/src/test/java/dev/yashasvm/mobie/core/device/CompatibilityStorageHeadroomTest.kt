@@ -4,6 +4,7 @@ import dev.yashasvm.mobie.core.model.Compatibility
 import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
+import dev.yashasvm.mobie.core.runtime.RuntimeLoadStoragePolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -14,16 +15,16 @@ class CompatibilityStorageHeadroomTest {
     private val gib = 1024L * mib
 
     @Test
-    fun `storage estimate includes first-load optimized cache headroom`() {
+    fun `storage estimate uses the same measured cold-load allowance as runtime admission`() {
         val weights = 2 * gib
         val required = resolver.requiredStorageBytes(weights)
 
-        assertEquals(weights + weights / 20 + weights * 3 / 10, required)
-        assertTrue(required > weights + weights / 20)
+        assertEquals(weights + RuntimeLoadStoragePolicy.requiredColdLoadFreeBytes(weights), required)
+        assertTrue(required > weights * 2)
     }
 
     @Test
-    fun `model is rejected when weights fit but runtime cache does not`() {
+    fun `model is rejected when weights fit but measured-scale runtime cache does not`() {
         val weights = 2 * gib
         val required = resolver.requiredStorageBytes(weights)
         val result = resolver.resolve(
@@ -49,10 +50,10 @@ class CompatibilityStorageHeadroomTest {
     }
 
     @Test
-    fun `small models still reserve a minimum optimized cache allowance`() {
-        val weights = 256 * mib
+    fun `small models still reserve minimum cache and filesystem allowances`() {
+        val weights = 128 * mib
         val required = resolver.requiredStorageBytes(weights)
 
-        assertEquals(weights + 64 * mib + 256 * mib, required)
+        assertEquals(weights + 256 * mib + 64 * mib, required)
     }
 }
