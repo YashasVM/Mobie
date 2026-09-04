@@ -27,6 +27,35 @@ class RuntimeLoadStoragePolicyTest {
     }
 
     @Test
+    fun validatedWarmCacheNeedsOnlyFilesystemReserve() {
+        val weights = 2L * GIB
+        val reserve = RuntimeLoadStoragePolicy.filesystemReserveBytes(weights)
+
+        assertEquals(reserve, RuntimeLoadStoragePolicy.requiredLoadFreeBytes(weights, reusableCache = true))
+        assertNotNull(
+            RuntimeLoadStoragePolicy.blockReason(
+                modelWeightsBytes = weights,
+                availableStorageBytes = reserve - 1,
+                reusableCache = true,
+            ),
+        )
+        assertNull(
+            RuntimeLoadStoragePolicy.blockReason(
+                modelWeightsBytes = weights,
+                availableStorageBytes = reserve,
+                reusableCache = true,
+            ),
+        )
+        assertNotNull(
+            RuntimeLoadStoragePolicy.blockReason(
+                modelWeightsBytes = weights,
+                availableStorageBytes = reserve,
+                reusableCache = false,
+            ),
+        )
+    }
+
+    @Test
     fun reservesModelSizedCachePlusTenPercentSafetyForLargeModels() {
         val weights = 2L * GIB
 
