@@ -23,6 +23,17 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.HttpUrl.Companion.toHttpUrl
 
+internal fun huggingFaceSearchUrl(query: String): String {
+    val encoded = URLEncoder.encode(query.trim(), Charsets.UTF_8.name())
+    // Filter at the Hub before applying the result limit. Without this, popular non-LiteRT
+    // repositories can consume all 60 search slots and hide directly runnable .litertlm models.
+    // The owner remains unrestricted so third-party LiteRT-LM publishers are still discoverable.
+    return "https://huggingface.co/api/models?search=$encoded&filter=litert-lm&sort=downloads&direction=-1&limit=60&full=true"
+}
+
+internal fun catalogOwnerAllowed(repoId: String, expectedOwner: String?): Boolean =
+    expectedOwner == null || repoId.substringBefore('/') == expectedOwner
+
 class HuggingFaceCatalogRepository(
     private val client: OkHttpClient,
     private val tokenStore: HuggingFaceTokenStore,
@@ -32,20 +43,23 @@ class HuggingFaceCatalogRepository(
 
     suspend fun featured(): Result<List<AiModel>> = fetchModels(
         "https://huggingface.co/api/models?author=litert-community&sort=downloads&direction=-1&limit=60&full=true",
+        expectedOwner = "litert-community",
     )
 
     suspend fun search(query: String): Result<List<AiModel>> {
         if (query.isBlank()) return Result.success(emptyList())
-        val encoded = URLEncoder.encode(query.trim(), Charsets.UTF_8.name())
-        return fetchModels("https://huggingface.co/api/models?author=litert-community&search=$encoded&limit=60&full=true")
+        return fetchModels(huggingFaceSearchUrl(query))
     }
 
-    private suspend fun fetchModels(url: String): Result<List<AiModel>> = withContext(Dispatchers.IO) {
+    private suspend fun fetchModels(
+        url: String,
+        expectedOwner: String? = null,
+    ): Result<List<AiModel>> = withContext(Dispatchers.IO) {
         runCatching {
             val summaries = json.decodeFromString<List<HfModel>>(
                 checkNotNull(fetchBody(url)) { "Hugging Face catalog request failed" },
             )
-                .filter { it.repoId().substringBefore('/') == "litert-community" && it.hasLiteRtArtifact() }
+                .filter { catalogOwnerAllowed(it.repoId(), expectedOwner) && it.hasLiteRtArtifact() }
                 .take(30)
             val limiter = Semaphore(6)
             val models = coroutineScope {

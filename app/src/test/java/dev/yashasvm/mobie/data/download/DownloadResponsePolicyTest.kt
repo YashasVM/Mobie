@@ -34,6 +34,12 @@ class DownloadResponsePolicyTest {
     }
 
     @Test
+    fun `resume response requires authoritative total size`() {
+        assertFalse(DownloadResponsePolicy.isValidResumeResponse("bytes 700-999/*", 700, 0))
+        assertTrue(DownloadResponsePolicy.isValidResumeResponse("bytes 700-999/1000", 700, 0))
+    }
+
+    @Test
     fun `server content range supplies total when catalog size is unknown`() {
         assertEquals(
             1_000,

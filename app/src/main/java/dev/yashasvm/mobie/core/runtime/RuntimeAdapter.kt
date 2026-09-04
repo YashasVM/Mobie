@@ -4,7 +4,7 @@ import dev.yashasvm.mobie.core.model.ModelFormat
 import kotlinx.coroutines.flow.Flow
 
 data class GenerationConfig(
-    val maxNewTokens: Int = 256,
+    val maxNewTokens: Int = 1_024,
 )
 
 data class RuntimeMessage(
