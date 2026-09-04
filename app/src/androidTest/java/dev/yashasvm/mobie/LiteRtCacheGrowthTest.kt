@@ -82,6 +82,7 @@ class LiteRtCacheGrowthTest {
                 "cp ${metricsFile.absolutePath} /sdcard/mobie-litert-cache-metrics.txt",
             ),
         ).use { it.readBytes() }
+        Unit
     }
 
     private fun directoryBytes(directory: File): Long = if (!directory.isDirectory) {
