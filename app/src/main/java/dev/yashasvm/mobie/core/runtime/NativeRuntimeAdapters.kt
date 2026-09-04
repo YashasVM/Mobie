@@ -98,6 +98,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                             cancelRequested = false
                             val modelFile = File(modelPath)
                             LiteRtCacheState.markReady(liteRtCacheDirectory(modelFile), modelFile)
+                            Unit
                         } catch (error: Throwable) {
                             runRuntimeCleanupUnlessFatal(error) { loadedEngine.engine.close() }
                             engine = null
