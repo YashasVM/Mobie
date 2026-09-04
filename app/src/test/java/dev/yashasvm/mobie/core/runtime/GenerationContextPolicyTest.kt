@@ -11,11 +11,25 @@ class GenerationContextPolicyTest {
             contextWindowTokens = 4096,
             history = emptyList(),
             prompt = "Hello",
-            requestedMaxOutputTokens = 256,
+            requestedMaxOutputTokens = 1_024,
             hasImage = false,
         )
 
-        assertEquals(256, result)
+        assertEquals(1_024, result)
+    }
+
+
+    @Test
+    fun `larger response ceiling is still clamped by a small model context`() {
+        val result = GenerationContextPolicy.maxOutputTokens(
+            contextWindowTokens = 1_280,
+            history = emptyList(),
+            prompt = "Hello",
+            requestedMaxOutputTokens = 1_024,
+            hasImage = false,
+        )
+
+        assertEquals(763, result)
     }
 
     @Test

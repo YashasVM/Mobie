@@ -29,6 +29,10 @@ class CompatibilityResolver {
         .minWithOrNull(
             compareBy<Pair<ModelArtifact, CompatibilityResult>>(
                 { (_, result) -> if (result.status == Compatibility.COMPATIBLE) 0 else 1 },
+                // Prefer enough context for normal multi-turn chat before optimizing the last bit
+                // of RAM. Cap the ranking benefit at 4K so a huge 64K package does not outrank a
+                // lighter 4K package merely for exposing a larger cache.
+                { (_, result) -> -minOf(result.contextWindowTokens.coerceAtLeast(0), PREFERRED_CONTEXT_TOKENS) },
                 { (_, result) -> result.estimatedRamBytes.takeIf { it > 0 } ?: Long.MAX_VALUE },
                 { (_, result) -> result.requiredStorageBytes.takeIf { it > 0 } ?: Long.MAX_VALUE },
                 { (artifact, _) -> artifact.sizeBytes },
@@ -131,6 +135,7 @@ class CompatibilityResolver {
 
     private companion object {
         const val MIB = 1024L * 1024L
+        const val PREFERRED_CONTEXT_TOKENS = 4_096
         const val THERMAL_STATUS_SEVERE = 3
     }
 }

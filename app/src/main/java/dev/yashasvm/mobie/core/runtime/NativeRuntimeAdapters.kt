@@ -507,7 +507,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     )
 
     private companion object {
-        const val DEFAULT_MAX_OUTPUT_TOKENS = 256
+        const val DEFAULT_MAX_OUTPUT_TOKENS = 1_024
         const val LITERT_CACHE_DIRECTORY = ".litert-cache"
         val REASONING_CHANNELS = setOf(
             "analysis", "thinking", "reasoning", "reasoning_content", "thought", "thoughts",

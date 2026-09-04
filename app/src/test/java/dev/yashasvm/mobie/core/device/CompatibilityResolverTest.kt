@@ -65,6 +65,23 @@ class CompatibilityResolverTest {
         assertEquals("model-ekv2048.litertlm", selected?.fileName)
     }
 
+
+    @Test
+    fun `device selector prefers useful context before small memory savings`() {
+        val model = AiModel(
+            id = "example/model",
+            title = "Example",
+            author = "example",
+            description = "",
+            artifacts = listOf(
+                artifact(size = gib, name = "model-ekv1280.litertlm"),
+                artifact(size = gib + 128 * mib, name = "model-ctx4096.litertlm"),
+            ),
+        )
+
+        assertEquals("model-ctx4096.litertlm", resolver.selectBestArtifact(model, device)?.fileName)
+    }
+
     @Test
     fun `device selector prefers measurable warning over unknown-size warning`() {
         val model = AiModel(

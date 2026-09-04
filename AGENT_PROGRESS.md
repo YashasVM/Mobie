@@ -1,6 +1,7 @@
 # Agent progress
 
 ## Major changes completed this week
+- Raised normal chat response capacity from 256 to 1024 tokens while preserving per-model context clamping, and prefer 4K-or-better artifacts when they safely fit so small 1280/2048-token packages do not win solely on RAM.
 - Hardened resumable Hugging Face downloads: strict range/size validation, retained partials, cancellation, checksum/fingerprint verification, storage admission, and rejection of ambiguous resumed ranges without an authoritative total size.
 - Verified real Qwen3-0.6B INT4 LiteRT-LM execution through Mobie: download → load → repeated generation → reset/history restore → unload/reload → generation.
 - Added real TTFT, total latency, prefill/decode throughput, token-count, and app-RAM telemetry.
@@ -10,6 +11,7 @@
 - Rejected an 8K unknown-context fallback after verifying LiteRT-LM does not expose package max context publicly and current Qwen3-0.6B LiteRT artifacts are published at 2K/4K context; unknown artifacts remain on the conservative 4K fallback.
 
 ## Important work in progress
+- Validate the larger response/context-selection change through exact-tip Android CI and the real Qwen LiteRT-LM E2E path before merging.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
 - Find an authoritative way to obtain `.litertlm` context capacity before increasing unknown-model context defaults.
 
