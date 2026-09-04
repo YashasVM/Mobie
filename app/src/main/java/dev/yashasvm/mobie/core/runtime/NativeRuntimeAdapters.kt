@@ -73,73 +73,83 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         vision: Boolean,
         history: List<RuntimeMessage>,
     ): Result<Unit> = withContext(Dispatchers.Default) {
-        val cancellationFailure = requestCancellationForLifecycleTransition()
-        generation.withLock {
-            lifecycle.withLock {
-                recoverableRuntimeResult {
-                    if (cancellationFailure != null) {
-                        rethrowAfterRuntimeCleanup(cancellationFailure) { closeRuntime() }
-                    }
-                    closeRuntime()
-                    ensureLoadHeadroom(modelPath)
-                    ExperimentalFlags.enableBenchmark = true
-                    val configuredContextWindowTokens = runtimeContextWindowTokens(modelPath)
-                    val loadedEngine = initializeEngineWithVisionFallback(modelPath, vision)
-                    try {
-                        contextWindowTokens = configuredContextWindowTokens
-                        val restored = ConversationHistoryPolicy.select(history, contextWindowTokens)
-                        engine = loadedEngine.engine
-                        visionReady = loadedEngine.visionReady
-                        conversation = loadedEngine.engine.createConversation(conversationConfig(restored))
-                        committedHistory = restored
-                        conversationDirty = false
-                        cancelRequested = false
-                    } catch (error: Throwable) {
-                        runRuntimeCleanupUnlessFatal(error) { loadedEngine.engine.close() }
-                        engine = null
-                        visionReady = false
-                        contextWindowTokens = DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS
-                        committedHistory = emptyList()
-                        conversationDirty = false
-                        cancelRequested = false
-                        throw error
+        val transition = cancellationState.beginLifecycleTransition()
+        try {
+            val cancellationFailure = requestCancellationForLifecycleTransition()
+            generation.withLock {
+                lifecycle.withLock {
+                    recoverableRuntimeResult {
+                        if (cancellationFailure != null) {
+                            rethrowAfterRuntimeCleanup(cancellationFailure) { closeRuntime() }
+                        }
+                        closeRuntime()
+                        ensureLoadHeadroom(modelPath)
+                        ExperimentalFlags.enableBenchmark = true
+                        val configuredContextWindowTokens = runtimeContextWindowTokens(modelPath)
+                        val loadedEngine = initializeEngineWithVisionFallback(modelPath, vision)
+                        try {
+                            contextWindowTokens = configuredContextWindowTokens
+                            val restored = ConversationHistoryPolicy.select(history, contextWindowTokens)
+                            engine = loadedEngine.engine
+                            visionReady = loadedEngine.visionReady
+                            conversation = loadedEngine.engine.createConversation(conversationConfig(restored))
+                            committedHistory = restored
+                            conversationDirty = false
+                            cancelRequested = false
+                        } catch (error: Throwable) {
+                            runRuntimeCleanupUnlessFatal(error) { loadedEngine.engine.close() }
+                            engine = null
+                            visionReady = false
+                            contextWindowTokens = DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS
+                            committedHistory = emptyList()
+                            conversationDirty = false
+                            cancelRequested = false
+                            throw error
+                        }
                     }
                 }
             }
+        } finally {
+            cancellationState.endLifecycleTransition(transition)
         }
     }
 
     override suspend fun resetConversation(history: List<RuntimeMessage>): Result<Unit> =
         withContext(Dispatchers.Default) {
-            val cancellationFailure = requestCancellationForLifecycleTransition()
-            generation.withLock {
-                lifecycle.withLock {
-                    recoverableRuntimeResult {
-                        val activeEngine = engine
-                            ?: throw IllegalStateException("Load a model before resetting the conversation")
-                        val restored = ConversationHistoryPolicy.select(history, contextWindowTokens)
-                        val previous = conversation
-                        conversationDirty = true
-                        val replaceConversation = {
-                            replaceRuntimeResourceBeforeClosingPrevious(
-                                previous = previous,
-                                createReplacement = { activeEngine.createConversation(conversationConfig(restored)) },
-                                installReplacement = { replacement ->
-                                    conversation = replacement
-                                    committedHistory = restored
-                                    conversationDirty = false
-                                    cancelRequested = false
-                                },
-                                closePrevious = { stale -> stale.close() },
-                            )
+            val transition = cancellationState.beginLifecycleTransition()
+            try {
+                val cancellationFailure = requestCancellationForLifecycleTransition()
+                generation.withLock {
+                    lifecycle.withLock {
+                        recoverableRuntimeResult {
+                            val activeEngine = engine
+                                ?: throw IllegalStateException("Load a model before resetting the conversation")
+                            val restored = ConversationHistoryPolicy.select(history, contextWindowTokens)
+                            val previous = conversation
+                            conversationDirty = true
+                            val replaceConversation = {
+                                replaceRuntimeResourceBeforeClosingPrevious(
+                                    previous = previous,
+                                    createReplacement = { activeEngine.createConversation(conversationConfig(restored)) },
+                                    installReplacement = { replacement ->
+                                        conversation = replacement
+                                        committedHistory = restored
+                                        conversationDirty = false
+                                        cancelRequested = false
+                                    },
+                                    closePrevious = { stale -> stale.close() },
+                                )
+                            }
+                            if (cancellationFailure != null) {
+                                rethrowAfterRuntimeCleanup(cancellationFailure, replaceConversation)
+                            }
+                            replaceConversation()
+                            Unit
                         }
-                        if (cancellationFailure != null) {
-                            rethrowAfterRuntimeCleanup(cancellationFailure, replaceConversation)
-                        }
-                        replaceConversation()
-                        Unit
                     }
                 }
+            } finally {
+                cancellationState.endLifecycleTransition(transition)
             }
         }
 
@@ -150,8 +160,9 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     ): Flow<InferenceEvent> {
         val partialAnswer = StringBuilder()
         return flow {
+            val generationPermit = cancellationState.captureGenerationPermit()
             generation.withLock {
-                if (cancelRequested) {
+                if (!cancellationState.isGenerationPermitValid(generationPermit) || cancelRequested) {
                     cancelRequested = false
                     throw CancellationException("Generation cancelled by a pending lifecycle transition")
                 }
@@ -270,14 +281,19 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     }
 
     override suspend fun unload() = withContext(Dispatchers.Default) {
-        val cancellationFailure = requestCancellationForLifecycleTransition()
-        generation.withLock {
-            lifecycle.withLock {
-                if (cancellationFailure != null) {
-                    rethrowAfterRuntimeCleanup(cancellationFailure) { closeRuntime() }
+        val transition = cancellationState.beginLifecycleTransition()
+        try {
+            val cancellationFailure = requestCancellationForLifecycleTransition()
+            generation.withLock {
+                lifecycle.withLock {
+                    if (cancellationFailure != null) {
+                        rethrowAfterRuntimeCleanup(cancellationFailure) { closeRuntime() }
+                    }
+                    closeRuntime()
                 }
-                closeRuntime()
             }
+        } finally {
+            cancellationState.endLifecycleTransition(transition)
         }
     }
 
