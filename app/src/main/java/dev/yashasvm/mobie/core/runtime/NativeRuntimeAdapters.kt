@@ -96,6 +96,8 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                             committedHistory = restored
                             conversationDirty = false
                             cancelRequested = false
+                            val modelFile = File(modelPath)
+                            LiteRtCacheState.markReady(liteRtCacheDirectory(modelFile), modelFile)
                         } catch (error: Throwable) {
                             runRuntimeCleanupUnlessFatal(error) { loadedEngine.engine.close() }
                             engine = null
@@ -335,7 +337,8 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     }
 
     private fun initializeEngine(modelPath: String, visionBackend: Backend?): Engine {
-        val cacheDirectory = File(File(modelPath).absoluteFile.parentFile, LITERT_CACHE_DIRECTORY).apply {
+        val modelFile = File(modelPath)
+        val cacheDirectory = liteRtCacheDirectory(modelFile).apply {
             if (!isDirectory && !mkdirs()) {
                 throw IllegalStateException("Could not create LiteRT cache directory beside the installed model.")
             }
@@ -360,6 +363,9 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
             throw error
         }
     }
+
+    private fun liteRtCacheDirectory(modelFile: File): File =
+        File(modelFile.absoluteFile.parentFile, LITERT_CACHE_DIRECTORY)
 
     private fun rebuildConversationFromCommittedHistory() {
         val activeEngine = engine
@@ -448,9 +454,11 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         )
         if (memoryReason != null) throw IllegalStateException(memoryReason)
 
+        val reusableCache = LiteRtCacheState.canReuse(liteRtCacheDirectory(modelFile), modelFile)
         val storageReason = RuntimeLoadStoragePolicy.blockReason(
             modelWeightsBytes = modelFile.length(),
             availableStorageBytes = modelFile.absoluteFile.parentFile?.usableSpace ?: -1,
+            reusableCache = reusableCache,
         )
         if (storageReason != null) throw IllegalStateException(storageReason)
     }
