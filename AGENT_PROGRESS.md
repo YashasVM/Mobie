@@ -6,16 +6,16 @@
 - Added real TTFT, total latency, prefill/decode throughput, token-count, and app-RAM telemetry.
 - Improved device/model recommendations using RAM pressure, storage headroom, quantization, artifact size, context/KV estimates, supported backend, and hardware-target filtering.
 - Hardened LiteRT lifecycle ordering, cancellation serialization, lifecycle-epoch generation admission, and Stop-vs-generation-finish handling.
-- Broadened Hugging Face discovery beyond `litert-community`; Featured remains curated while Search accepts directly runnable third-party LiteRT-LM text/vision artifacts.
-- Added server-side `litert-lm` filtering so unrelated Hub models cannot consume the search result window.
+- Broadened Hugging Face discovery beyond `litert-community`; Featured remains curated while Search accepts directly runnable third-party LiteRT-LM text/vision artifacts, with server-side `litert-lm` filtering.
+- Rejected an 8K unknown-context fallback after verifying LiteRT-LM does not expose package max context publicly and current Qwen3-0.6B LiteRT artifacts are published at 2K/4K context; unknown artifacts remain on the conservative 4K fallback.
 
 ## Important work in progress
-- Revalidate the tightened resumable-download response policy through exact-tip Android CI and interrupted-download coverage.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
+- Find an authoritative way to obtain `.litertlm` context capacity before increasing unknown-model context defaults.
 
 ## Tests actually performed
-- `e1fa3cad` passed JVM tests, lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E job.
-- `4d181da9` passed the same full Android CI pipeline.
+- `f6811a21` passed JVM tests, lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E job.
+- `e1fa3cad` and `4d181da9` passed the same full Android CI pipeline.
 - Earlier validated lifecycle hardening through `2db41a75` passed the same full Android CI pipeline.
 - Focused catalog tests cover unrestricted third-party ownership, curated Featured ownership, and server-side LiteRT-LM filtering.
 - Focused download policy tests cover exact resume offsets, expected-size agreement, and rejection of `Content-Range` resumes whose total is `*`.
@@ -27,11 +27,10 @@
 - No physical-device speed claim yet; emulator numbers are regression baselines only.
 
 ## Known problems / regressions
-- The tightened resumed-range validation still needs exact-tip full CI and a real interrupted-download check after this change.
 - Vision history, thermal/LMK behavior, first-load cache sizing, long-context pressure, and interrupted-generation recovery still need representative physical-device testing.
 - GGUF remains intentionally unavailable; v1 relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU execution remains disabled until representative phones show a reliable net benefit.
-- Backend/context constraints hidden only in model metadata cannot yet be inferred when filenames omit them; unknown context uses a conservative 4K cap.
+- Backend/context constraints hidden only in model metadata cannot yet be inferred when filenames omit them; unknown context therefore remains capped conservatively at 4K.
 
 ## Items to inspect before merging
 - Search for a directly runnable third-party `.litertlm` repository and verify Mobie discovers it while Featured remains limited to `litert-community`.
