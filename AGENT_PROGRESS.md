@@ -11,7 +11,7 @@
 - Rejected an 8K unknown-context fallback after verifying LiteRT-LM does not expose package max context publicly and current Qwen3-0.6B LiteRT artifacts are published at 2K/4K context; unknown artifacts remain on the conservative 4K fallback.
 
 ## Important work in progress
-- Audit first-load LiteRT cache admission so Mobie reserves enough storage for initial optimization without falsely blocking later reloads after a valid per-model cache already exists. A real Qwen E2E cache-growth probe now clears the cache, measures cold-load cache/filesystem growth, reload growth, and load latency; use its CI evidence before reducing reload headroom.
+- Audit first-load LiteRT cache admission so Mobie reserves enough storage for initial optimization without falsely blocking later reloads after a valid per-model cache already exists. Cache growth is now measured inside the same real Qwen E2E lifecycle that downloads and verifies the model, avoiding a second instrumentation reinstall that discarded app-internal model state. Use the resulting CI evidence before reducing reload headroom.
 - Improve authoritative context-capacity discovery. Current Hugging Face model cards can publish per-artifact context even when filenames do not (for example Qwen3-0.6B mixed INT4 at 2048 tokens), while Mobie currently relies on filename inference/fallbacks.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
 
@@ -21,7 +21,7 @@
 - Earlier validated lifecycle hardening through `2db41a75` passed the same full Android CI pipeline.
 - Focused catalog tests cover unrestricted third-party ownership, curated Featured ownership, and server-side LiteRT-LM filtering.
 - Focused download policy tests cover exact resume offsets, expected-size agreement, and rejection of `Content-Range` resumes whose total is `*`.
-- Cache-growth instrumentation is committed in `76f6346f`; its Android CI run is pending, so no cache-size result is claimed yet.
+- The first standalone cache-growth CI attempt failed because a second `connectedDebugAndroidTest` invocation reinstalled/reset the app and lost the model downloaded by the preceding E2E test. The measurement has been integrated into `LiteRtEndToEndTest`; the replacement CI run is pending, so no cache-size result is claimed yet.
 
 ## Real benchmarks / performance improvements
 - CPU-emulator Qwen3-0.6B INT4 baseline: 20.64 prefill tok/s, 7.51 decode tok/s, 1.468 s TTFT, 3.955 s total, ~1.02 GiB app RAM.
@@ -42,6 +42,6 @@
 - Queue generation around reset/load/unload transitions and verify stale requests are rejected while post-transition generation runs.
 - Switch directly between installed LiteRT models under constrained RAM and verify the old engine is released before next-load admission.
 - Delete/truncate an installed model or fill storage before first load and verify Mobie blocks before native initialization and recovers after correction.
-- Review the cache-growth evidence from `76f6346f`; only reduce reload storage headroom if subsequent loads show negligible cache growth versus the cold first load.
+- Review the integrated Qwen cache-growth evidence; only reduce reload storage headroom if subsequent loads show negligible cache growth versus the cold first load.
 - Exercise a near-4K conversation including vision/history eviction and verify bounded replay/output admission stays stable.
 - Heat representative phones through MODERATE → SEVERE and verify inference blocks/stops cleanly without ANR or conversation corruption.
