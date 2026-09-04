@@ -26,6 +26,7 @@ object DownloadResponsePolicy {
     ): Boolean {
         val range = parseContentRange(contentRangeHeader) ?: return false
         if (range.start != expectedStart) return false
+        if (range.totalBytes == null) return false
         if (expectedTotalBytes > 0 && range.totalBytes != expectedTotalBytes) return false
         return true
     }
