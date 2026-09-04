@@ -5,6 +5,7 @@ import dev.yashasvm.mobie.core.model.ArtifactExecutionTarget
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
 import dev.yashasvm.mobie.core.model.ModelType
+import dev.yashasvm.mobie.core.model.inferArtifactContextWindow
 import dev.yashasvm.mobie.core.model.inferArtifactQuantization
 import dev.yashasvm.mobie.core.security.HuggingFaceTokenStore
 import java.net.URLEncoder
@@ -65,7 +66,7 @@ class HuggingFaceCatalogRepository(
             val models = coroutineScope {
                 summaries.map { summary ->
                     async {
-                        if (summary.hasCompleteLiteRtArtifactMetadata()) {
+                        if (summary.hasCompleteLiteRtArtifactMetadata() && !summary.needsModelCardContextLookup()) {
                             summary
                         } else {
                             detailCache.get(summary.repoId())
@@ -91,10 +92,27 @@ class HuggingFaceCatalogRepository(
             repoId.split('/').forEach(::addPathSegment)
             addQueryParameter("blobs", "true")
         }.build()
-        fetchBody(url.toString())
+        val model = fetchBody(url.toString())
             ?.let { json.decodeFromString<HfModel>(it) }
-            ?.also { detailCache.put(repoId, it) }
+            ?: return@runCatching null
+        val enriched = if (model.needsModelCardContextLookup()) {
+            val contexts = fetchBody(modelCardUrl(repoId))
+                ?.let(::parseArtifactContextWindows)
+                .orEmpty()
+            if (contexts.isEmpty()) model else model.copy(artifactContextWindows = contexts)
+        } else {
+            model
+        }
+        enriched.also { detailCache.put(repoId, it) }
     }.getOrNull()
+
+    private fun modelCardUrl(repoId: String): String =
+        "https://huggingface.co".toHttpUrl().newBuilder().apply {
+            repoId.split('/').filter(String::isNotBlank).forEach(::addPathSegment)
+            addPathSegment("resolve")
+            addPathSegment("main")
+            addPathSegment("README.md")
+        }.build().toString()
 
     private suspend fun fetchBody(url: String): String? {
         val token = tokenStore.read()
@@ -125,6 +143,7 @@ private data class HfModel(
     val pipeline_tag: String? = null,
     val tags: List<String> = emptyList(),
     val siblings: List<HfSibling> = emptyList(),
+    val artifactContextWindows: Map<String, Int> = emptyMap(),
 ) {
     fun repoId(): String = modelId ?: id.orEmpty()
 
@@ -136,6 +155,12 @@ private data class HfModel(
             (file.size ?: file.lfs?.size) != null &&
                 (!file.lfs?.sha256.isNullOrBlank() || !file.lfs?.oid.isNullOrBlank())
         }
+    }
+
+    fun needsModelCardContextLookup(): Boolean = siblings.any { file ->
+        file.rfilename.endsWith(".litertlm", ignoreCase = true) &&
+            inferArtifactContextWindow(file.rfilename) == null &&
+            artifactContextWindows[file.rfilename] == null
     }
 
     fun toDomain(): AiModel? {
@@ -153,6 +178,8 @@ private data class HfModel(
                 sha256 = file.lfs?.sha256 ?: file.lfs?.oid?.removePrefix("sha256:"),
                 format = format,
                 quantization = inferArtifactQuantization(file.rfilename),
+                contextWindowTokens = artifactContextWindows[file.rfilename]
+                    ?: inferArtifactContextWindow(file.rfilename),
             )
         }
         val pipeline = pipeline_tag ?: tags.firstOrNull { it in setOf(

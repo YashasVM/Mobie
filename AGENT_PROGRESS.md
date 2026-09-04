@@ -13,15 +13,14 @@
 - Added fail-closed warm-cache identity tracking keyed to exact model path/size/mtime, LiteRT-LM version, and cache manifest; validated warm reloads now use reduced storage headroom while stale/missing/mutated caches fall back to cold-load admission.
 
 ## Important work in progress
-- Validate the new warm-cache runtime integration through the full Android CI + real Qwen E2E lifecycle; exact-tip validator-only CI passed before integration landed.
-- Improve authoritative context-capacity discovery. Current Hugging Face model cards can publish per-artifact context even when filenames do not, while Mobie currently relies on filename inference/fallbacks.
+- Parse artifact-specific context capacity from Hugging Face model-card tables when `.litertlm` filenames omit it, so recommendation/KV-memory estimates can use publisher metadata instead of the conservative fallback; exact-tip CI is pending.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
 
 ## Tests actually performed
-- `c8013686` passed JVM tests, lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E job with the measured cold-load storage policy.
+- `e3ec8758` passed JVM tests, lint/debug APK build, emulator smoke, and the full real Qwen LiteRT-LM E2E lifecycle with validated warm-cache runtime integration.
+- `c8013686` passed the same full pipeline with the measured cold-load storage policy.
 - The successful Qwen E2E measured a 347,251,840-byte artifact, 339,216,776-byte cold cache, and 0-byte cache growth after full unload/reload.
 - `1fa77181` passed Android CI with `LiteRtCacheState` JVM coverage for unchanged warm-cache reuse, cache mutation invalidation, model replacement invalidation, and refusal to mark an empty cache.
-- Added storage-policy coverage proving a validated warm cache requires only the filesystem reserve while the same free space remains insufficient for a cold load; current integration CI is pending.
 - Earlier validated lifecycle/runtime changes through `f6811a21`, `e1fa3cad`, `4d181da9`, and `2db41a75` passed the same full Android CI pipeline.
 
 ## Real benchmarks / performance improvements
@@ -31,13 +30,13 @@
 - No physical-device speed claim yet; emulator numbers are regression baselines only.
 
 ## Known problems / regressions
-- Warm-cache runtime integration has not yet completed the full real-Qwen CI lifecycle, so it remains merge-gated until that run passes.
+- Model-card context parsing has not yet completed exact-tip CI, and malformed/non-tabular model cards still fall back conservatively to filename inference/4K rather than guessing.
 - Vision history, thermal/LMK behavior, long-context pressure, and interrupted-generation recovery still need representative physical-device testing.
 - GGUF remains intentionally unavailable; v1 relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU execution remains disabled until representative phones show a reliable net benefit.
-- Backend/context constraints hidden only in model metadata cannot yet be inferred when filenames omit them; unknown context remains capped conservatively at 4K.
 
 ## Items to inspect before merging
+- Verify Qwen3-0.6B artifacts whose filenames omit context show their published 2048/4096-token capacities and corresponding KV-memory recommendation impact.
 - Verify an initialized model can reload with only filesystem safety reserve free while a cold or mutated-cache model is still blocked.
 - Delete/truncate/replace an installed model after cache creation and verify the warm marker is rejected before native initialization.
 - Interrupt/resume a large real model download and verify Mobie rejects ambiguous `Content-Range .../*` resumes instead of finalizing an unproven partial artifact.
