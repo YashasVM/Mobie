@@ -19,6 +19,7 @@
 ## Tests actually performed
 - `4a4a529c` passed JVM tests, lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E job with integrated cold-cache/reload measurement.
 - The successful Qwen E2E measured a 347,251,840-byte artifact, 339,216,776-byte cold cache, and 0-byte cache growth after full unload/reload.
+- `16e80739` updates cold-load storage admission from that measurement; its full Android CI validation is pending.
 - Earlier validated lifecycle/runtime changes through `f6811a21`, `e1fa3cad`, `4d181da9`, and `2db41a75` passed the same full Android CI pipeline.
 - Focused catalog tests cover unrestricted third-party ownership, curated Featured ownership, and server-side LiteRT-LM filtering.
 - Focused download policy tests cover exact resume offsets, expected-size agreement, and rejection of `Content-Range` resumes whose total is `*`.
