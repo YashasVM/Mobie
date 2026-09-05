@@ -12,14 +12,15 @@
 - Replaced the old 30% first-load LiteRT cache estimate with a measured model-sized allowance plus 10% safety; recommendation storage estimates and runtime cold-load admission use the same policy.
 - Added fail-closed warm-cache identity tracking keyed to exact model path/size/mtime, LiteRT-LM version, and cache manifest; validated warm reloads now use reduced storage headroom while stale/missing/mutated caches fall back to cold-load admission.
 - Added artifact-specific context metadata from Hugging Face model-card tables for `.litertlm` filenames that omit context, including compact `4K`/`8K` values, so KV/RAM recommendations use publisher capacity when available.
+- Hardened model-card parsing across Markdown table/prose boundaries so unrelated storage/benchmark values cannot leak into context capacity.
 
 ## Important work in progress
-- Harden model-card context parsing so table schema cannot leak across prose or unrelated Markdown tables and turn storage/benchmark numbers into false context capacities; new boundary-isolation coverage is running in exact-tip CI.
+- Propagate trusted model-card context through download/install/restart into the actual LiteRT EngineConfig. The current fix encodes publisher context into the local runtime filename only when the original artifact name omits a context marker; exact-tip CI is running.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
 
 ## Tests actually performed
+- `404fb573` passed JVM tests, lint/debug APK build, emulator smoke, and the full real Qwen LiteRT-LM E2E with model-card table-boundary hardening.
 - `2d938534` passed JVM tests, lint/debug APK build, emulator smoke, and the full real Qwen LiteRT-LM E2E after fixing compact `4K`/`8K` context parsing.
-- `6a189d50` previously reached JVM tests/lint/build and exposed the compact-context parser defect, which `20373dd3` fixed.
 - `e3ec8758` passed JVM tests, lint/debug APK build, emulator smoke, and the full real Qwen LiteRT-LM E2E lifecycle with validated warm-cache runtime integration.
 - `c8013686` passed the same full pipeline with the measured cold-load storage policy.
 - The successful Qwen E2E measured a 347,251,840-byte artifact, 339,216,776-byte cold cache, and 0-byte cache growth after full unload/reload.
@@ -32,12 +33,13 @@
 - No physical-device speed claim yet; emulator numbers are regression baselines only.
 
 ## Known problems / regressions
-- Model-card boundary hardening has not yet completed exact-tip CI; malformed/non-tabular cards still fall back conservatively to filename inference/4K rather than guessing.
+- Runtime propagation of model-card-only context is not yet exact-tip CI validated. Until this change is green, a filename with no context marker can still fall back to 4K at runtime even when recommendations used a publisher-supplied 2K capacity.
 - Vision history, thermal/LMK behavior, long-context pressure, and interrupted-generation recovery still need representative physical-device testing.
 - GGUF remains intentionally unavailable; v1 relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU execution remains disabled until representative phones show a reliable net benefit.
 
 ## Items to inspect before merging
+- Verify a `.litertlm` artifact whose publisher filename omits context but whose model card says 2048 installs with a local `ctx2048` runtime marker, while the Hugging Face URL still targets the original filename and LiteRT uses 2048 rather than the 4K fallback.
 - Verify Qwen3-0.6B artifacts whose filenames omit context show their published 2048/4096-token capacities and corresponding KV-memory recommendation impact, while unrelated model-card tables cannot override them.
 - Verify an initialized model can reload with only filesystem safety reserve free while a cold or mutated-cache model is still blocked.
 - Delete/truncate/replace an installed model after cache creation and verify the warm marker is rejected before native initialization.
