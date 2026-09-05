@@ -15,12 +15,15 @@
 - Hardened model-card parsing across Markdown table/prose boundaries so unrelated storage/benchmark values cannot leak into context capacity.
 - Validated model-card context propagation end to end through catalog selection → runtime-aware filename → hashed on-disk filename → LiteRT runtime context parsing, so recommendation memory estimates and EngineConfig stay aligned after download/restart.
 - Added thermal inference protection around the real LiteRT runtime: SEVERE caps new responses to 256 tokens; CRITICAL/EMERGENCY/SHUTDOWN reject new work and cancel active generations before stale output is forwarded.
+- Validated independent 500 ms thermal monitoring during active generation, including stalled native inference, so CRITICAL+ escalation can cancel LiteRT even when no further token callbacks arrive.
 
 ## Important work in progress
-- Thermal protection now has an independent 500 ms active-generation monitor so a stalled native inference can still be cancelled after a CRITICAL+ escalation even when LiteRT emits no tokens. Exact-tip CI/E2E validation is pending.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
+- Thermal protection still needs representative physical-device heat testing across sustained SEVERE/CRITICAL transitions; CI validates control flow, not real handset throttling behavior.
 
 ## Tests actually performed
+- `def170ec` passed Android CI after preserving thermal-guard constructor call-site compatibility: JVM tests/lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E all passed.
+- The stalled-inference thermal regression simulates a token followed by CRITICAL thermal escalation while native inference stops producing output; the guard independently cancels the delegate instead of waiting for another inference event.
 - `455d3ca9` passed Android CI after adding active-generation CRITICAL+ cancellation, validating the existing unit/lint/APK/emulator/real-Qwen pipeline for that path.
 - `b939096a` passed Android CI after fixing the thermal-guard JVM test coroutine runner; this validates new-generation thermal admission through the existing CI pipeline.
 - `25f60ace` passed JVM tests, lint/debug APK build, emulator smoke, and the full real Qwen LiteRT-LM E2E with cross-layer stored-context propagation coverage.
@@ -38,8 +41,7 @@
 - No physical-device speed claim yet; emulator numbers are regression baselines only.
 
 ## Known problems / regressions
-- Independent thermal polling during stalled inference is implemented but still needs exact-tip CI and representative physical-device heat testing.
-- Vision history, thermal/LMK behavior, long-context pressure, and interrupted-generation recovery still need representative physical-device testing.
+- Thermal/LMK behavior, vision history, long-context pressure, and interrupted-generation recovery still need representative physical-device testing.
 - GGUF remains intentionally unavailable; v1 relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU execution remains disabled until representative phones show a reliable net benefit.
 
