@@ -13,16 +13,18 @@
 - Added an inference-stall watchdog around production LiteRT streaming: 120 s initial prefill allowance, 30 s active-stream idle timeout, bounded cancellation, and explicit failure for streams that disappear without a terminal callback.
 
 ## Important work in progress
+- Validate the thermal admission alignment that keeps SEVERE usable under the existing 256-token throttle while retaining CRITICAL+ load/generation rejection.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
 - Thermal protection still needs representative physical-device sustained-heat testing.
 
 ## Tests actually performed
-- `e7368396` passed JVM tests/lint/debug APK build, emulator smoke, and real Qwen LiteRT-LM E2E with the inference-stall guard wired around production LiteRT.
+- `615fe48d` passed JVM tests/lint/debug APK build, emulator smoke, and real Qwen LiteRT-LM E2E with the inference-stall guard wired around production LiteRT.
 - Inference-stall JVM coverage exercises stalled prefill, mid-stream stalls after token output, healthy Token → Stats → Complete pass-through, and streams ending without a terminal event.
 - `563aab15` passed JVM tests/lint/debug APK build, emulator smoke, and real Qwen LiteRT-LM E2E with the production two-thread CPU policy.
 - `6d969769` passed the same pipeline plus the real-model CPU-thread benchmark.
 - `def170ec` passed JVM/lint/APK/emulator/real-Qwen E2E for independent stalled-inference thermal cancellation.
 - `455d3ca9`, `b939096a`, `25f60ace`, `404fb573`, `2d938534`, `e3ec8758`, `c8013686`, and `1fa77181` passed their respective lifecycle, thermal, context, cache, and runtime regression pipelines.
+- New JVM coverage now asserts SEVERE thermal status is admitted to the outer throttling layer and CRITICAL status still blocks model load and generation; exact-tip CI is pending.
 
 ## Real benchmarks / performance improvements
 - Real-Qwen CPU-thread comparison on the 2-vCPU Android runner: runtime default 8.02 decode tok/s and 19.32 prefill tok/s; explicit 2 threads 19.19 decode tok/s and 39.01 prefill tok/s (2.39x decode, 2.02x prefill).
@@ -37,8 +39,8 @@
 - Main-model GPU/NPU and more than two CPU inference threads remain disabled pending representative handset evidence.
 
 ## Items to inspect before merging
+- Heat a representative phone to SEVERE before starting a prompt and verify Mobie still generates with the 256-token cap; at CRITICAL verify new generation is rejected and active generation is cancelled.
 - Reproduce a real LiteRT stream whose terminal callback disappears and verify Mobie returns control, reports the stall, and can recover/reload without ANR or stale tokens.
 - Compare 2-thread production against runtime-default and 4+ threads on representative big.LITTLE phones, measuring TTFT, decode/prefill throughput, battery drain, and thermal throttling.
-- Heat representative phones through MODERATE → SEVERE → CRITICAL during normal and intentionally slow/stalled responses; verify cancellation timing and conversation integrity.
 - Interrupt/resume a large real model download and verify ambiguous `Content-Range .../*` resumes are rejected.
 - Switch installed LiteRT models under constrained RAM and exercise a near-4K conversation including vision/history eviction.
