@@ -17,8 +17,11 @@ internal object RuntimeLoadMemoryPolicy {
         if (isLowMemory) {
             return "Android reports active memory pressure. Free memory before loading this model."
         }
-        if (thermalStatus >= THERMAL_STATUS_SEVERE) {
-            return "Android reports severe thermal pressure. Let the device cool before loading a local model."
+        // SEVERE remains intentionally usable: ThermalInferencePolicy caps new generations to a
+        // short 256-token response at that level. Only CRITICAL+ should make the runtime refuse
+        // new work outright; otherwise this inner preflight makes the outer thermal throttle dead.
+        if (thermalStatus >= THERMAL_STATUS_CRITICAL) {
+            return "Android reports critical thermal pressure. Let the device cool before loading a local model."
         }
         if (modelWeightsBytes <= 0 || totalRamBytes <= 0) return null
 
@@ -57,8 +60,10 @@ internal object RuntimeLoadMemoryPolicy {
         if (isLowMemory) {
             return "Android reports active memory pressure. Close other apps before starting generation."
         }
-        if (thermalStatus >= THERMAL_STATUS_SEVERE) {
-            return "Android reports severe thermal pressure. Let the device cool before continuing local generation."
+        // Keep this threshold aligned with ThermalInferencePolicy: SEVERE is throttled there,
+        // while CRITICAL+ is rejected and active generation is cancelled by ThermalGuardRuntimeAdapter.
+        if (thermalStatus >= THERMAL_STATUS_CRITICAL) {
+            return "Android reports critical thermal pressure. Let the device cool before continuing local generation."
         }
         if (availableRamBytes > 0 && lowMemoryThresholdBytes > 0) {
             val proactiveReserve = max(MIN_GENERATION_HEADROOM_BYTES, totalRamBytes / 50)
@@ -81,5 +86,5 @@ internal object RuntimeLoadMemoryPolicy {
     private const val DEFAULT_CONTEXT_TOKENS = 4_096
     private const val MIN_CONTEXT_TOKENS = 128
     private const val THERMAL_STATUS_NONE = 0
-    private const val THERMAL_STATUS_SEVERE = 3
+    private const val THERMAL_STATUS_CRITICAL = 4
 }
