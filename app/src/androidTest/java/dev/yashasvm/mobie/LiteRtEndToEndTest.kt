@@ -73,9 +73,19 @@ class LiteRtEndToEndTest {
         }
         assertTrue("Model download failed: ${completed.error}", completed.state == WorkInfo.State.SUCCEEDED)
         val path = checkNotNull(completed.localPath)
+        val modelFile = File(path)
+        val modelDirectory = checkNotNull(modelFile.parentFile)
+        val cacheDirectory = File(modelDirectory, ".litert-cache")
 
+        assertTrue("Could not clear the prior LiteRT cache", !cacheDirectory.exists() || cacheDirectory.deleteRecursively())
+        val freeBeforeFirstLoad = modelDirectory.usableSpace
         val runtime = LiteRtLmRuntimeAdapter(context)
+        val firstLoadStartedNs = SystemClock.elapsedRealtimeNanos()
         runtime.load(path).getOrThrow()
+        val firstLoadMs = elapsedMs(firstLoadStartedNs)
+        val cacheBytesAfterFirstLoad = directoryBytes(cacheDirectory)
+        val freeAfterFirstLoad = modelDirectory.usableSpace
+
         val firstEvents = generate(runtime, PROMPT)
         assertSuccessfulGeneration("first prompt", firstEvents)
         val output = firstEvents.visibleOutput()
@@ -127,12 +137,18 @@ class LiteRtEndToEndTest {
         runtime.unload()
         runtime.load(path).getOrThrow()
         val fullReloadSetupMs = elapsedMs(reloadStartedNs)
+        val cacheBytesAfterReload = directoryBytes(cacheDirectory)
+        val freeAfterReload = modelDirectory.usableSpace
         val reloadEvents = generate(runtime, RELOAD_PROMPT, maxNewTokens = 64)
         assertSuccessfulGeneration("post-reload prompt", reloadEvents)
         Log.i(TAG, "Reload response: ${reloadEvents.visibleOutput()}")
         logStats("post-reload prompt", reloadEvents)
         Log.i(TAG, "Conversation setup: reset=${resetSetupMs}ms, unload+reload=${fullReloadSetupMs}ms")
         runtime.unload()
+
+        assertTrue("LiteRT did not create its configured cache directory", cacheDirectory.isDirectory)
+        assertTrue("First-load timing was not measured", firstLoadMs > 0.0)
+        assertTrue("Reload timing was not measured", fullReloadSetupMs > 0.0)
 
         persistMetrics(
             instrumentation = instrumentation,
@@ -144,7 +160,13 @@ class LiteRtEndToEndTest {
             reset = resetEvents.stats(),
             reload = reloadEvents.stats(),
             resetSetupMs = resetSetupMs,
+            firstLoadMs = firstLoadMs,
             fullReloadSetupMs = fullReloadSetupMs,
+            cacheBytesAfterFirstLoad = cacheBytesAfterFirstLoad,
+            cacheBytesAfterReload = cacheBytesAfterReload,
+            freeBeforeFirstLoad = freeBeforeFirstLoad,
+            freeAfterFirstLoad = freeAfterFirstLoad,
+            freeAfterReload = freeAfterReload,
         )
 
         val model = AiModel(
@@ -223,7 +245,13 @@ class LiteRtEndToEndTest {
         reset: InferenceStats,
         reload: InferenceStats,
         resetSetupMs: Double,
+        firstLoadMs: Double,
         fullReloadSetupMs: Double,
+        cacheBytesAfterFirstLoad: Long,
+        cacheBytesAfterReload: Long,
+        freeBeforeFirstLoad: Long,
+        freeAfterFirstLoad: Long,
+        freeAfterReload: Long,
     ) {
         val metricsFile = File(checkNotNull(context.getExternalFilesDir(null)), "mobie-qwen-e2e-metrics.txt")
         metricsFile.writeText(
@@ -231,8 +259,17 @@ class LiteRtEndToEndTest {
                 appendLine("model=litert-community/Qwen3-0.6B-int4")
                 appendLine("artifact=${artifact.fileName}")
                 appendLine("artifact_bytes=${artifact.sizeBytes}")
+                appendLine("first_load_ms=$firstLoadMs")
                 appendLine("conversation_reset_ms=$resetSetupMs")
                 appendLine("full_unload_reload_ms=$fullReloadSetupMs")
+                appendLine("cache_bytes_after_first_load=$cacheBytesAfterFirstLoad")
+                appendLine("cache_bytes_after_reload=$cacheBytesAfterReload")
+                appendLine("cache_growth_on_reload_bytes=${cacheBytesAfterReload - cacheBytesAfterFirstLoad}")
+                appendLine("free_bytes_before_first_load=$freeBeforeFirstLoad")
+                appendLine("free_bytes_after_first_load=$freeAfterFirstLoad")
+                appendLine("free_bytes_after_reload=$freeAfterReload")
+                appendLine("filesystem_delta_first_load_bytes=${freeBeforeFirstLoad - freeAfterFirstLoad}")
+                appendLine("filesystem_delta_reload_bytes=${freeAfterFirstLoad - freeAfterReload}")
                 appendLine(metricsLine("first", first))
                 appendLine(metricsLine("second", followUp))
                 appendLine(metricsLine("post_cancel", recovery))
@@ -245,6 +282,12 @@ class LiteRtEndToEndTest {
 
     private fun metricsLine(label: String, stats: InferenceStats): String =
         "$label.decode_tokens_per_second=${stats.tokensPerSecond};$label.decode_token_count=${stats.decodeTokenCount};$label.prefill_tokens_per_second=${stats.prefillTokensPerSecond};$label.prefill_token_count=${stats.prefillTokenCount};$label.ttft_ms=${stats.timeToFirstTokenMs};$label.total_ms=${stats.totalGenerationMs};$label.ram_bytes=${stats.ramBytes}"
+
+    private fun directoryBytes(directory: File): Long = if (!directory.isDirectory) {
+        0L
+    } else {
+        directory.walkTopDown().filter(File::isFile).sumOf(File::length)
+    }
 
     private fun elapsedMs(startedNs: Long): Double =
         (SystemClock.elapsedRealtimeNanos() - startedNs) / 1_000_000.0

@@ -182,35 +182,7 @@ private fun isPlausibleContextWindow(tokens: Int): Boolean = tokens in 128..MAX_
 
 internal fun inferArtifactExecutionTarget(fileName: String): ArtifactExecutionTarget {
     val normalized = fileName.lowercase()
-    val hardwareSpecificTokens = listOf(
-        "mediatek",
-        "qualcomm",
-        "npu",
-        "gpu",
-        "opencl",
-        "adreno",
-        "qnn",
-        "htp",
-        "hexagon",
-        "google_tensor",
-        "google-tensor",
-        // LiteRT repositories can contain platform-specific packages alongside Android artifacts.
-        // Mobie's v1 runtime is Android CPU-only for the main model, so desktop/web-targeted
-        // containers must not fall through as generic candidates simply because they use .litertlm.
-        "intel",
-        "web",
-        "webgpu",
-        "windows",
-        "linux",
-        "macos",
-        "darwin",
-        "ios",
-        "metal",
-    )
-    val hardwareSpecific = hardwareSpecificTokens.any { token ->
-        Regex("(?:^|[._-])${Regex.escape(token)}(?:[._-]|$)").containsMatchIn(normalized)
-    }
-    return if (hardwareSpecific) {
+    return if (HARDWARE_SPECIFIC_ARTIFACT_PATTERN.containsMatchIn(normalized)) {
         ArtifactExecutionTarget.HARDWARE_SPECIFIC
     } else {
         ArtifactExecutionTarget.GENERIC
@@ -253,3 +225,7 @@ private const val DEFAULT_CONTEXT_TOKENS = 4_096
 private const val DEFAULT_KV_CACHE_BYTES = 256L * MIB
 private const val MIN_KV_CACHE_BYTES = 64L * MIB
 private const val MAX_EXPLICIT_CONTEXT_TOKENS = 1_048_576
+
+private val HARDWARE_SPECIFIC_ARTIFACT_PATTERN = Regex(
+    "(?:^|[._-])(?:mediatek|qualcomm|npu|gpu|opencl|adreno|qnn|htp|hexagon|google_tensor|google\\-tensor|intel|web|webgpu|windows|linux|macos|darwin|ios|metal)(?:[._-]|$)",
+)

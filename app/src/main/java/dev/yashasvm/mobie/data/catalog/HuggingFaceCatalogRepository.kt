@@ -5,6 +5,7 @@ import dev.yashasvm.mobie.core.model.ArtifactExecutionTarget
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
 import dev.yashasvm.mobie.core.model.ModelType
+import dev.yashasvm.mobie.core.model.inferArtifactContextWindow
 import dev.yashasvm.mobie.core.model.inferArtifactQuantization
 import dev.yashasvm.mobie.core.security.HuggingFaceTokenStore
 import java.net.URLEncoder
@@ -33,6 +34,28 @@ internal fun huggingFaceSearchUrl(query: String): String {
 
 internal fun catalogOwnerAllowed(repoId: String, expectedOwner: String?): Boolean =
     expectedOwner == null || repoId.substringBefore('/') == expectedOwner
+
+/**
+ * LiteRT-LM currently receives the context limit through EngineConfig rather than discovering the
+ * package's maximum from the loaded container. When the Hub filename does not encode context but a
+ * trusted model-card table does, preserve that capacity in the local filename so the same value
+ * survives download/install/restart and reaches runtimeContextWindowTokens(). The download URL
+ * still points at the publisher's original filename.
+ */
+internal fun runtimeAwareArtifactFileName(sourceFileName: String, contextWindowTokens: Int?): String {
+    if (contextWindowTokens == null || inferArtifactContextWindow(sourceFileName) != null) return sourceFileName
+    if (contextWindowTokens !in 128..1_048_576) return sourceFileName
+
+    val slashAt = sourceFileName.lastIndexOf('/')
+    val directory = if (slashAt >= 0) sourceFileName.substring(0, slashAt + 1) else ""
+    val name = sourceFileName.substring(slashAt + 1)
+    val extensionAt = name.lastIndexOf('.')
+    return if (extensionAt > 0) {
+        "$directory${name.substring(0, extensionAt)}.ctx$contextWindowTokens${name.substring(extensionAt)}"
+    } else {
+        "$directory$name.ctx$contextWindowTokens"
+    }
+}
 
 class HuggingFaceCatalogRepository(
     private val client: OkHttpClient,
@@ -65,7 +88,7 @@ class HuggingFaceCatalogRepository(
             val models = coroutineScope {
                 summaries.map { summary ->
                     async {
-                        if (summary.hasCompleteLiteRtArtifactMetadata()) {
+                        if (summary.hasCompleteLiteRtArtifactMetadata() && !summary.needsModelCardContextLookup()) {
                             summary
                         } else {
                             detailCache.get(summary.repoId())
@@ -91,10 +114,27 @@ class HuggingFaceCatalogRepository(
             repoId.split('/').forEach(::addPathSegment)
             addQueryParameter("blobs", "true")
         }.build()
-        fetchBody(url.toString())
+        val model = fetchBody(url.toString())
             ?.let { json.decodeFromString<HfModel>(it) }
-            ?.also { detailCache.put(repoId, it) }
+            ?: return@runCatching null
+        val enriched = if (model.needsModelCardContextLookup()) {
+            val contexts = fetchBody(modelCardUrl(repoId))
+                ?.let(::parseArtifactContextWindows)
+                .orEmpty()
+            if (contexts.isEmpty()) model else model.copy(artifactContextWindows = contexts)
+        } else {
+            model
+        }
+        enriched.also { detailCache.put(repoId, it) }
     }.getOrNull()
+
+    private fun modelCardUrl(repoId: String): String =
+        "https://huggingface.co".toHttpUrl().newBuilder().apply {
+            repoId.split('/').filter(String::isNotBlank).forEach(::addPathSegment)
+            addPathSegment("resolve")
+            addPathSegment("main")
+            addPathSegment("README.md")
+        }.build().toString()
 
     private suspend fun fetchBody(url: String): String? {
         val token = tokenStore.read()
@@ -125,6 +165,7 @@ private data class HfModel(
     val pipeline_tag: String? = null,
     val tags: List<String> = emptyList(),
     val siblings: List<HfSibling> = emptyList(),
+    val artifactContextWindows: Map<String, Int> = emptyMap(),
 ) {
     fun repoId(): String = modelId ?: id.orEmpty()
 
@@ -138,6 +179,12 @@ private data class HfModel(
         }
     }
 
+    fun needsModelCardContextLookup(): Boolean = siblings.any { file ->
+        file.rfilename.endsWith(".litertlm", ignoreCase = true) &&
+            inferArtifactContextWindow(file.rfilename) == null &&
+            artifactContextWindows[file.rfilename] == null
+    }
+
     fun toDomain(): AiModel? {
         val repoId = modelId ?: id ?: return null
         val artifacts = siblings.mapNotNull { file ->
@@ -146,13 +193,16 @@ private data class HfModel(
                 else -> return@mapNotNull null
             }
             val size = file.size ?: file.lfs?.size ?: return@mapNotNull null
+            val contextWindowTokens = artifactContextWindows[file.rfilename]
+                ?: inferArtifactContextWindow(file.rfilename)
             ModelArtifact(
-                fileName = file.rfilename,
+                fileName = runtimeAwareArtifactFileName(file.rfilename, contextWindowTokens),
                 downloadUrl = artifactUrl(repoId, file.rfilename),
                 sizeBytes = size,
                 sha256 = file.lfs?.sha256 ?: file.lfs?.oid?.removePrefix("sha256:"),
                 format = format,
                 quantization = inferArtifactQuantization(file.rfilename),
+                contextWindowTokens = contextWindowTokens,
             )
         }
         val pipeline = pipeline_tag ?: tags.firstOrNull { it in setOf(

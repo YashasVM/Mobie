@@ -8,6 +8,7 @@ import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
 import dev.yashasvm.mobie.core.model.estimateLiteRtRuntimeMemory
+import dev.yashasvm.mobie.core.runtime.RuntimeLoadStoragePolicy
 import kotlin.math.max
 
 class CompatibilityResolver {
@@ -122,19 +123,14 @@ class CompatibilityResolver {
 
     /**
      * LiteRT-LM optimizes model weights for the current device on first load and stores those
-     * artifacts in the configured cache directory. Reserve persistent cache space in addition to
-     * the model and download margin so a download is not recommended when first inference is
-     * likely to exhaust storage. The cache allowance is intentionally conservative until Mobie can
-     * measure per-model cache growth on representative physical devices.
+     * artifacts in the configured cache directory. The real Qwen E2E cache reached ~97.7% of the
+     * model artifact size, so recommendations share the runtime's measured cold-load allowance
+     * rather than the old 30% estimate.
      */
-    internal fun requiredStorageBytes(modelWeightsBytes: Long): Long {
-        val downloadHeadroom = max(modelWeightsBytes / 20, 64L * MIB)
-        val optimizedCacheHeadroom = max(modelWeightsBytes * 3 / 10, 256L * MIB)
-        return modelWeightsBytes + downloadHeadroom + optimizedCacheHeadroom
-    }
+    internal fun requiredStorageBytes(modelWeightsBytes: Long): Long =
+        modelWeightsBytes + RuntimeLoadStoragePolicy.requiredColdLoadFreeBytes(modelWeightsBytes)
 
     private companion object {
-        const val MIB = 1024L * 1024L
         const val PREFERRED_CONTEXT_TOKENS = 4_096
         const val THERMAL_STATUS_SEVERE = 3
     }
