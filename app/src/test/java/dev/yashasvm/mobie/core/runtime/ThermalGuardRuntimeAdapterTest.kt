@@ -2,6 +2,7 @@ package dev.yashasvm.mobie.core.runtime
 
 import dev.yashasvm.mobie.core.model.ModelFormat
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
@@ -48,6 +49,21 @@ class ThermalGuardRuntimeAdapterTest {
     }
 
     @Test
+    fun criticalEscalationDuringGenerationCancelsRuntimeAndStopsForwardingTokens() = runBlocking {
+        var thermalStatus = 2
+        val delegate = RecordingRuntimeAdapter(onAfterFirstToken = { thermalStatus = 4 })
+        val adapter = ThermalGuardRuntimeAdapter(delegate) { thermalStatus }
+
+        val events = adapter.generate("hello").toList()
+
+        assertTrue(delegate.cancelCalled)
+        assertEquals(2, events.size)
+        assertEquals(InferenceEvent.Token("first"), events.first())
+        val error = events.last() as InferenceEvent.Error
+        assertTrue(error.message.contains("too hot", ignoreCase = true))
+    }
+
+    @Test
     fun policyNeverExpandsSmallUserGenerationLimit() {
         val decision = ThermalInferencePolicy.decide(thermalStatus = 3, requestedMaxNewTokens = 64)
 
@@ -55,9 +71,12 @@ class ThermalGuardRuntimeAdapterTest {
         assertEquals(64, decision.maxNewTokens)
     }
 
-    private class RecordingRuntimeAdapter : RuntimeAdapter {
+    private class RecordingRuntimeAdapter(
+        private val onAfterFirstToken: (() -> Unit)? = null,
+    ) : RuntimeAdapter {
         override val format: ModelFormat = ModelFormat.LITERT_LM
         var generateCalled = false
+        var cancelCalled = false
         var lastGenerationConfig: GenerationConfig? = null
 
         override suspend fun load(
@@ -75,10 +94,18 @@ class ThermalGuardRuntimeAdapterTest {
         ): Flow<InferenceEvent> {
             generateCalled = true
             lastGenerationConfig = config
-            return flowOf(InferenceEvent.Complete)
+            val callback = onAfterFirstToken ?: return flowOf(InferenceEvent.Complete)
+            return flow {
+                emit(InferenceEvent.Token("first"))
+                callback()
+                emit(InferenceEvent.Token("second"))
+                emit(InferenceEvent.Complete)
+            }
         }
 
-        override suspend fun cancel() = Unit
+        override suspend fun cancel() {
+            cancelCalled = true
+        }
 
         override suspend fun unload() = Unit
     }
