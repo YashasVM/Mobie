@@ -12,13 +12,14 @@
 - Aligned device recommendations with that thermal policy: SEVERE warns about the 256-token throttle while CRITICAL+ explains that local model loading is blocked until the phone cools.
 - Benchmarked LiteRT CPU threading with the real Qwen model and enabled a conservative two-thread production policy after exact-tip E2E validation.
 - Added an inference-stall watchdog around production LiteRT streaming: 120 s initial prefill allowance, 30 s active-stream idle timeout, bounded cancellation, and explicit failure for streams that disappear without a terminal callback.
+- Wired device-aware LiteRT KV/context sizing into production: Mobie selects the largest context fitting the current RAM budget and consistently applies it to memory admission, native KV allocation, history trimming, and generation output budgeting while preserving full advertised context when safe.
 
 ## Important work in progress
-- Device-aware LiteRT KV/context sizing is now wired into production EngineConfig: the runtime selects the largest context fitting the current RAM budget, uses that same reduced context for memory admission, native KV allocation, history trimming, and output budgeting, and preserves full advertised context when it safely fits. Exact-tip Android CI for the production wiring is pending.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second without unvalidated main-model GPU/NPU execution.
 - Thermal protection still needs representative physical-device sustained-heat testing.
 
 ## Tests actually performed
+- `c79df688` passed JVM tests/lint/debug APK build, emulator smoke, and real Qwen LiteRT-LM E2E with production device-aware context sizing wired into runtime.
 - `d8dd78f8` passed JVM tests/lint/debug APK build, emulator smoke, and real Qwen LiteRT-LM E2E with the device-aware context sizing policy present and its JVM coverage green before production wiring.
 - Device-aware context sizing JVM coverage checks full-context retention when RAM is sufficient, context reduction under current free-RAM pressure, stricter low-RAM-device behavior, stable 256-token sizing, and telemetry-unavailable fallback.
 - `4bc03ac9` passed JVM tests/lint/debug APK build, emulator smoke, and real Qwen LiteRT-LM E2E with recommendation behavior aligned to the validated SEVERE/CRITICAL runtime boundary.
@@ -34,11 +35,12 @@
 - Production now requests up to two LiteRT CPU threads; this is CI/E2E validated but not claimed as a physical-phone speedup.
 - Latest benchmark-run normal Qwen prompt before the production thread change: 7.16 decode tok/s, 16.37 prefill tok/s, 1.820 s TTFT, 4.369 s total, ~1.02 GiB app RAM.
 - Cold load measured 2745.6 ms with 339,216,776 bytes cache growth; full unload/reload measured 1476.3 ms with 0 additional cache growth.
+- Device-aware context sizing is now exact-tip CI/E2E validated for correctness, but no handset RAM/OOM improvement is claimed until representative 32K/64K physical-device testing is performed.
 
 ## Known problems / regressions
 - Physical-device thermal/LMK behavior, vision history, long-context pressure, and interrupted-generation recovery still need representative handset testing.
 - Upstream LiteRT-LM Android streaming has open reports of missing terminal callbacks; Mobie now fails and cancels stalled streams instead of waiting forever, but recovery from a native deadlock that ignores cancellation still needs a reproducible device case.
-- Production device-aware context sizing still needs exact-tip Android CI and representative 32K/64K handset validation before claiming a measured RAM/OOM improvement.
+- Representative 32K/64K handset validation is still needed before claiming a measured RAM/OOM improvement from device-aware context sizing.
 - GGUF remains intentionally unavailable; v1 relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU and more than two CPU inference threads remain disabled pending representative handset evidence.
 
