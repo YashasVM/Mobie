@@ -12,8 +12,8 @@ import kotlinx.coroutines.launch
 
 internal class ThermalGuardRuntimeAdapter(
     private val delegate: RuntimeAdapter,
-    private val thermalStatusProvider: () -> Int,
     private val activePollIntervalMs: Long = 500L,
+    private val thermalStatusProvider: () -> Int,
 ) : RuntimeAdapter {
     override val format: ModelFormat = delegate.format
 
