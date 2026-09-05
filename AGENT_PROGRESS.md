@@ -13,10 +13,11 @@
 - Added fail-closed warm-cache identity tracking keyed to exact model path/size/mtime, LiteRT-LM version, and cache manifest; validated warm reloads now use reduced storage headroom while stale/missing/mutated caches fall back to cold-load admission.
 
 ## Important work in progress
-- Parse artifact-specific context capacity from Hugging Face model-card tables when `.litertlm` filenames omit it, so recommendation/KV-memory estimates can use publisher metadata instead of the conservative fallback; exact-tip CI is pending.
+- Parse artifact-specific context capacity from Hugging Face model-card tables when `.litertlm` filenames omit it, so recommendation/KV-memory estimates can use publisher metadata instead of the conservative fallback; fixed compact `4K`/`8K` parsing after CI exposed the bug, with exact-tip CI pending.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
 
 ## Tests actually performed
+- `6a189d50` reached JVM tests/lint/build and failed in the new context-parser coverage because compact `4K`/`8K` values were not accepted; `20373dd3` fixes that parser defect and awaits exact-tip CI.
 - `e3ec8758` passed JVM tests, lint/debug APK build, emulator smoke, and the full real Qwen LiteRT-LM E2E lifecycle with validated warm-cache runtime integration.
 - `c8013686` passed the same full pipeline with the measured cold-load storage policy.
 - The successful Qwen E2E measured a 347,251,840-byte artifact, 339,216,776-byte cold cache, and 0-byte cache growth after full unload/reload.
