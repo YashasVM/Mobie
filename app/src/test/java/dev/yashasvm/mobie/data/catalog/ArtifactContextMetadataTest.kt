@@ -41,4 +41,40 @@ class ArtifactContextMetadataTest {
         assertFalse(contexts.containsKey("ignored.litertlm"))
         assertFalse(contexts.containsKey("invalid.litertlm"))
     }
+
+    @Test
+    fun `does not leak context columns into a later table`() {
+        val card = """
+            | Artifact | Context window | Notes |
+            | --- | --- | --- |
+            | `valid.litertlm` | 4K | Android package |
+            | Model | Download size | Notes |
+            | --- | --- | --- |
+            | `not-context.litertlm` | 768 MB | benchmark fixture |
+        """.trimIndent()
+
+        val contexts = parseArtifactContextWindows(card)
+
+        assertEquals(4096, contexts["valid.litertlm"])
+        assertFalse(contexts.containsKey("not-context.litertlm"))
+    }
+
+    @Test
+    fun `resets context schema across prose boundaries`() {
+        val card = """
+            | File | Context |
+            | --- | --- |
+            | `valid.litertlm` | 2048 |
+
+            Benchmark results
+            | Package | Memory |
+            | --- | --- |
+            | `benchmark.litertlm` | 512 MB |
+        """.trimIndent()
+
+        val contexts = parseArtifactContextWindows(card)
+
+        assertEquals(2048, contexts["valid.litertlm"])
+        assertFalse(contexts.containsKey("benchmark.litertlm"))
+    }
 }
