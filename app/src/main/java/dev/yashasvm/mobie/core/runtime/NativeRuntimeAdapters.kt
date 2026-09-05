@@ -347,7 +347,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         val createdEngine = Engine(
             EngineConfig(
                 modelPath = modelPath,
-                backend = Backend.CPU(),
+                backend = Backend.CPU(threadCount = LiteRtCpuThreadPolicy.threadCount()),
                 visionBackend = visionBackend,
                 maxNumTokens = runtimeContextWindowTokens(modelPath),
                 maxNumImages = if (visionBackend != null) 1 else null,
