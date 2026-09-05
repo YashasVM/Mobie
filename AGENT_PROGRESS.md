@@ -16,13 +16,16 @@
 - Validated model-card context propagation end to end through catalog selection → runtime-aware filename → hashed on-disk filename → LiteRT runtime context parsing, so recommendation memory estimates and EngineConfig stay aligned after download/restart.
 - Added thermal inference protection around the real LiteRT runtime: SEVERE caps new responses to 256 tokens; CRITICAL/EMERGENCY/SHUTDOWN reject new work and cancel active generations before stale output is forwarded.
 - Validated independent 500 ms thermal monitoring during active generation, including stalled native inference, so CRITICAL+ escalation can cancel LiteRT even when no further token callbacks arrive.
+- Benchmarked LiteRT-LM CPU threading with the real Qwen3-0.6B INT4 artifact and promoted the measured win into production with a conservative two-thread cap.
 
 ## Important work in progress
-- Benchmark LiteRT-LM 0.16.1's explicit CPU `threadCount` against the runtime default with the same real Qwen3-0.6B artifact before changing production thread policy; do not assume all Android cores improve TTFT/decode on heterogeneous CPUs.
+- Validate the production two-thread LiteRT CPU policy through exact-tip Android CI and real-model E2E; keep the two-thread cap until representative phones justify using more heterogeneous cores.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
 - Thermal protection still needs representative physical-device heat testing across sustained SEVERE/CRITICAL transitions; CI validates control flow, not real handset throttling behavior.
 
 ## Tests actually performed
+- `6d969769` passed Android CI including JVM tests/lint/debug APK build, emulator smoke, real Qwen LiteRT-LM E2E, and the new CPU-thread benchmark artifact.
+- The CPU-thread benchmark used the same Qwen3-0.6B INT4 model and measured runtime-default CPU execution against explicit two-thread execution on the 2-vCPU Android runner.
 - `def170ec` passed Android CI after preserving thermal-guard constructor call-site compatibility: JVM tests/lint/debug APK build, emulator smoke, and the real Qwen LiteRT-LM E2E all passed.
 - The stalled-inference thermal regression simulates a token followed by CRITICAL thermal escalation while native inference stops producing output; the guard independently cancels the delegate instead of waiting for another inference event.
 - `455d3ca9` passed Android CI after adding active-generation CRITICAL+ cancellation, validating the existing unit/lint/APK/emulator/real-Qwen pipeline for that path.
@@ -36,8 +39,9 @@
 - `1fa77181` passed Android CI with `LiteRtCacheState` JVM coverage for unchanged warm-cache reuse, cache mutation invalidation, model replacement invalidation, and refusal to mark an empty cache.
 
 ## Real benchmarks / performance improvements
-- CPU-emulator Qwen3-0.6B INT4 latest measured run: first prompt 22.09 prefill tok/s, 7.10 decode tok/s, 1.439 s TTFT, 4.060 s total, ~1.02 GiB app RAM.
-- Same lifecycle second prompt: 25.25 prefill tok/s, 7.82 decode tok/s, 1.211 s TTFT, 2.783 s total, ~1.02 GiB app RAM.
+- Real-Qwen CPU-thread comparison on the 2-vCPU Android runner: runtime default 8.02 decode tok/s and 19.32 prefill tok/s; explicit 2 threads 19.19 decode tok/s and 39.01 prefill tok/s, a 2.39x decode and 2.02x prefill speedup.
+- Production now requests up to two LiteRT CPU threads rather than the runtime default; this is benchmark-backed on CI but not yet claimed as a physical-phone speedup.
+- Latest normal Qwen E2E on the same run: first prompt 7.16 decode tok/s, 16.37 prefill tok/s, 1.820 s TTFT, 4.369 s total, ~1.02 GiB app RAM before the production thread-policy change.
 - Cold load: 2745.6 ms and 339,216,776 bytes of LiteRT cache/filesystem growth; full unload/reload: 1476.3 ms and 0 bytes of additional cache growth.
 - No physical-device speed claim yet; emulator numbers are regression baselines only.
 
@@ -45,8 +49,10 @@
 - Thermal/LMK behavior, vision history, long-context pressure, and interrupted-generation recovery still need representative physical-device testing.
 - GGUF remains intentionally unavailable; v1 relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU execution remains disabled until representative phones show a reliable net benefit.
+- More than two CPU inference threads remain intentionally disabled until phone benchmarks show a sustained gain without unacceptable heat/battery cost.
 
 ## Items to inspect before merging
+- Compare the two-thread production policy against runtime-default and 4+ threads on representative big.LITTLE phones, measuring TTFT, decode/prefill throughput, battery drain, and sustained thermal throttling before raising the cap.
 - Heat representative phones through MODERATE → SEVERE → CRITICAL during both normal streaming and an intentionally stalled/slow response; verify active inference cancels within roughly the monitor interval without ANR, stale tokens, or conversation corruption.
 - Verify a `.litertlm` artifact whose publisher filename omits context but whose model card says 2048 installs with a local `ctx2048` runtime marker, while the Hugging Face URL still targets the original filename and LiteRT uses 2048 rather than the 4K fallback.
 - Verify Qwen3-0.6B artifacts whose filenames omit context show their published 2048/4096-token capacities and corresponding KV-memory recommendation impact, while unrelated model-card tables cannot override them.
