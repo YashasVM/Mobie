@@ -1,7 +1,6 @@
 package dev.yashasvm.mobie.data.catalog
 
 import java.io.IOException
-import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.Call
@@ -15,7 +14,7 @@ internal suspend fun Call.awaitResponse(): Response = suspendCancellableCoroutin
         object : Callback {
             override fun onResponse(call: Call, response: Response) {
                 if (continuation.isActive) {
-                    continuation.resume(response)
+                    continuation.resume(response) { _, value, _ -> value.close() }
                 } else {
                     response.close()
                 }

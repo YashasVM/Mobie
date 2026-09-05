@@ -43,6 +43,7 @@ class LocalPersistenceTest {
 
         assertEquals(2, store.sessions(modelId).size)
         store.activate(modelId, first)
+        assertEquals(first, store.currentSessionId(modelId))
         assertEquals("First chat", store.read(modelId).single().text)
         store.clear(modelId)
     }

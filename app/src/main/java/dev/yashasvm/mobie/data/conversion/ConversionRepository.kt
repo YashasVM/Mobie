@@ -16,7 +16,7 @@ class ConversionRepository(
 ) {
     suspend fun request(modelId: String): Result<ConversionStatus> = withContext(Dispatchers.IO) {
         if (BuildConfig.CONVERSION_API_URL.isBlank()) {
-            return@withContext Result.success(ConversionStatus.REQUESTED)
+            return@withContext Result.failure(IllegalStateException("Model conversion is not configured"))
         }
         runCatching {
             val body = Json.encodeToString(mapOf("modelId" to modelId))

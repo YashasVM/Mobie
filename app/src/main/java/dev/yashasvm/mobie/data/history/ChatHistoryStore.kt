@@ -27,10 +27,14 @@ class ChatHistoryStore(context: Context) {
     private val preferences = context.getSharedPreferences("chat_history", Context.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true }
 
-    fun read(modelId: String): List<HistoryMessage> = sessions(modelId)
-        .firstOrNull { currentId(modelId) == null || it.id == currentId(modelId) }
-        ?.messages
-        .orEmpty()
+    fun read(modelId: String): List<HistoryMessage> {
+        val activeId = currentId(modelId)
+        return sessions(modelId).firstOrNull { activeId == null || it.id == activeId }
+            ?.messages.orEmpty()
+    }
+
+    fun currentSessionId(modelId: String): String? = currentId(modelId)
+        ?: sessions(modelId).firstOrNull()?.id
 
     fun write(modelId: String, messages: List<HistoryMessage>) {
         val now = System.currentTimeMillis()

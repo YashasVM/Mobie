@@ -106,6 +106,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -148,6 +149,10 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private const val REPOSITORY_URL = "https://github.com/YashasVM/Mobie"
 
@@ -864,9 +869,31 @@ internal fun ChatScreen(
     val context = LocalContext.current
     var prompt by rememberSaveable { mutableStateOf("") }
     var imagePath by rememberSaveable { mutableStateOf<String?>(null) }
+    var imageError by remember { mutableStateOf<String?>(null) }
+    var imageCopying by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        imagePath = uri?.let { copyImageToCache(context, it) }
+        uri ?: return@rememberLauncherForActivityResult
+        scope.launch {
+            imageError = null
+            imageCopying = true
+            try {
+                val copiedPath = copyImageToCache(context, uri)
+                if (copiedPath == null) {
+                    imageError = "Couldn't attach that image. Try another one."
+                } else {
+                    imagePath?.let { File(it).delete() }
+                    imagePath = copiedPath
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                imageError = "Couldn't attach that image. Try another one."
+            } finally {
+                imageCopying = false
+            }
+        }
     }
     val streamedLengthBucket = state.messages.lastOrNull()?.let { (it.text.length + it.thinking.length) / 120 } ?: 0
     LaunchedEffect(state.messages.size, streamedLengthBucket) {
@@ -875,10 +902,11 @@ internal fun ChatScreen(
     val ready = state.runtimeState == RuntimeState.READY
     val generating = state.runtimeState == RuntimeState.GENERATING
     val submit = {
-        if (ready && prompt.isNotBlank()) {
+        if (ready && !imageCopying && prompt.isNotBlank()) {
             onSend(prompt, imagePath)
             prompt = ""
             imagePath = null
+            imageError = null
         }
     }
     Scaffold(
@@ -899,10 +927,14 @@ internal fun ChatScreen(
                         )
                     }
                     if (generating) Text("Generating on this device…", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                    if (imageCopying) Text("Attaching image…", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                     imagePath?.let {
                         FilterChip(
                             selected = true,
-                            onClick = { imagePath = null },
+                            onClick = {
+                                File(it).delete()
+                                imagePath = null
+                            },
                             label = { Text("Image attached") },
                             leadingIcon = { LucideIcon(LucideR.drawable.lucide_ic_check, null, Modifier.size(16.dp)) },
                             trailingIcon = { LucideIcon(LucideR.drawable.lucide_ic_x, "Remove image", Modifier.size(16.dp)) },
@@ -927,14 +959,14 @@ internal fun ChatScreen(
                             disabledIndicatorColor = Color.Transparent,
                         ),
                         leadingIcon = if (model.supportsVision) {{
-                            IconButton(onClick = { imagePicker.launch("image/*") }, enabled = ready) {
+                            IconButton(onClick = { imagePicker.launch("image/*") }, enabled = ready && !imageCopying) {
                                 LucideIcon(LucideR.drawable.lucide_ic_image, "Attach image", Modifier.size(20.dp))
                             }
                         }} else null,
                         trailingIcon = {
                             FilledIconButton(
                                 onClick = { if (generating) onStop() else submit() },
-                                enabled = generating || (ready && prompt.isNotBlank()),
+                                enabled = generating || (ready && !imageCopying && prompt.isNotBlank()),
                                 modifier = Modifier.size(48.dp),
                             ) {
                                 LucideIcon(
@@ -948,6 +980,9 @@ internal fun ChatScreen(
                         keyboardActions = KeyboardActions(onSend = { submit() }),
                     )
                     state.error?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                    }
+                    imageError?.let {
                         Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                     }
                 }
@@ -1290,11 +1325,23 @@ private fun LucideIcon(
     Icon(painterResource(icon), contentDescription, modifier, tint)
 }
 
-private fun copyImageToCache(context: Context, uri: Uri): String? = runCatching {
-    val file = File(context.cacheDir, "chat-image-${System.currentTimeMillis()}.bin")
-    context.contentResolver.openInputStream(uri)?.use { input -> file.outputStream().use(input::copyTo) } ?: return null
-    file.absolutePath
-}.getOrNull()
+internal suspend fun copyImageToCache(context: Context, uri: Uri): String? = withContext(Dispatchers.IO) {
+    val image = File.createTempFile("chat-image-", ".bin", context.cacheDir)
+    var copied = false
+    try {
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            image.outputStream().use(input::copyTo)
+        } ?: return@withContext null
+        copied = true
+        image.absolutePath
+    } catch (error: CancellationException) {
+        throw error
+    } catch (_: Exception) {
+        null
+    } finally {
+        if (!copied) image.delete()
+    }
+}
 
 private fun formatBytes(value: Long): String {
     if (value <= 0) return "Unknown"
