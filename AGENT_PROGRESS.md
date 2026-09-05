@@ -9,23 +9,24 @@
 - Unified recommendation/runtime context metadata and cold/warm LiteRT cache storage admission, including fail-closed cache identity checks.
 - Hardened LiteRT lifecycle ordering, cancellation serialization, interrupted-turn recovery, Stop-vs-completion behavior, and active low-memory checks.
 - Added thermal protection around real LiteRT inference: SEVERE remains usable with new output capped to 256 tokens; CRITICAL+ rejects new work and cancels active/stalled generation through an independent 500 ms monitor.
+- Aligned device recommendations with that thermal policy: SEVERE warns about the 256-token throttle while CRITICAL+ explains that local model loading is blocked until the phone cools.
 - Benchmarked LiteRT CPU threading with the real Qwen model and enabled a conservative two-thread production policy after exact-tip E2E validation.
 - Added an inference-stall watchdog around production LiteRT streaming: 120 s initial prefill allowance, 30 s active-stream idle timeout, bounded cancellation, and explicit failure for streams that disappear without a terminal callback.
 
 ## Important work in progress
-- Align device recommendations with the validated thermal runtime policy: SEVERE should explain the 256-token throttle, while CRITICAL should explain that model loading is temporarily blocked. Exact-tip validation is pending.
-- Continue auditing runtime/backend choices and device-aware KV/context sizing for reliable TTFT/tokens-per-second and lower OOM risk without arbitrary global context caps or unvalidated main-model GPU/NPU execution.
+- Implement device-aware LiteRT KV/context sizing. A pure policy now derives the largest stable context from artifact context, model weights, total/free RAM, Android low-memory reserve, and the existing normal/low-RAM runtime fractions; production EngineConfig wiring is still pending.
+- Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second without unvalidated main-model GPU/NPU execution.
 - Thermal protection still needs representative physical-device sustained-heat testing.
 
 ## Tests actually performed
+- `4bc03ac9` passed JVM tests/lint/debug APK build, emulator smoke, and real Qwen LiteRT-LM E2E with recommendation behavior aligned to the validated SEVERE/CRITICAL runtime boundary.
+- JVM coverage asserts SEVERE recommendations describe continued throttled inference and CRITICAL recommendations describe blocked model loading.
 - `1268c26a` passed JVM tests/lint/debug APK build, emulator smoke, and real Qwen LiteRT-LM E2E with SEVERE thermal admission aligned to the existing 256-token throttle while CRITICAL+ still blocks model load/generation.
-- JVM coverage asserts SEVERE thermal status reaches the outer throttling layer and CRITICAL status still blocks model load and generation.
 - `615fe48d` passed JVM tests/lint/debug APK build, emulator smoke, and real Qwen LiteRT-LM E2E with the inference-stall guard wired around production LiteRT.
 - Inference-stall JVM coverage exercises stalled prefill, mid-stream stalls after token output, healthy Token → Stats → Complete pass-through, and streams ending without a terminal event.
 - `563aab15` passed JVM tests/lint/debug APK build, emulator smoke, and real Qwen LiteRT-LM E2E with the production two-thread CPU policy.
 - `6d969769` passed the same pipeline plus the real-model CPU-thread benchmark.
-- `def170ec` passed JVM/lint/APK/emulator/real-Qwen E2E for independent stalled-inference thermal cancellation.
-- `455d3ca9`, `b939096a`, `25f60ace`, `404fb573`, `2d938534`, `e3ec8758`, `c8013686`, and `1fa77181` passed their respective lifecycle, thermal, context, cache, and runtime regression pipelines.
+- Device-aware context sizing JVM coverage now checks full-context retention when RAM is sufficient, context reduction under current free-RAM pressure, stricter low-RAM-device behavior, and telemetry-unavailable fallback; exact-tip Android CI is pending.
 
 ## Real benchmarks / performance improvements
 - Real-Qwen CPU-thread comparison on the 2-vCPU Android runner: runtime default 8.02 decode tok/s and 19.32 prefill tok/s; explicit 2 threads 19.19 decode tok/s and 39.01 prefill tok/s (2.39x decode, 2.02x prefill).
@@ -36,13 +37,13 @@
 ## Known problems / regressions
 - Physical-device thermal/LMK behavior, vision history, long-context pressure, and interrupted-generation recovery still need representative handset testing.
 - Upstream LiteRT-LM Android streaming has open reports of missing terminal callbacks; Mobie now fails and cancels stalled streams instead of waiting forever, but recovery from a native deadlock that ignores cancellation still needs a reproducible device case.
-- Extended-context artifacts still size the native KV cache from the full advertised context; device-aware context sizing is not implemented yet.
+- Extended-context artifacts still size production native KV cache from the full advertised context until the new memory-budget policy is wired into EngineConfig.
 - GGUF remains intentionally unavailable; v1 relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU and more than two CPU inference threads remain disabled pending representative handset evidence.
 
 ## Items to inspect before merging
+- On a representative low/free-RAM phone, compare a 32K/64K LiteRT artifact before/after context-budget wiring: verify load success/OOM behavior, usable context, app RAM, TTFT, and decode/prefill throughput.
 - Heat a representative phone to SEVERE before starting a prompt and verify recommendations mention throttling and Mobie still generates with the 256-token cap; at CRITICAL verify recommendations say loading is blocked, new generation is rejected, and active generation is cancelled.
 - Reproduce a real LiteRT stream whose terminal callback disappears and verify Mobie returns control, reports the stall, and can recover/reload without ANR or stale tokens.
 - Compare 2-thread production against runtime-default and 4+ threads on representative big.LITTLE phones, measuring TTFT, decode/prefill throughput, battery drain, and thermal throttling.
 - Interrupt/resume a large real model download and verify ambiguous `Content-Range .../*` resumes are rejected.
-- Switch installed LiteRT models under constrained RAM and exercise a near-4K conversation including vision/history eviction.
