@@ -13,7 +13,8 @@
 - Added an inference-stall watchdog around production LiteRT streaming: 120 s initial prefill allowance, 30 s active-stream idle timeout, bounded cancellation, and explicit failure for streams that disappear without a terminal callback.
 
 ## Important work in progress
-- Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
+- Align device recommendations with the validated thermal runtime policy: SEVERE should explain the 256-token throttle, while CRITICAL should explain that model loading is temporarily blocked. Exact-tip validation is pending.
+- Continue auditing runtime/backend choices and device-aware KV/context sizing for reliable TTFT/tokens-per-second and lower OOM risk without arbitrary global context caps or unvalidated main-model GPU/NPU execution.
 - Thermal protection still needs representative physical-device sustained-heat testing.
 
 ## Tests actually performed
@@ -35,11 +36,12 @@
 ## Known problems / regressions
 - Physical-device thermal/LMK behavior, vision history, long-context pressure, and interrupted-generation recovery still need representative handset testing.
 - Upstream LiteRT-LM Android streaming has open reports of missing terminal callbacks; Mobie now fails and cancels stalled streams instead of waiting forever, but recovery from a native deadlock that ignores cancellation still needs a reproducible device case.
+- Extended-context artifacts still size the native KV cache from the full advertised context; device-aware context sizing is not implemented yet.
 - GGUF remains intentionally unavailable; v1 relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU and more than two CPU inference threads remain disabled pending representative handset evidence.
 
 ## Items to inspect before merging
-- Heat a representative phone to SEVERE before starting a prompt and verify Mobie still generates with the 256-token cap; at CRITICAL verify new generation is rejected and active generation is cancelled.
+- Heat a representative phone to SEVERE before starting a prompt and verify recommendations mention throttling and Mobie still generates with the 256-token cap; at CRITICAL verify recommendations say loading is blocked, new generation is rejected, and active generation is cancelled.
 - Reproduce a real LiteRT stream whose terminal callback disappears and verify Mobie returns control, reports the stall, and can recover/reload without ANR or stale tokens.
 - Compare 2-thread production against runtime-default and 4+ threads on representative big.LITTLE phones, measuring TTFT, decode/prefill throughput, battery drain, and thermal throttling.
 - Interrupt/resume a large real model download and verify ambiguous `Content-Range .../*` resumes are rejected.
