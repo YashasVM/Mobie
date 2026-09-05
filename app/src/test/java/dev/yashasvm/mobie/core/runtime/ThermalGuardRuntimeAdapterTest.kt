@@ -1,6 +1,7 @@
 package dev.yashasvm.mobie.core.runtime
 
 import dev.yashasvm.mobie.core.model.ModelFormat
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
@@ -49,10 +50,17 @@ class ThermalGuardRuntimeAdapterTest {
     }
 
     @Test
-    fun criticalEscalationDuringGenerationCancelsRuntimeAndStopsForwardingTokens() = runBlocking {
+    fun criticalEscalationCancelsRuntimeEvenWhenGenerationStopsEmittingTokens() = runBlocking {
         var thermalStatus = 2
-        val delegate = RecordingRuntimeAdapter(onAfterFirstToken = { thermalStatus = 4 })
-        val adapter = ThermalGuardRuntimeAdapter(delegate) { thermalStatus }
+        val delegate = RecordingRuntimeAdapter(
+            onAfterFirstToken = { thermalStatus = 4 },
+            stallAfterFirstTokenMs = 1_000L,
+        )
+        val adapter = ThermalGuardRuntimeAdapter(
+            delegate = delegate,
+            thermalStatusProvider = { thermalStatus },
+            activePollIntervalMs = 1L,
+        )
 
         val events = adapter.generate("hello").toList()
 
@@ -73,6 +81,7 @@ class ThermalGuardRuntimeAdapterTest {
 
     private class RecordingRuntimeAdapter(
         private val onAfterFirstToken: (() -> Unit)? = null,
+        private val stallAfterFirstTokenMs: Long = 0L,
     ) : RuntimeAdapter {
         override val format: ModelFormat = ModelFormat.LITERT_LM
         var generateCalled = false
@@ -98,6 +107,7 @@ class ThermalGuardRuntimeAdapterTest {
             return flow {
                 emit(InferenceEvent.Token("first"))
                 callback()
+                if (stallAfterFirstTokenMs > 0L) delay(stallAfterFirstTokenMs)
                 emit(InferenceEvent.Token("second"))
                 emit(InferenceEvent.Complete)
             }
