@@ -16,8 +16,9 @@
 - Validated model-card context propagation end to end through catalog selection → runtime-aware filename → hashed on-disk filename → LiteRT runtime context parsing, so recommendation memory estimates and EngineConfig stay aligned after download/restart.
 
 ## Important work in progress
+- Thermal-pressure generation admission is now wired around the real LiteRT runtime: SEVERE status caps new generation to 256 tokens, while CRITICAL/EMERGENCY/SHUTDOWN reject generation before native execution. Exact-tip CI and real E2E validation are still pending before this is considered complete.
+- Extend thermal protection to react safely to status escalation during an already-running generation without corrupting conversation/lifecycle state.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
-- Add runtime thermal-pressure protection only where it can safely stop or reject expensive generation without corrupting conversation/lifecycle state; device profiling already records Android thermal status, but this still needs integration and tests.
 
 ## Tests actually performed
 - `25f60ace` passed JVM tests, lint/debug APK build, emulator smoke, and the full real Qwen LiteRT-LM E2E with cross-layer stored-context propagation coverage.
@@ -35,11 +36,13 @@
 - No physical-device speed claim yet; emulator numbers are regression baselines only.
 
 ## Known problems / regressions
+- Thermal admission currently samples status when generation starts; safe cancellation on mid-generation escalation is not yet implemented.
 - Vision history, thermal/LMK behavior, long-context pressure, and interrupted-generation recovery still need representative physical-device testing.
 - GGUF remains intentionally unavailable; v1 relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU execution remains disabled until representative phones show a reliable net benefit.
 
 ## Items to inspect before merging
+- Heat representative phones through MODERATE → SEVERE → CRITICAL and verify new prompts are shortened/blocked as intended without ANR or conversation corruption; also verify an already-running generation still needs follow-up escalation handling.
 - Verify a `.litertlm` artifact whose publisher filename omits context but whose model card says 2048 installs with a local `ctx2048` runtime marker, while the Hugging Face URL still targets the original filename and LiteRT uses 2048 rather than the 4K fallback.
 - Verify Qwen3-0.6B artifacts whose filenames omit context show their published 2048/4096-token capacities and corresponding KV-memory recommendation impact, while unrelated model-card tables cannot override them.
 - Verify an initialized model can reload with only filesystem safety reserve free while a cold or mutated-cache model is still blocked.
@@ -48,4 +51,3 @@
 - Trigger Stop exactly as a real generation completes, then immediately send another prompt; verify the next prompt runs normally.
 - Switch directly between installed LiteRT models under constrained RAM and verify the old engine is released before next-load admission.
 - Exercise a near-4K conversation including vision/history eviction and verify bounded replay/output admission stays stable.
-- Heat representative phones through MODERATE → SEVERE and verify inference blocks/stops cleanly without ANR or conversation corruption.
