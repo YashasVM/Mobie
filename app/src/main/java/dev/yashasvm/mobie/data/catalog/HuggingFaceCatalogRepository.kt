@@ -35,6 +35,28 @@ internal fun huggingFaceSearchUrl(query: String): String {
 internal fun catalogOwnerAllowed(repoId: String, expectedOwner: String?): Boolean =
     expectedOwner == null || repoId.substringBefore('/') == expectedOwner
 
+/**
+ * LiteRT-LM currently receives the context limit through EngineConfig rather than discovering the
+ * package's maximum from the loaded container. When the Hub filename does not encode context but a
+ * trusted model-card table does, preserve that capacity in the local filename so the same value
+ * survives download/install/restart and reaches runtimeContextWindowTokens(). The download URL
+ * still points at the publisher's original filename.
+ */
+internal fun runtimeAwareArtifactFileName(sourceFileName: String, contextWindowTokens: Int?): String {
+    if (contextWindowTokens == null || inferArtifactContextWindow(sourceFileName) != null) return sourceFileName
+    if (contextWindowTokens !in 128..1_048_576) return sourceFileName
+
+    val slashAt = sourceFileName.lastIndexOf('/')
+    val directory = if (slashAt >= 0) sourceFileName.substring(0, slashAt + 1) else ""
+    val name = sourceFileName.substring(slashAt + 1)
+    val extensionAt = name.lastIndexOf('.')
+    return if (extensionAt > 0) {
+        "$directory${name.substring(0, extensionAt)}.ctx$contextWindowTokens${name.substring(extensionAt)}"
+    } else {
+        "$directory$name.ctx$contextWindowTokens"
+    }
+}
+
 class HuggingFaceCatalogRepository(
     private val client: OkHttpClient,
     private val tokenStore: HuggingFaceTokenStore,
@@ -171,15 +193,16 @@ private data class HfModel(
                 else -> return@mapNotNull null
             }
             val size = file.size ?: file.lfs?.size ?: return@mapNotNull null
+            val contextWindowTokens = artifactContextWindows[file.rfilename]
+                ?: inferArtifactContextWindow(file.rfilename)
             ModelArtifact(
-                fileName = file.rfilename,
+                fileName = runtimeAwareArtifactFileName(file.rfilename, contextWindowTokens),
                 downloadUrl = artifactUrl(repoId, file.rfilename),
                 sizeBytes = size,
                 sha256 = file.lfs?.sha256 ?: file.lfs?.oid?.removePrefix("sha256:"),
                 format = format,
                 quantization = inferArtifactQuantization(file.rfilename),
-                contextWindowTokens = artifactContextWindows[file.rfilename]
-                    ?: inferArtifactContextWindow(file.rfilename),
+                contextWindowTokens = contextWindowTokens,
             )
         }
         val pipeline = pipeline_tag ?: tags.firstOrNull { it in setOf(
