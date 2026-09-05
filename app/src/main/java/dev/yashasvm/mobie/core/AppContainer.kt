@@ -3,6 +3,7 @@ package dev.yashasvm.mobie.core
 import android.content.Context
 import dev.yashasvm.mobie.core.device.CompatibilityResolver
 import dev.yashasvm.mobie.core.device.DeviceProfileProvider
+import dev.yashasvm.mobie.core.runtime.InferenceStallGuardRuntimeAdapter
 import dev.yashasvm.mobie.core.runtime.LiteRtLmRuntimeAdapter
 import dev.yashasvm.mobie.core.runtime.RuntimeRegistry
 import dev.yashasvm.mobie.core.runtime.ThermalGuardRuntimeAdapter
@@ -28,10 +29,11 @@ class AppContainer(context: Context) {
     val deviceProfile = DeviceProfileProvider(appContext)
     val compatibility = CompatibilityResolver()
     private val liteRtRuntime = LiteRtLmRuntimeAdapter(appContext)
+    private val stallGuardedLiteRtRuntime = InferenceStallGuardRuntimeAdapter(liteRtRuntime)
     val runtimes = RuntimeRegistry(
         setOf(
             ThermalGuardRuntimeAdapter(
-                delegate = liteRtRuntime,
+                delegate = stallGuardedLiteRtRuntime,
                 thermalStatusProvider = {
                     deviceProfile.current().thermalStatus
                 },
