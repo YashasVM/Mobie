@@ -5,6 +5,7 @@ import dev.yashasvm.mobie.core.device.CompatibilityResolver
 import dev.yashasvm.mobie.core.device.DeviceProfileProvider
 import dev.yashasvm.mobie.core.runtime.LiteRtLmRuntimeAdapter
 import dev.yashasvm.mobie.core.runtime.RuntimeRegistry
+import dev.yashasvm.mobie.core.runtime.ThermalGuardRuntimeAdapter
 import dev.yashasvm.mobie.core.security.HuggingFaceTokenStore
 import dev.yashasvm.mobie.data.catalog.HuggingFaceCatalogRepository
 import dev.yashasvm.mobie.data.conversion.ConversionRepository
@@ -26,5 +27,12 @@ class AppContainer(context: Context) {
     val chatHistory = ChatHistoryStore(appContext)
     val deviceProfile = DeviceProfileProvider(appContext)
     val compatibility = CompatibilityResolver()
-    val runtimes = RuntimeRegistry(setOf(LiteRtLmRuntimeAdapter(appContext)))
+    private val liteRtRuntime = LiteRtLmRuntimeAdapter(appContext)
+    val runtimes = RuntimeRegistry(
+        setOf(
+            ThermalGuardRuntimeAdapter(liteRtRuntime) {
+                deviceProfile.current().thermalStatus
+            },
+        ),
+    )
 }
