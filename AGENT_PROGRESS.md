@@ -13,12 +13,14 @@
 - Added fail-closed warm-cache identity tracking keyed to exact model path/size/mtime, LiteRT-LM version, and cache manifest; validated warm reloads now use reduced storage headroom while stale/missing/mutated caches fall back to cold-load admission.
 - Added artifact-specific context metadata from Hugging Face model-card tables for `.litertlm` filenames that omit context, including compact `4K`/`8K` values, so KV/RAM recommendations use publisher capacity when available.
 - Hardened model-card parsing across Markdown table/prose boundaries so unrelated storage/benchmark values cannot leak into context capacity.
+- Validated model-card context propagation end to end through catalog selection → runtime-aware filename → hashed on-disk filename → LiteRT runtime context parsing, so recommendation memory estimates and EngineConfig stay aligned after download/restart.
 
 ## Important work in progress
-- Finish exact-tip validation of model-card context propagation through catalog → runtime-aware filename → hashed on-disk filename → LiteRT EngineConfig. A cross-layer regression test now verifies the hashed storage filename still resolves to the publisher context at runtime; CI is pending.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
+- Add runtime thermal-pressure protection only where it can safely stop or reject expensive generation without corrupting conversation/lifecycle state; device profiling already records Android thermal status, but this still needs integration and tests.
 
 ## Tests actually performed
+- `25f60ace` passed JVM tests, lint/debug APK build, emulator smoke, and the full real Qwen LiteRT-LM E2E with cross-layer stored-context propagation coverage.
 - `404fb573` passed JVM tests, lint/debug APK build, emulator smoke, and the full real Qwen LiteRT-LM E2E with model-card table-boundary hardening.
 - `2d938534` passed JVM tests, lint/debug APK build, emulator smoke, and the full real Qwen LiteRT-LM E2E after fixing compact `4K`/`8K` context parsing.
 - `e3ec8758` passed JVM tests, lint/debug APK build, emulator smoke, and the full real Qwen LiteRT-LM E2E lifecycle with validated warm-cache runtime integration.
@@ -33,7 +35,6 @@
 - No physical-device speed claim yet; emulator numbers are regression baselines only.
 
 ## Known problems / regressions
-- Runtime propagation of model-card-only context is not yet exact-tip CI validated. The catalog and persistence path now carry the marker through the hashed stored filename, but this remains merge-gated until the current Android pipeline is green.
 - Vision history, thermal/LMK behavior, long-context pressure, and interrupted-generation recovery still need representative physical-device testing.
 - GGUF remains intentionally unavailable; v1 relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU execution remains disabled until representative phones show a reliable net benefit.
