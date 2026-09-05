@@ -1,0 +1,63 @@
+name: Publish Mobie v0.0.2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/release-v0.0.2.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build APK
+        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
+
+      - name: Prepare release APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk Mobie-v0.0.2.apk
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > release-notes.md <<'EOF'
+          ## Mobie v0.0.2
+
+          This release focuses on making local LiteRT-LM inference safer, more reliable, and more useful across different Android devices.
+
+          ### Highlights
+          - Improved context handling: trusted model-card context metadata now follows supported LiteRT-LM artifacts through install/restart into runtime configuration.
+          - Smarter device/model compatibility using RAM pressure, storage headroom, context/KV-cache estimates, artifact size, backend support, and hardware-target filtering.
+          - Measured LiteRT cold-cache storage policy plus fail-closed warm-cache identity tracking for safer reloads and lower unnecessary storage requirements.
+          - Broader Hugging Face search for directly runnable third-party LiteRT-LM text/vision models while keeping Featured curated.
+          - More reliable chat sessions and interruption handling, including correct active-session restoration and cancellation behavior.
+          - Safer image attachments: background cache copies, cleanup on failure/removal, and clear attachment progress/error handling.
+          - OkHttp coroutine cancellation now closes delivered responses correctly instead of risking resource leaks.
+          - Conversion requests now fail clearly when no conversion backend is configured instead of reporting false success.
+          - Expanded Android/JVM test coverage for cache identity, storage policy, model-card context parsing, image cache handling, HTTP cancellation, conversion configuration, persistence, and chat interruption behavior.
+
+          ### Validation
+          The combined development branch passed unit tests, lint, debug APK build, emulator smoke testing, and has a real Qwen LiteRT-LM end-to-end validation path covering download, load, generation, history/reset, unload/reload, and generation again.
+
+          ### Known limitations
+          - This remains an early alpha release.
+          - The attached APK is a debug-signed build.
+          - GGUF/llama.cpp is not bundled; directly runnable LiteRT-LM artifacts remain the supported path.
+          - Main-model GPU/NPU acceleration remains disabled until representative physical-device testing shows a reliable benefit.
+          - Physical-device thermal, battery, long-context, and vision testing is still less comprehensive than emulator/CI validation.
+          EOF
+
+          gh release create v0.0.2 Mobie-v0.0.2.apk             --repo "${GITHUB_REPOSITORY}"             --target "${GITHUB_SHA}"             --title "Mobie v0.0.2"             --notes-file release-notes.md             --latest
