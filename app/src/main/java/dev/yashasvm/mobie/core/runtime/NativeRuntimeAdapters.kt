@@ -83,10 +83,14 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                             rethrowAfterRuntimeCleanup(cancellationFailure) { closeRuntime() }
                         }
                         closeRuntime()
-                        ensureLoadHeadroom(modelPath)
+                        val configuredContextWindowTokens = selectRuntimeContextWindowTokens(modelPath)
+                        ensureLoadHeadroom(modelPath, configuredContextWindowTokens)
                         ExperimentalFlags.enableBenchmark = true
-                        val configuredContextWindowTokens = runtimeContextWindowTokens(modelPath)
-                        val loadedEngine = initializeEngineWithVisionFallback(modelPath, vision)
+                        val loadedEngine = initializeEngineWithVisionFallback(
+                            modelPath = modelPath,
+                            vision = vision,
+                            contextWindowTokens = configuredContextWindowTokens,
+                        )
                         try {
                             contextWindowTokens = configuredContextWindowTokens
                             val restored = ConversationHistoryPolicy.select(history, contextWindowTokens)
@@ -314,19 +318,37 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         },
     ) { conversation?.cancelProcess() }
 
-    private fun initializeEngineWithVisionFallback(modelPath: String, vision: Boolean): LoadedEngine {
-        if (!vision) return LoadedEngine(initializeEngine(modelPath, visionBackend = null), visionReady = false)
+    private fun initializeEngineWithVisionFallback(
+        modelPath: String,
+        vision: Boolean,
+        contextWindowTokens: Int,
+    ): LoadedEngine {
+        if (!vision) {
+            return LoadedEngine(
+                initializeEngine(modelPath, visionBackend = null, contextWindowTokens = contextWindowTokens),
+                visionReady = false,
+            )
+        }
 
         return try {
-            LoadedEngine(initializeEngine(modelPath, visionBackend = Backend.GPU()), visionReady = true)
+            LoadedEngine(
+                initializeEngine(modelPath, visionBackend = Backend.GPU(), contextWindowTokens = contextWindowTokens),
+                visionReady = true,
+            )
         } catch (gpuVisionError: Exception) {
             rethrowCancellation(gpuVisionError)
             try {
-                LoadedEngine(initializeEngine(modelPath, visionBackend = Backend.CPU()), visionReady = true)
+                LoadedEngine(
+                    initializeEngine(modelPath, visionBackend = Backend.CPU(), contextWindowTokens = contextWindowTokens),
+                    visionReady = true,
+                )
             } catch (cpuVisionError: Exception) {
                 rethrowCancellation(cpuVisionError)
                 try {
-                    LoadedEngine(initializeEngine(modelPath, visionBackend = null), visionReady = false)
+                    LoadedEngine(
+                        initializeEngine(modelPath, visionBackend = null, contextWindowTokens = contextWindowTokens),
+                        visionReady = false,
+                    )
                 } catch (textOnlyError: Exception) {
                     rethrowCancellation(textOnlyError)
                     textOnlyError.addSuppressed(gpuVisionError)
@@ -337,7 +359,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         }
     }
 
-    private fun initializeEngine(modelPath: String, visionBackend: Backend?): Engine {
+    private fun initializeEngine(modelPath: String, visionBackend: Backend?, contextWindowTokens: Int): Engine {
         val modelFile = File(modelPath)
         val cacheDirectory = liteRtCacheDirectory(modelFile).apply {
             if (!isDirectory && !mkdirs()) {
@@ -349,7 +371,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                 modelPath = modelPath,
                 backend = Backend.CPU(threadCount = LiteRtCpuThreadPolicy.threadCount()),
                 visionBackend = visionBackend,
-                maxNumTokens = runtimeContextWindowTokens(modelPath),
+                maxNumTokens = contextWindowTokens,
                 maxNumImages = if (visionBackend != null) 1 else null,
                 cacheDir = cacheDirectory.absolutePath,
             ),
@@ -438,11 +460,24 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         )
     }
 
-    private fun ensureLoadHeadroom(modelPath: String) {
+    private fun selectRuntimeContextWindowTokens(modelPath: String): Int {
         val manager = appContext.getSystemService(ActivityManager::class.java)
         val memory = ActivityManager.MemoryInfo().also(manager::getMemoryInfo)
         val modelFile = File(modelPath)
-        val contextWindowTokens = runtimeContextWindowTokens(modelPath)
+        return LiteRtContextWindowPolicy.select(
+            advertisedContextWindowTokens = runtimeContextWindowTokens(modelPath),
+            modelWeightsBytes = modelFile.length(),
+            totalRamBytes = memory.totalMem,
+            availableRamBytes = memory.availMem,
+            lowMemoryThresholdBytes = memory.threshold,
+            isLowRamDevice = manager.isLowRamDevice,
+        )
+    }
+
+    private fun ensureLoadHeadroom(modelPath: String, contextWindowTokens: Int) {
+        val manager = appContext.getSystemService(ActivityManager::class.java)
+        val memory = ActivityManager.MemoryInfo().also(manager::getMemoryInfo)
+        val modelFile = File(modelPath)
         val memoryReason = RuntimeLoadMemoryPolicy.blockReason(
             modelWeightsBytes = modelFile.length(),
             totalRamBytes = memory.totalMem,
