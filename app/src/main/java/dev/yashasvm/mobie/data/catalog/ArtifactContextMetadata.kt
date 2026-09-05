@@ -52,7 +52,7 @@ private fun extractLiteRtFileName(cell: String): String? {
 
 private fun parseContextTokenCount(cell: String): Int? {
     val normalized = cell.replace(",", "").trim()
-    val match = Regex("(?i)(\\d{3,7})\\s*([km]?)").find(normalized) ?: return null
+    val match = Regex("(?i)(\\d{1,7})\\s*([km]?)").find(normalized) ?: return null
     val value = match.groupValues[1].toLongOrNull() ?: return null
     val multiplier = when (match.groupValues[2].lowercase()) {
         "k" -> 1024L
