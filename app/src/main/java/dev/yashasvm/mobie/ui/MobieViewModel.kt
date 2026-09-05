@@ -157,7 +157,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val artifact = model?.let { artifactForDevice(it, device) }
         val presentedModel = model?.preferArtifact(artifact)
         val sessions = presentedModel?.let { container.chatHistory.sessions(it.id) }.orEmpty()
-        val currentSessionId = sessions.firstOrNull()?.id
+        val currentSessionId = presentedModel?.let { container.chatHistory.currentSessionId(it.id) }
         mutableState.update {
             it.copy(
                 selected = presentedModel,
@@ -249,7 +249,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 runtimeState = RuntimeState.LOADING,
                 messages = history,
                 history = sessions,
-                sessionId = sessions.firstOrNull()?.id,
+                sessionId = container.chatHistory.currentSessionId(model.id),
                 error = null,
             )
         }
@@ -380,12 +380,12 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val path = current.downloadedPath ?: return
         val canReuseLoadedModel = current.runtimeState == RuntimeState.READY
         inferenceJob?.cancel()
-        container.chatHistory.startNewSession(model.id)
+        val sessionId = container.chatHistory.startNewSession(model.id)
         mutableState.update {
             it.copy(
                 messages = emptyList(),
                 history = container.chatHistory.sessions(model.id),
-                sessionId = container.chatHistory.sessions(model.id).firstOrNull()?.id,
+                sessionId = sessionId,
                 runtimeState = RuntimeState.LOADING,
                 stats = null,
                 error = null,
@@ -549,8 +549,8 @@ internal fun List<ChatMessage>.updateLastAssistant(chunk: String, thinkingChunk:
 }
 
 internal fun List<ChatMessage>.markLastAssistantInterrupted(): List<ChatMessage> {
-    val index = indexOfLast { !it.fromUser }
-    if (index < 0) return this
+    if (lastOrNull()?.fromUser != false) return this
+    val index = lastIndex
     return toMutableList().apply {
         this[index] = this[index].copy(interrupted = true)
     }

@@ -8,8 +8,12 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
 import okhttp3.Call
 import okhttp3.Callback
+import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
+import okhttp3.ResponseBody
+import okio.Buffer
+import okio.BufferedSource
 import okio.Timeout
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -24,6 +28,27 @@ class OkHttpCoroutinesTest {
         request.cancelAndJoin()
 
         assertTrue(call.isCanceled())
+    }
+
+    @Test
+    fun `cancelling after response delivery closes the response`() = runBlocking {
+        val call = HangingCall()
+        val request = async { call.awaitResponse() }
+        val closed = AtomicBoolean(false)
+
+        yield()
+        call.respond(
+            Response.Builder()
+                .request(call.request())
+                .protocol(Protocol.HTTP_1_1)
+                .code(200)
+                .message("OK")
+                .body(TrackingBody(closed))
+                .build(),
+        )
+        request.cancelAndJoin()
+
+        assertTrue(closed.get())
     }
 
     private class HangingCall : Call {
@@ -54,5 +79,24 @@ class OkHttpCoroutinesTest {
         override fun timeout(): Timeout = Timeout.NONE
 
         override fun clone(): Call = HangingCall()
+
+        fun respond(response: Response) {
+            checkNotNull(callback).onResponse(this, response)
+        }
+    }
+
+    private class TrackingBody(private val closed: AtomicBoolean) : ResponseBody() {
+        private val source = Buffer()
+
+        override fun contentType() = null
+
+        override fun contentLength() = 0L
+
+        override fun source(): BufferedSource = source
+
+        override fun close() {
+            closed.set(true)
+            source.close()
+        }
     }
 }

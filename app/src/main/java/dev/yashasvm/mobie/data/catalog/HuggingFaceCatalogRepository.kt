@@ -25,10 +25,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 
 internal fun huggingFaceSearchUrl(query: String): String {
     val encoded = URLEncoder.encode(query.trim(), Charsets.UTF_8.name())
-    // Filter at the Hub before applying the result limit. Without this, popular non-LiteRT
-    // repositories can consume all 60 search slots and hide directly runnable .litertlm models.
-    // The owner remains unrestricted so third-party LiteRT-LM publishers are still discoverable.
-    return "https://huggingface.co/api/models?search=$encoded&filter=litert-lm&sort=downloads&direction=-1&limit=60&full=true"
+    return "https://huggingface.co/api/models?search=$encoded&author=litert-community&filter=litert-lm&sort=downloads&direction=-1&limit=60&full=true"
 }
 
 internal fun catalogOwnerAllowed(repoId: String, expectedOwner: String?): Boolean =
@@ -48,7 +45,7 @@ class HuggingFaceCatalogRepository(
 
     suspend fun search(query: String): Result<List<AiModel>> {
         if (query.isBlank()) return Result.success(emptyList())
-        return fetchModels(huggingFaceSearchUrl(query))
+        return fetchModels(huggingFaceSearchUrl(query), expectedOwner = "litert-community")
     }
 
     private suspend fun fetchModels(

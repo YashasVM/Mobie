@@ -7,6 +7,17 @@ import org.junit.Test
 
 class MobieViewModelMessageTest {
     @Test
+    fun `cancelling before output preserves the previous completed answer`() {
+        val messages = listOf(
+            ChatMessage(fromUser = true, text = "first prompt"),
+            ChatMessage(fromUser = false, text = "completed answer"),
+            ChatMessage(fromUser = true, text = "cancelled before output"),
+        )
+
+        assertEquals(messages, messages.markLastAssistantInterrupted())
+    }
+
+    @Test
     fun `marks latest assistant partial as interrupted`() {
         val messages = listOf(
             ChatMessage(fromUser = true, text = "first prompt"),

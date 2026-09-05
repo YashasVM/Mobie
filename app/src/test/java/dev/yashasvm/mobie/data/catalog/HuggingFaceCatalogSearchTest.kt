@@ -6,13 +6,13 @@ import org.junit.Test
 
 class HuggingFaceCatalogSearchTest {
     @Test
-    fun `search is restricted to LiteRT LM at the Hub but not by owner`() {
+    fun `search is restricted to the supported LiteRT publisher`() {
         val url = huggingFaceSearchUrl("Qwen3.5 LiteRT")
 
         assertTrue(url.contains("search=Qwen3.5+LiteRT"))
         assertTrue(url.contains("filter=litert-lm"))
-        assertFalse(url.contains("author="))
-        assertTrue(catalogOwnerAllowed("LudwigBanach/Qwen3.5-0.8B-LiteRT", expectedOwner = null))
+        assertTrue(url.contains("author=litert-community"))
+        assertTrue(catalogOwnerAllowed("litert-community/Qwen3.5-0.8B-LiteRT", expectedOwner = "litert-community"))
     }
 
     @Test

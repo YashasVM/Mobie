@@ -28,7 +28,12 @@ class MobieSmokeTest {
 
         composeRule.onNodeWithTag("bottom_nav_settings").performClick()
         composeRule.onNodeWithText("Hugging Face access").assertIsDisplayed()
-        composeRule.onNodeWithText("Add token").performClick()
+        val tokenAction = if (composeRule.onAllNodesWithText("Add token").fetchSemanticsNodes().isNotEmpty()) {
+            "Add token"
+        } else {
+            "Change token"
+        }
+        composeRule.onNodeWithText(tokenAction).performClick()
         composeRule.onNodeWithTag("hf_token_input").performTextInput("hf_test_only_not_a_real_token")
         composeRule.onNodeWithText("Save").performClick()
 
