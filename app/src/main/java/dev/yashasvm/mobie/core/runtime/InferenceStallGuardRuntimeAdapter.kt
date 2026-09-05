@@ -48,7 +48,9 @@ class InferenceStallGuardRuntimeAdapter(
             val events = Channel<InferenceEvent>(Channel.BUFFERED)
             val producer = launch {
                 try {
-                    delegate.generate(prompt, imagePath, config).collect(events::send)
+                    delegate.generate(prompt, imagePath, config).collect { event ->
+                        events.send(event)
+                    }
                 } finally {
                     events.close()
                 }
