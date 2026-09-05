@@ -1,5 +1,7 @@
 package dev.yashasvm.mobie.data.catalog
 
+import dev.yashasvm.mobie.core.runtime.runtimeContextWindowTokens
+import dev.yashasvm.mobie.data.download.DownloadFilePolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Test
@@ -100,5 +102,16 @@ class ArtifactContextMetadataTest {
             "android/Qwen3-0.6B.ctx4096.litertlm",
             runtimeAwareArtifactFileName("android/Qwen3-0.6B.litertlm", 4096),
         )
+    }
+
+    @Test
+    fun `stored download filename preserves model card context for runtime`() {
+        val runtimeAwareName = runtimeAwareArtifactFileName(
+            "Qwen3-0.6B_dynamic_wi4b32_afp32.litertlm",
+            2048,
+        )
+        val storedName = DownloadFilePolicy.storageFileName(runtimeAwareName)
+
+        assertEquals(2048, runtimeContextWindowTokens("/data/user/0/dev.yashasvm.mobie/files/models/$storedName"))
     }
 }
