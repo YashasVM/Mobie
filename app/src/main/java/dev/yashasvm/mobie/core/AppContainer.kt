@@ -30,9 +30,12 @@ class AppContainer(context: Context) {
     private val liteRtRuntime = LiteRtLmRuntimeAdapter(appContext)
     val runtimes = RuntimeRegistry(
         setOf(
-            ThermalGuardRuntimeAdapter(liteRtRuntime) {
-                deviceProfile.current().thermalStatus
-            },
+            ThermalGuardRuntimeAdapter(
+                delegate = liteRtRuntime,
+                thermalStatusProvider = {
+                    deviceProfile.current().thermalStatus
+                },
+            ),
         ),
     )
 }
