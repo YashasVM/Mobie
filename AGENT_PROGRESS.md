@@ -15,7 +15,7 @@
 - Hardened model-card parsing across Markdown table/prose boundaries so unrelated storage/benchmark values cannot leak into context capacity.
 
 ## Important work in progress
-- Propagate trusted model-card context through download/install/restart into the actual LiteRT EngineConfig. The current fix encodes publisher context into the local runtime filename only when the original artifact name omits a context marker; exact-tip CI is running.
+- Finish exact-tip validation of model-card context propagation through catalog → runtime-aware filename → hashed on-disk filename → LiteRT EngineConfig. A cross-layer regression test now verifies the hashed storage filename still resolves to the publisher context at runtime; CI is pending.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
 
 ## Tests actually performed
@@ -33,7 +33,7 @@
 - No physical-device speed claim yet; emulator numbers are regression baselines only.
 
 ## Known problems / regressions
-- Runtime propagation of model-card-only context is not yet exact-tip CI validated. Until this change is green, a filename with no context marker can still fall back to 4K at runtime even when recommendations used a publisher-supplied 2K capacity.
+- Runtime propagation of model-card-only context is not yet exact-tip CI validated. The catalog and persistence path now carry the marker through the hashed stored filename, but this remains merge-gated until the current Android pipeline is green.
 - Vision history, thermal/LMK behavior, long-context pressure, and interrupted-generation recovery still need representative physical-device testing.
 - GGUF remains intentionally unavailable; v1 relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU execution remains disabled until representative phones show a reliable net benefit.
