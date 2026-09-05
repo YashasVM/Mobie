@@ -77,4 +77,28 @@ class ArtifactContextMetadataTest {
         assertEquals(2048, contexts["valid.litertlm"])
         assertFalse(contexts.containsKey("benchmark.litertlm"))
     }
+
+    @Test
+    fun `embeds trusted card context in runtime filename when publisher filename omits it`() {
+        assertEquals(
+            "Qwen3-0.6B_dynamic_wi4b32_afp32.ctx2048.litertlm",
+            runtimeAwareArtifactFileName("Qwen3-0.6B_dynamic_wi4b32_afp32.litertlm", 2048),
+        )
+    }
+
+    @Test
+    fun `preserves publisher filename when it already encodes context`() {
+        assertEquals(
+            "Qwen3-0.6B.ctx4k.litertlm",
+            runtimeAwareArtifactFileName("Qwen3-0.6B.ctx4k.litertlm", 4096),
+        )
+    }
+
+    @Test
+    fun `preserves nested artifact directory while embedding runtime context`() {
+        assertEquals(
+            "android/Qwen3-0.6B.ctx4096.litertlm",
+            runtimeAwareArtifactFileName("android/Qwen3-0.6B.litertlm", 4096),
+        )
+    }
 }
