@@ -87,22 +87,7 @@ class RuntimeLoadMemoryPolicyTest {
     }
 
     @Test
-    fun blocksModelLoadAtSevereThermalPressure() {
-        val reason = RuntimeLoadMemoryPolicy.blockReason(
-            modelWeightsBytes = 350L * MIB,
-            totalRamBytes = 8L * GIB,
-            availableRamBytes = 5L * GIB,
-            lowMemoryThresholdBytes = 512L * MIB,
-            isLowMemory = false,
-            isLowRamDevice = false,
-            thermalStatus = 3,
-        )
-        assertNotNull(reason)
-        assertTrue(reason!!.contains("severe thermal pressure"))
-    }
-
-    @Test
-    fun allowsModelLoadBelowSevereThermalPressure() {
+    fun allowsModelLoadAtSevereThermalPressureForThrottledInference() {
         assertNull(
             RuntimeLoadMemoryPolicy.blockReason(
                 modelWeightsBytes = 350L * MIB,
@@ -111,9 +96,24 @@ class RuntimeLoadMemoryPolicyTest {
                 lowMemoryThresholdBytes = 512L * MIB,
                 isLowMemory = false,
                 isLowRamDevice = false,
-                thermalStatus = 2,
+                thermalStatus = 3,
             ),
         )
+    }
+
+    @Test
+    fun blocksModelLoadAtCriticalThermalPressure() {
+        val reason = RuntimeLoadMemoryPolicy.blockReason(
+            modelWeightsBytes = 350L * MIB,
+            totalRamBytes = 8L * GIB,
+            availableRamBytes = 5L * GIB,
+            lowMemoryThresholdBytes = 512L * MIB,
+            isLowMemory = false,
+            isLowRamDevice = false,
+            thermalStatus = 4,
+        )
+        assertNotNull(reason)
+        assertTrue(reason!!.contains("critical thermal pressure"))
     }
 
     @Test
@@ -122,10 +122,15 @@ class RuntimeLoadMemoryPolicyTest {
     }
 
     @Test
-    fun blocksGenerationAtSevereThermalPressure() {
-        val reason = RuntimeLoadMemoryPolicy.generationBlockReason(isLowMemory = false, thermalStatus = 3)
+    fun allowsGenerationAtSevereThermalPressureForOuterTokenCap() {
+        assertNull(RuntimeLoadMemoryPolicy.generationBlockReason(isLowMemory = false, thermalStatus = 3))
+    }
+
+    @Test
+    fun blocksGenerationAtCriticalThermalPressure() {
+        val reason = RuntimeLoadMemoryPolicy.generationBlockReason(isLowMemory = false, thermalStatus = 4)
         assertNotNull(reason)
-        assertTrue(reason!!.contains("severe thermal pressure"))
+        assertTrue(reason!!.contains("critical thermal pressure"))
     }
 
     @Test
