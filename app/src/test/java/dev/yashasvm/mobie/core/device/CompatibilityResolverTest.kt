@@ -65,7 +65,6 @@ class CompatibilityResolverTest {
         assertEquals("model-ekv2048.litertlm", selected?.fileName)
     }
 
-
     @Test
     fun `device selector prefers useful context before small memory savings`() {
         val model = AiModel(
@@ -164,11 +163,21 @@ class CompatibilityResolverTest {
     }
 
     @Test
-    fun `severe thermal pressure warns before recommending a local model load`() {
+    fun `severe thermal pressure warns that inference will be throttled`() {
         val hot = device.copy(thermalStatus = 3)
         val result = resolver.resolve(artifact(size = gib), hot)
         assertEquals(Compatibility.WARNING, result.status)
         assertTrue(result.reason.contains("severe thermal pressure"))
+        assertTrue(result.reason.contains("256 tokens"))
+    }
+
+    @Test
+    fun `critical thermal pressure warns that model loading is blocked`() {
+        val hot = device.copy(thermalStatus = 4)
+        val result = resolver.resolve(artifact(size = gib), hot)
+        assertEquals(Compatibility.WARNING, result.status)
+        assertTrue(result.reason.contains("critical thermal pressure"))
+        assertTrue(result.reason.contains("block local model loading"))
     }
 
     @Test
