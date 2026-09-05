@@ -18,6 +18,7 @@
 - Validated independent 500 ms thermal monitoring during active generation, including stalled native inference, so CRITICAL+ escalation can cancel LiteRT even when no further token callbacks arrive.
 
 ## Important work in progress
+- Benchmark LiteRT-LM 0.16.1's explicit CPU `threadCount` against the runtime default with the same real Qwen3-0.6B artifact before changing production thread policy; do not assume all Android cores improve TTFT/decode on heterogeneous CPUs.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
 - Thermal protection still needs representative physical-device heat testing across sustained SEVERE/CRITICAL transitions; CI validates control flow, not real handset throttling behavior.
 
