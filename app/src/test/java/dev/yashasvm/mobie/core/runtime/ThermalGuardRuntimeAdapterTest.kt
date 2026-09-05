@@ -4,7 +4,7 @@ import dev.yashasvm.mobie.core.model.ModelFormat
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -12,7 +12,7 @@ import org.junit.Test
 
 class ThermalGuardRuntimeAdapterTest {
     @Test
-    fun severeThermalStatusCapsGenerationLength() = runTest {
+    fun severeThermalStatusCapsGenerationLength() = runBlocking {
         val delegate = RecordingRuntimeAdapter()
         val adapter = ThermalGuardRuntimeAdapter(delegate) { 3 }
 
@@ -23,7 +23,7 @@ class ThermalGuardRuntimeAdapterTest {
     }
 
     @Test
-    fun moderateThermalStatusKeepsRequestedGenerationLength() = runTest {
+    fun moderateThermalStatusKeepsRequestedGenerationLength() = runBlocking {
         val delegate = RecordingRuntimeAdapter()
         val adapter = ThermalGuardRuntimeAdapter(delegate) { 2 }
 
@@ -33,7 +33,7 @@ class ThermalGuardRuntimeAdapterTest {
     }
 
     @Test
-    fun criticalAndHotterStatusesBlockInferenceBeforeRuntimeExecution() = runTest {
+    fun criticalAndHotterStatusesBlockInferenceBeforeRuntimeExecution() = runBlocking {
         for (status in 4..6) {
             val delegate = RecordingRuntimeAdapter()
             val adapter = ThermalGuardRuntimeAdapter(delegate) { status }
