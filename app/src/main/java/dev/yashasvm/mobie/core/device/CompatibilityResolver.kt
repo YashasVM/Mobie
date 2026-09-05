@@ -104,10 +104,16 @@ class CompatibilityResolver {
                 "Android reports active memory pressure. Free memory before loading this model.",
             )
         }
+        if (device.thermalStatus >= THERMAL_STATUS_CRITICAL) {
+            return result(
+                Compatibility.WARNING,
+                "Android reports critical thermal pressure. Mobie will block local model loading until the device cools.",
+            )
+        }
         if (device.thermalStatus >= THERMAL_STATUS_SEVERE) {
             return result(
                 Compatibility.WARNING,
-                "Android reports severe thermal pressure. Let the device cool before loading a local model.",
+                "Android reports severe thermal pressure. The model can still run, but Mobie will cap new responses at 256 tokens until the device cools.",
             )
         }
         if (estimatedRam > safeAvailableRam) {
@@ -133,5 +139,6 @@ class CompatibilityResolver {
     private companion object {
         const val PREFERRED_CONTEXT_TOKENS = 4_096
         const val THERMAL_STATUS_SEVERE = 3
+        const val THERMAL_STATUS_CRITICAL = 4
     }
 }
