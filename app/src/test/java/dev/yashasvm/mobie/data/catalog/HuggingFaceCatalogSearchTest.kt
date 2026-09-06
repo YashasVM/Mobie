@@ -20,4 +20,28 @@ class HuggingFaceCatalogSearchTest {
         assertTrue(catalogOwnerAllowed("litert-community/Qwen3-0.6B", "litert-community"))
         assertFalse(catalogOwnerAllowed("someone-else/Qwen3-0.6B", "litert-community"))
     }
+
+    @Test
+    fun `artifact URLs pin discovered Hub revision`() {
+        val revision = "0123456789abcdef0123456789abcdef01234567"
+        val url = huggingFaceArtifactUrl(
+            repoId = "litert-community/Qwen3-0.6B",
+            fileName = "models/qwen.litertlm",
+            revision = revision,
+        )
+
+        assertTrue(url.contains("/resolve/$revision/models/qwen.litertlm"))
+        assertFalse(url.contains("/resolve/main/"))
+    }
+
+    @Test
+    fun `artifact URL falls back to main only without a revision`() {
+        val url = huggingFaceArtifactUrl(
+            repoId = "litert-community/Qwen3-0.6B",
+            fileName = "qwen.litertlm",
+            revision = null,
+        )
+
+        assertTrue(url.contains("/resolve/main/qwen.litertlm"))
+    }
 }
