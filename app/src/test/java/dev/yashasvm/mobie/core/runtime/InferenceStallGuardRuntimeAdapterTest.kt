@@ -11,6 +11,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 
 class InferenceStallGuardRuntimeAdapterTest {
@@ -89,6 +90,59 @@ class InferenceStallGuardRuntimeAdapterTest {
     }
 
     @Test
+    fun nonCooperativeNativeCancelCannotHoldWatchdogOpen() = runBlocking {
+        val delegate = RecordingRuntimeAdapter(
+            generation = flow {
+                emit(InferenceEvent.Token("partial"))
+                delay(1_000L)
+            },
+            cancelBlock = { Thread.sleep(750L) },
+        )
+        val adapter = InferenceStallGuardRuntimeAdapter(
+            delegate = delegate,
+            firstEventTimeoutMs = 100L,
+            activeIdleTimeoutMs = 20L,
+            cancellationTimeoutMs = 50L,
+        )
+        lateinit var events: List<InferenceEvent>
+
+        val elapsedMs = measureTimeMillis {
+            events = adapter.generate("prompt").toList()
+        }
+
+        assertTrue(delegate.cancelCalled)
+        assertTrue("watchdog waited ${elapsedMs}ms for a blocked native cancel", elapsedMs < 500L)
+        assertEquals(InferenceEvent.Token("partial"), events.first())
+        val error = events.last() as InferenceEvent.Error
+        assertTrue(error.message.contains("stopped making progress", ignoreCase = true))
+    }
+
+    @Test
+    fun explicitStopReturnsBoundedFailureWhenNativeCancelBlocks() = runBlocking {
+        val delegate = RecordingRuntimeAdapter(
+            generation = flowOf(),
+            cancelBlock = { Thread.sleep(750L) },
+        )
+        val adapter = InferenceStallGuardRuntimeAdapter(
+            delegate = delegate,
+            firstEventTimeoutMs = 100L,
+            activeIdleTimeoutMs = 100L,
+            cancellationTimeoutMs = 50L,
+        )
+        var elapsedMs = 0L
+
+        try {
+            elapsedMs = measureTimeMillis { adapter.cancel() }
+            fail("Expected bounded cancellation failure")
+        } catch (error: IllegalStateException) {
+            assertTrue(error.message.orEmpty().contains("did not return", ignoreCase = true))
+        }
+
+        assertTrue(delegate.cancelCalled)
+        assertTrue("explicit Stop waited ${elapsedMs}ms for blocked native cancel", elapsedMs < 500L)
+    }
+
+    @Test
     fun healthyStreamingPassesThroughWithoutCancellation() = runBlocking {
         val expected = listOf(
             InferenceEvent.Token("hello"),
@@ -128,6 +182,7 @@ class InferenceStallGuardRuntimeAdapterTest {
 
     private class RecordingRuntimeAdapter(
         private val generation: Flow<InferenceEvent>,
+        private val cancelBlock: (() -> Unit)? = null,
     ) : RuntimeAdapter {
         override val format: ModelFormat = ModelFormat.LITERT_LM
         @Volatile var cancelCalled = false
@@ -148,6 +203,7 @@ class InferenceStallGuardRuntimeAdapterTest {
 
         override suspend fun cancel() {
             cancelCalled = true
+            cancelBlock?.invoke()
         }
 
         override suspend fun unload() = Unit
