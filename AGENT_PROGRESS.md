@@ -19,11 +19,12 @@
 - Completed single-image-slot replacement handling: when a new image arrives after a restored image, Mobie rebuilds native history with the older image downgraded to text before submitting the replacement; exact-tip Android CI is green.
 
 ## Important work in progress
-- Real multimodal LiteRT-LM E2E is now wired into Android CI using `litert-community/SmolVLM2-500M`: restore historical image → text follow-up → replacement image → text follow-up. Exact-tip CI is pending before this is marked validated.
+- Real multimodal LiteRT-LM E2E is wired into Android CI using `litert-community/SmolVLM2-500M`: restore historical image → text follow-up → replacement image → text follow-up. The first run exposed a JUnit discovery bug in the new test itself: its expression body inferred `Int` from the final `Log.i(...)`, making the `@Test` non-void. `0d48396c` explicitly returns `Unit`; exact-tip CI is pending.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second without unvalidated main-model GPU/NPU execution.
 - Thermal protection still needs representative physical-device sustained-heat testing.
 
 ## Tests actually performed
+- `67d2642b` passed JVM tests/lint/debug APK verification, but emulator smoke and runtime E2E both failed before the new vision test body ran because JUnit rejected `LiteRtVisionEndToEndTest` during runner construction. The production multimodal path was therefore not exercised in that run.
 - `982f6ec7` passed exact-tip Android CI after single-image replacement handling: JVM tests/lint/debug APK, emulator smoke, and the real Qwen LiteRT-LM E2E all completed successfully.
 - `1a2675f7` passed exact-tip Android CI after restored-vision context accounting, including JVM tests/lint/debug APK, emulator smoke, and the real Qwen LiteRT-LM E2E.
 - Restored-vision context-budget JVM coverage checks that a history image consumes the same reserve as a new image and that the single image slot is not double-counted when both flags are present.
@@ -50,7 +51,7 @@
 
 ## Known problems / regressions
 - Physical-device thermal/LMK behavior, vision history, long-context pressure, and interrupted-generation recovery still need representative handset testing.
-- LiteRT-LM `maxNumImages` remains intentionally configured to one image. Replacement handling is text-path CI validated; the newly added real SmolVLM2 multimodal replacement gate is still awaiting exact-tip CI.
+- LiteRT-LM `maxNumImages` remains intentionally configured to one image. Replacement handling is text-path CI validated; the real SmolVLM2 multimodal replacement gate is pending exact-tip CI after fixing its JUnit test signature.
 - Upstream LiteRT-LM Android streaming can lose terminal callbacks. Mobie now returns an error even if the collector ignores coroutine cancellation, but a truly wedged native call may still retain native resources until the app process restarts.
 - Representative 32K/64K handset validation is still needed before claiming a measured RAM/OOM improvement from device-aware context sizing.
 - GGUF remains intentionally unavailable; v1 relies on published LiteRT-LM artifacts.
