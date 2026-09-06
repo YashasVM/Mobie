@@ -1,6 +1,8 @@
 package dev.yashasvm.mobie.data.catalog
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -43,5 +45,23 @@ class HuggingFaceCatalogSearchTest {
         )
 
         assertTrue(url.contains("/resolve/main/qwen.litertlm"))
+    }
+
+    @Test
+    fun `detail cache key changes when Hub revision changes`() {
+        val repoId = "litert-community/Qwen3-0.6B"
+        val first = modelDetailCacheKey(repoId, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        val second = modelDetailCacheKey(repoId, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+
+        assertNotEquals(first, second)
+        assertTrue(first.startsWith("$repoId@"))
+    }
+
+    @Test
+    fun `detail cache key is stable when revision is unavailable`() {
+        val repoId = "litert-community/Qwen3-0.6B"
+
+        assertEquals(modelDetailCacheKey(repoId, null), modelDetailCacheKey(repoId, ""))
+        assertEquals("$repoId@unversioned", modelDetailCacheKey(repoId, null))
     }
 }
