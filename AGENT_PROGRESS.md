@@ -15,10 +15,12 @@
 - Wired device-aware LiteRT KV/context sizing into production: Mobie selects the largest context fitting the current RAM budget and consistently applies it to memory admission, native KV allocation, history trimming, and generation output budgeting while preserving full advertised context when safe.
 
 ## Important work in progress
+- Validate the constrained-context replay fix: 1K-3K runtime contexts now receive proportionally smaller conversation-history replay budgets instead of inheriting the old 4K floor.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second without unvalidated main-model GPU/NPU execution.
 - Thermal protection still needs representative physical-device sustained-heat testing.
 
 ## Tests actually performed
+- Added JVM regression coverage that compares 1K, 2K, and 4K replay budgets and asserts constrained contexts stay below their proportional UTF-8 history limits; exact-tip Android CI is pending.
 - `c79df688` passed JVM tests/lint/debug APK build, emulator smoke, and real Qwen LiteRT-LM E2E with production device-aware context sizing wired into runtime.
 - `d8dd78f8` passed JVM tests/lint/debug APK build, emulator smoke, and real Qwen LiteRT-LM E2E with the device-aware context sizing policy present and its JVM coverage green before production wiring.
 - Device-aware context sizing JVM coverage checks full-context retention when RAM is sufficient, context reduction under current free-RAM pressure, stricter low-RAM-device behavior, stable 256-token sizing, and telemetry-unavailable fallback.
@@ -38,6 +40,7 @@
 - Device-aware context sizing is now exact-tip CI/E2E validated for correctness, but no handset RAM/OOM improvement is claimed until representative 32K/64K physical-device testing is performed.
 
 ## Known problems / regressions
+- The new constrained-context replay scaling still needs exact-tip Android CI/E2E validation before it is considered complete.
 - Physical-device thermal/LMK behavior, vision history, long-context pressure, and interrupted-generation recovery still need representative handset testing.
 - Upstream LiteRT-LM Android streaming has open reports of missing terminal callbacks; Mobie now fails and cancels stalled streams instead of waiting forever, but recovery from a native deadlock that ignores cancellation still needs a reproducible device case.
 - Representative 32K/64K handset validation is still needed before claiming a measured RAM/OOM improvement from device-aware context sizing.
@@ -45,6 +48,7 @@
 - Main-model GPU/NPU and more than two CPU inference threads remain disabled pending representative handset evidence.
 
 ## Items to inspect before merging
+- On a RAM-constrained phone where context sizing drops below 4K, restore a long conversation and verify replay remains bounded, generation still has usable prompt/output headroom, and native context rebuilds cleanly when older turns are evicted.
 - On a representative low/free-RAM phone, compare a 32K/64K LiteRT artifact before/after context-budget wiring: verify load success/OOM behavior, selected usable context, app RAM, TTFT, and decode/prefill throughput.
 - Heat a representative phone to SEVERE before starting a prompt and verify recommendations mention throttling and Mobie still generates with the 256-token cap; at CRITICAL verify recommendations say loading is blocked, new generation is rejected, and active generation is cancelled.
 - Reproduce a real LiteRT stream whose terminal callback disappears and verify Mobie returns control, reports the stall, and can recover/reload without ANR or stale tokens.
