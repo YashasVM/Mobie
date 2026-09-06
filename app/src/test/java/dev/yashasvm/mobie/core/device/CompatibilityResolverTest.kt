@@ -42,15 +42,28 @@ class CompatibilityResolverTest {
     }
 
     @Test
-    fun `compact 64k context marker prevents unsafe 4k fallback`() {
+    fun `extended context recommendation uses same bounded context as runtime`() {
         val result = resolver.resolve(artifact(size = gib, name = "MiniCPM5-1B-c64k.litertlm"), device)
-        assertEquals(65_536, result.contextWindowTokens)
-        assertEquals(4 * gib, result.kvCacheBytes)
-        assertEquals(Compatibility.WARNING, result.status)
+
+        assertEquals(Compatibility.COMPATIBLE, result.status)
+        assertTrue(result.contextWindowTokens >= 4_096)
+        assertTrue(result.contextWindowTokens < 65_536)
+        assertEquals(0, result.contextWindowTokens % 256)
+        assertEquals(result.contextWindowTokens.toLong() * 64L * 1024L, result.kvCacheBytes)
     }
 
     @Test
-    fun `device selector prefers artifact that safely fits current device`() {
+    fun `constrained device reports minimum bounded context instead of advertised context`() {
+        val constrained = device.copy(availableRamBytes = 2 * gib)
+        val result = resolver.resolve(artifact(size = gib, name = "model-c64k.litertlm"), constrained)
+
+        assertEquals(Compatibility.WARNING, result.status)
+        assertEquals(1_024, result.contextWindowTokens)
+        assertEquals(64 * mib, result.kvCacheBytes)
+    }
+
+    @Test
+    fun `device selector can choose extended context artifact when runtime can bound it safely`() {
         val model = AiModel(
             id = "example/model",
             title = "Example",
@@ -62,7 +75,7 @@ class CompatibilityResolverTest {
             ),
         )
         val selected = resolver.selectBestArtifact(model, device.copy(availableRamBytes = 4 * gib))
-        assertEquals("model-ekv2048.litertlm", selected?.fileName)
+        assertEquals("model-c64k.litertlm", selected?.fileName)
     }
 
     @Test
