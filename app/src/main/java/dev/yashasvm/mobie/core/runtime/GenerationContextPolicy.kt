@@ -9,7 +9,8 @@ package dev.yashasvm.mobie.core.runtime
  * request whose restored history + prompt + requested output can obviously exceed the configured
  * context window. A fixed template reserve covers chat-template/special-token overhead; vision
  * requests reserve additional room because image embeddings also consume context on multimodal
- * models.
+ * models. The same reserve is also applied when the native conversation already contains a restored
+ * history image.
  */
 internal object GenerationContextPolicy {
     private const val TEMPLATE_RESERVE_TOKENS = 512
@@ -22,6 +23,7 @@ internal object GenerationContextPolicy {
         prompt: String,
         requestedMaxOutputTokens: Int,
         hasImage: Boolean,
+        historyHasImage: Boolean = false,
     ): Int {
         require(contextWindowTokens > 0) { "Context window must be positive" }
         require(requestedMaxOutputTokens > 0) { "Output token limit must be positive" }
@@ -29,7 +31,8 @@ internal object GenerationContextPolicy {
         val selectedHistory = ConversationHistoryPolicy.select(history, contextWindowTokens)
         val textInputUpperBound = selectedHistory.sumOf { it.text.toByteArray(Charsets.UTF_8).size.toLong() } +
             prompt.toByteArray(Charsets.UTF_8).size.toLong()
-        val fixedReserve = TEMPLATE_RESERVE_TOKENS + if (hasImage) VISION_RESERVE_TOKENS else 0
+        val fixedReserve = TEMPLATE_RESERVE_TOKENS +
+            if (hasImage || historyHasImage) VISION_RESERVE_TOKENS else 0
         val availableForOutput = contextWindowTokens.toLong() - fixedReserve - textInputUpperBound
 
         if (availableForOutput < MIN_USEFUL_OUTPUT_TOKENS) {
