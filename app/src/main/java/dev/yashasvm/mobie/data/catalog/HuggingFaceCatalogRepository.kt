@@ -43,6 +43,9 @@ internal fun huggingFaceArtifactUrl(repoId: String, fileName: String, revision: 
         fileName.split('/').filter(String::isNotBlank).forEach(::addPathSegment)
     }.build().toString()
 
+internal fun modelDetailCacheKey(repoId: String, revision: String?): String =
+    "$repoId@${revision?.takeIf(String::isNotBlank) ?: "unversioned"}"
+
 /**
  * LiteRT-LM currently receives the context limit through EngineConfig rather than discovering the
  * package's maximum from the loaded container. When the Hub filename does not encode context but a
@@ -102,8 +105,11 @@ class HuggingFaceCatalogRepository(
                         ) {
                             summary
                         } else {
-                            detailCache.get(summary.repoId())
-                                ?: limiter.withPermit { fetchDetails(summary.repoId()) ?: summary }
+                            val cacheKey = modelDetailCacheKey(summary.repoId(), summary.sha)
+                            detailCache.get(cacheKey)
+                                ?: limiter.withPermit {
+                                    fetchDetails(summary.repoId(), summary.sha) ?: summary
+                                }
                         }
                     }
                 }.awaitAll()
@@ -118,7 +124,7 @@ class HuggingFaceCatalogRepository(
         }
     }
 
-    private suspend fun fetchDetails(repoId: String): HfModel? = runCatching {
+    private suspend fun fetchDetails(repoId: String, expectedRevision: String?): HfModel? = runCatching {
         val url = "https://huggingface.co".toHttpUrl().newBuilder().apply {
             addPathSegment("api")
             addPathSegment("models")
@@ -136,7 +142,8 @@ class HuggingFaceCatalogRepository(
         } else {
             model
         }
-        enriched.also { detailCache.put(repoId, it) }
+        val cacheRevision = model.sha?.takeIf(String::isNotBlank) ?: expectedRevision
+        enriched.also { detailCache.put(modelDetailCacheKey(repoId, cacheRevision), it) }
     }.getOrNull()
 
     private fun modelCardUrl(repoId: String, revision: String?): String =
