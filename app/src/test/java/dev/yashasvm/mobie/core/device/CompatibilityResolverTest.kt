@@ -43,6 +43,31 @@ class CompatibilityResolverTest {
     }
 
     @Test
+    fun `undersized explicit context is rejected instead of silently expanded`() {
+        val result = resolver.resolve(artifact(size = gib, name = "model-c512.litertlm"), device)
+
+        assertEquals(Compatibility.INCOMPATIBLE, result.status)
+        assertEquals(512, result.contextWindowTokens)
+        assertTrue(result.reason.contains("1,024-token minimum"))
+    }
+
+    @Test
+    fun `device selector skips undersized context artifact`() {
+        val model = AiModel(
+            id = "example/model",
+            title = "Example",
+            author = "example",
+            description = "",
+            artifacts = listOf(
+                artifact(size = gib / 2, name = "model-c512.litertlm"),
+                artifact(size = gib, name = "model-ekv2048.litertlm"),
+            ),
+        )
+
+        assertEquals("model-ekv2048.litertlm", resolver.selectBestArtifact(model, device)?.fileName)
+    }
+
+    @Test
     fun `extended context recommendation uses same bounded context as runtime`() {
         val model = artifact(size = gib, name = "MiniCPM5-1B-c64k.litertlm")
         val result = resolver.resolve(model, device)

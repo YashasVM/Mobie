@@ -51,6 +51,22 @@ class RuntimeLoadMemoryPolicyTest {
     }
 
     @Test
+    fun blocksPackagesWhoseAdvertisedContextIsBelowUsefulMinimum() {
+        val reason = RuntimeLoadMemoryPolicy.blockReason(
+            modelWeightsBytes = 350L * MIB,
+            totalRamBytes = 8L * GIB,
+            availableRamBytes = 5L * GIB,
+            lowMemoryThresholdBytes = 512L * MIB,
+            isLowMemory = false,
+            isLowRamDevice = false,
+            contextWindowTokens = 512,
+        )
+
+        assertNotNull(reason)
+        assertTrue(reason!!.contains("1,024-token minimum"))
+    }
+
+    @Test
     fun resolvesRuntimeContextFromArtifactName() {
         assertEquals(65_536, runtimeContextWindowTokens("/models/qwen3-int4-c64k.litertlm"))
         assertEquals(32_768, runtimeContextWindowTokens("/models/gemma-context32768.litertlm"))

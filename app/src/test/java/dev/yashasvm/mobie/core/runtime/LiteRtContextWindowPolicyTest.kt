@@ -20,6 +20,20 @@ class LiteRtContextWindowPolicyTest {
     }
 
     @Test
+    fun neverExpandsAContextSmallerThanMobiesUsefulMinimum() {
+        val selected = LiteRtContextWindowPolicy.select(
+            advertisedContextWindowTokens = 512,
+            modelWeightsBytes = 350L * MIB,
+            totalRamBytes = 8L * GIB,
+            availableRamBytes = 6L * GIB,
+            lowMemoryThresholdBytes = 256L * MIB,
+            isLowRamDevice = false,
+        )
+
+        assertEquals(512, selected)
+    }
+
+    @Test
     fun shrinksExtendedContextWhenCurrentFreeRamCannotSafelyBackFullKvCache() {
         val selected = LiteRtContextWindowPolicy.select(
             advertisedContextWindowTokens = 65_536,
