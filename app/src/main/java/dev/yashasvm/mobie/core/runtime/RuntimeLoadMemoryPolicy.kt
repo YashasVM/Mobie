@@ -23,6 +23,9 @@ internal object RuntimeLoadMemoryPolicy {
         if (thermalStatus >= THERMAL_STATUS_CRITICAL) {
             return "Android reports critical thermal pressure. Let the device cool before loading a local model."
         }
+        if (contextWindowTokens < LiteRtContextWindowPolicy.MIN_USEFUL_CONTEXT_TOKENS) {
+            return "This LiteRT package exposes only $contextWindowTokens context tokens, below Mobie's 1,024-token minimum for useful local chat."
+        }
         if (modelWeightsBytes <= 0 || totalRamBytes <= 0) return null
 
         val runtimeOverhead = max((modelWeightsBytes * 0.4).toLong(), 512L * MIB)

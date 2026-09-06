@@ -12,6 +12,8 @@ import kotlin.math.min
  * is wired into native EngineConfig.
  */
 internal object LiteRtContextWindowPolicy {
+    const val MIN_USEFUL_CONTEXT_TOKENS = 1_024
+
     fun select(
         advertisedContextWindowTokens: Int,
         modelWeightsBytes: Long,
@@ -20,7 +22,10 @@ internal object LiteRtContextWindowPolicy {
         lowMemoryThresholdBytes: Long,
         isLowRamDevice: Boolean,
     ): Int {
-        val advertised = advertisedContextWindowTokens.coerceAtLeast(MIN_CONTEXT_TOKENS)
+        // Never ask LiteRT for more KV capacity than the artifact explicitly advertises. Some
+        // community packages encode small fixed caches (for example c512); rounding those up to our
+        // normal 1K minimum can exceed the package's real capacity and fail during engine init.
+        val advertised = advertisedContextWindowTokens.coerceAtLeast(1)
         if (modelWeightsBytes <= 0 || totalRamBytes <= 0 || availableRamBytes <= 0) return advertised
 
         val runtimeOverheadBytes = max((modelWeightsBytes * 0.4).toLong(), MIN_RUNTIME_OVERHEAD_BYTES)
@@ -33,22 +38,22 @@ internal object LiteRtContextWindowPolicy {
 
         val kvBudgetBytes = min(totalRuntimeBudget, availableRuntimeBudget) - modelWeightsBytes - runtimeOverheadBytes
         val budgetedTokens = if (kvBudgetBytes <= MIN_KV_CACHE_BYTES) {
-            MIN_CONTEXT_TOKENS
+            MIN_USEFUL_CONTEXT_TOKENS
         } else {
             (kvBudgetBytes / KV_BYTES_PER_TOKEN)
                 .coerceAtMost(Int.MAX_VALUE.toLong())
                 .toInt()
-                .coerceAtLeast(MIN_CONTEXT_TOKENS)
+                .coerceAtLeast(MIN_USEFUL_CONTEXT_TOKENS)
         }
 
         val selected = min(advertised, budgetedTokens)
-        if (selected <= MIN_CONTEXT_TOKENS) return MIN_CONTEXT_TOKENS
+        if (selected <= MIN_USEFUL_CONTEXT_TOKENS) return selected
 
         // Keep allocations stable instead of changing by a handful of tokens as Android's free-RAM
         // reading fluctuates. 256-token steps are small relative to phone chat contexts but avoid
         // unnecessary engine/cache churn when this policy is integrated with runtime loading.
         return (selected / CONTEXT_ALIGNMENT_TOKENS * CONTEXT_ALIGNMENT_TOKENS)
-            .coerceAtLeast(MIN_CONTEXT_TOKENS)
+            .coerceAtLeast(MIN_USEFUL_CONTEXT_TOKENS)
     }
 
     private const val MIB = 1024L * 1024L
@@ -57,6 +62,5 @@ internal object LiteRtContextWindowPolicy {
     private const val DEFAULT_KV_CACHE_BYTES = 256L * MIB
     private const val DEFAULT_CONTEXT_TOKENS = 4_096L
     private const val KV_BYTES_PER_TOKEN = DEFAULT_KV_CACHE_BYTES / DEFAULT_CONTEXT_TOKENS
-    private const val MIN_CONTEXT_TOKENS = 1_024
     private const val CONTEXT_ALIGNMENT_TOKENS = 256
 }

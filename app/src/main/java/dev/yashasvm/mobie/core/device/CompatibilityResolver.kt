@@ -81,6 +81,15 @@ class CompatibilityResolver {
             lowMemoryThresholdBytes = device.lowMemoryThresholdBytes,
             isLowRamDevice = device.isLowRamDevice,
         )
+        if (selectedContext < LiteRtContextWindowPolicy.MIN_USEFUL_CONTEXT_TOKENS) {
+            return CompatibilityResult(
+                status = Compatibility.INCOMPATIBLE,
+                reason = "This LiteRT package exposes only $selectedContext context tokens, below Mobie's 1,024-token minimum for useful local chat.",
+                estimatedRamBytes = 0,
+                modelWeightsBytes = artifact.sizeBytes,
+                contextWindowTokens = selectedContext,
+            )
+        }
         val memoryEstimate = requireNotNull(
             estimateLiteRtRuntimeMemory(artifact.copy(contextWindowTokens = selectedContext)),
         )
