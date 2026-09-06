@@ -16,13 +16,15 @@
 - Scaled conversation-history replay below 4K so 1K-3K constrained contexts no longer inherit the old 4K replay floor; exact-tip Android CI validated the fix.
 - Hardened the inference-stall watchdog so Mobie returns control even when a native LiteRT collector ignores coroutine cancellation; exact-tip CI validated the non-cooperative regression coverage and real-Qwen E2E.
 - Validated restored-vision output budgeting so a restored history image reserves the same context as a new image without double-reserving Mobie's single vision slot.
+- Completed single-image-slot replacement handling: when a new image arrives after a restored image, Mobie rebuilds native history with the older image downgraded to text before submitting the replacement; exact-tip Android CI is green.
 
 ## Important work in progress
-- Finish multimodal single-image-slot handling: production now tracks whether the native LiteRT conversation already contains an image and rebuilds prior multimodal history as text before sending a replacement image; exact-tip CI and a real vision-model replacement flow still need validation.
+- Add a real multimodal LiteRT-LM E2E gate for restore image → text follow-up → replacement image. `litert-community/SmolVLM2-500M` is a practical ~361 MB candidate, but it has not yet been wired into CI.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second without unvalidated main-model GPU/NPU execution.
 - Thermal protection still needs representative physical-device sustained-heat testing.
 
 ## Tests actually performed
+- `982f6ec7` passed exact-tip Android CI after single-image replacement handling: JVM tests/lint/debug APK, emulator smoke, and the real Qwen LiteRT-LM E2E all completed successfully.
 - `1a2675f7` passed exact-tip Android CI after restored-vision context accounting, including JVM tests/lint/debug APK, emulator smoke, and the real Qwen LiteRT-LM E2E.
 - Restored-vision context-budget JVM coverage checks that a history image consumes the same reserve as a new image and that the single image slot is not double-counted when both flags are present.
 - `eadd96ff` passed exact-tip Android CI after non-cooperative stall containment, including JVM tests/lint/debug APK, emulator smoke, and real Qwen LiteRT-LM E2E.
@@ -48,7 +50,7 @@
 
 ## Known problems / regressions
 - Physical-device thermal/LMK behavior, vision history, long-context pressure, and interrupted-generation recovery still need representative handset testing.
-- LiteRT-LM `maxNumImages` remains intentionally configured to one image. Replacement handling is now implemented by dropping the older image from native replay before a new image is sent, but it still needs real multimodal-model validation.
+- LiteRT-LM `maxNumImages` remains intentionally configured to one image. Replacement handling is CI-validated for the text runtime path, but still needs a real multimodal-model replacement test.
 - Upstream LiteRT-LM Android streaming can lose terminal callbacks. Mobie now returns an error even if the collector ignores coroutine cancellation, but a truly wedged native call may still retain native resources until the app process restarts.
 - Representative 32K/64K handset validation is still needed before claiming a measured RAM/OOM improvement from device-aware context sizing.
 - GGUF remains intentionally unavailable; v1 relies on published LiteRT-LM artifacts.
