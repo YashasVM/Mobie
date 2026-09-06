@@ -5,6 +5,7 @@ import dev.yashasvm.mobie.core.model.Compatibility
 import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
+import dev.yashasvm.mobie.core.runtime.LiteRtContextWindowPolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -43,9 +44,19 @@ class CompatibilityResolverTest {
 
     @Test
     fun `extended context recommendation uses same bounded context as runtime`() {
-        val result = resolver.resolve(artifact(size = gib, name = "MiniCPM5-1B-c64k.litertlm"), device)
+        val model = artifact(size = gib, name = "MiniCPM5-1B-c64k.litertlm")
+        val result = resolver.resolve(model, device)
+        val runtimeSelectedContext = LiteRtContextWindowPolicy.select(
+            advertisedContextWindowTokens = 65_536,
+            modelWeightsBytes = model.sizeBytes,
+            totalRamBytes = device.totalRamBytes,
+            availableRamBytes = device.availableRamBytes,
+            lowMemoryThresholdBytes = device.lowMemoryThresholdBytes,
+            isLowRamDevice = device.isLowRamDevice,
+        )
 
         assertEquals(Compatibility.COMPATIBLE, result.status)
+        assertEquals(runtimeSelectedContext, result.contextWindowTokens)
         assertTrue(result.contextWindowTokens >= 4_096)
         assertTrue(result.contextWindowTokens < 65_536)
         assertEquals(0, result.contextWindowTokens % 256)
