@@ -13,14 +13,14 @@
 - Benchmarked LiteRT CPU threading with the real Qwen model and enabled a conservative two-thread production policy after exact-tip E2E validation.
 - Added an inference-stall watchdog around production LiteRT streaming: 120 s initial prefill allowance, 30 s active-stream idle timeout, bounded cancellation, and explicit failure for streams that disappear without a terminal callback.
 - Wired device-aware LiteRT KV/context sizing into production: Mobie selects the largest context fitting the current RAM budget and consistently applies it to memory admission, native KV allocation, history trimming, and generation output budgeting while preserving full advertised context when safe.
+- Scaled conversation-history replay below 4K so 1K-3K constrained contexts no longer inherit the old 4K replay floor; exact-tip Android CI validated the fix.
 
 ## Important work in progress
-- Validate the constrained-context replay fix: 1K-3K runtime contexts now receive proportionally smaller conversation-history replay budgets instead of inheriting the old 4K floor.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second without unvalidated main-model GPU/NPU execution.
 - Thermal protection still needs representative physical-device sustained-heat testing.
 
 ## Tests actually performed
-- Added JVM regression coverage that compares 1K, 2K, and 4K replay budgets and asserts constrained contexts stay below their proportional UTF-8 history limits; exact-tip Android CI is pending.
+- `0437aa22` passed exact-tip Android CI after the constrained-context replay fix; JVM coverage compares 1K, 2K, and 4K replay budgets and asserts constrained contexts stay below proportional UTF-8 history limits.
 - `c79df688` passed JVM tests/lint/debug APK build, emulator smoke, and real Qwen LiteRT-LM E2E with production device-aware context sizing wired into runtime.
 - `d8dd78f8` passed JVM tests/lint/debug APK build, emulator smoke, and real Qwen LiteRT-LM E2E with the device-aware context sizing policy present and its JVM coverage green before production wiring.
 - Device-aware context sizing JVM coverage checks full-context retention when RAM is sufficient, context reduction under current free-RAM pressure, stricter low-RAM-device behavior, stable 256-token sizing, and telemetry-unavailable fallback.
@@ -37,10 +37,9 @@
 - Production now requests up to two LiteRT CPU threads; this is CI/E2E validated but not claimed as a physical-phone speedup.
 - Latest benchmark-run normal Qwen prompt before the production thread change: 7.16 decode tok/s, 16.37 prefill tok/s, 1.820 s TTFT, 4.369 s total, ~1.02 GiB app RAM.
 - Cold load measured 2745.6 ms with 339,216,776 bytes cache growth; full unload/reload measured 1476.3 ms with 0 additional cache growth.
-- Device-aware context sizing is now exact-tip CI/E2E validated for correctness, but no handset RAM/OOM improvement is claimed until representative 32K/64K physical-device testing is performed.
+- Device-aware context sizing and constrained-context replay are exact-tip CI/E2E validated for correctness, but no handset RAM/OOM improvement is claimed until representative 32K/64K physical-device testing is performed.
 
 ## Known problems / regressions
-- The new constrained-context replay scaling still needs exact-tip Android CI/E2E validation before it is considered complete.
 - Physical-device thermal/LMK behavior, vision history, long-context pressure, and interrupted-generation recovery still need representative handset testing.
 - Upstream LiteRT-LM Android streaming has open reports of missing terminal callbacks; Mobie now fails and cancels stalled streams instead of waiting forever, but recovery from a native deadlock that ignores cancellation still needs a reproducible device case.
 - Representative 32K/64K handset validation is still needed before claiming a measured RAM/OOM improvement from device-aware context sizing.
