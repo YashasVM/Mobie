@@ -19,7 +19,7 @@
 - Completed single-image-slot replacement handling: when a new image arrives after a restored image, Mobie rebuilds native history with the older image downgraded to text before submitting the replacement; exact-tip Android CI is green.
 
 ## Important work in progress
-- Add a real multimodal LiteRT-LM E2E gate for restore image → text follow-up → replacement image. `litert-community/SmolVLM2-500M` is a practical ~361 MB candidate, but it has not yet been wired into CI.
+- Real multimodal LiteRT-LM E2E is now wired into Android CI using `litert-community/SmolVLM2-500M`: restore historical image → text follow-up → replacement image → text follow-up. Exact-tip CI is pending before this is marked validated.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second without unvalidated main-model GPU/NPU execution.
 - Thermal protection still needs representative physical-device sustained-heat testing.
 
@@ -50,7 +50,7 @@
 
 ## Known problems / regressions
 - Physical-device thermal/LMK behavior, vision history, long-context pressure, and interrupted-generation recovery still need representative handset testing.
-- LiteRT-LM `maxNumImages` remains intentionally configured to one image. Replacement handling is CI-validated for the text runtime path, but still needs a real multimodal-model replacement test.
+- LiteRT-LM `maxNumImages` remains intentionally configured to one image. Replacement handling is text-path CI validated; the newly added real SmolVLM2 multimodal replacement gate is still awaiting exact-tip CI.
 - Upstream LiteRT-LM Android streaming can lose terminal callbacks. Mobie now returns an error even if the collector ignores coroutine cancellation, but a truly wedged native call may still retain native resources until the app process restarts.
 - Representative 32K/64K handset validation is still needed before claiming a measured RAM/OOM improvement from device-aware context sizing.
 - GGUF remains intentionally unavailable; v1 relies on published LiteRT-LM artifacts.
