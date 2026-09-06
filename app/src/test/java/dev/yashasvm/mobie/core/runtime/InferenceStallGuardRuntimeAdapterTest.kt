@@ -1,6 +1,7 @@
 package dev.yashasvm.mobie.core.runtime
 
 import dev.yashasvm.mobie.core.model.ModelFormat
+import kotlin.system.measureTimeMillis
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -60,6 +61,34 @@ class InferenceStallGuardRuntimeAdapterTest {
     }
 
     @Test
+    fun nonCooperativeNativeCollectorCannotHoldWatchdogOpen() = runBlocking {
+        val delegate = RecordingRuntimeAdapter(
+            generation = flow {
+                emit(InferenceEvent.Token("partial"))
+                Thread.sleep(750L)
+                emit(InferenceEvent.Complete)
+            },
+        )
+        val adapter = InferenceStallGuardRuntimeAdapter(
+            delegate = delegate,
+            firstEventTimeoutMs = 100L,
+            activeIdleTimeoutMs = 20L,
+            cancellationTimeoutMs = 50L,
+        )
+        lateinit var events: List<InferenceEvent>
+
+        val elapsedMs = measureTimeMillis {
+            events = adapter.generate("prompt").toList()
+        }
+
+        assertTrue(delegate.cancelCalled)
+        assertTrue("watchdog waited ${elapsedMs}ms for a non-cooperative collector", elapsedMs < 500L)
+        assertEquals(InferenceEvent.Token("partial"), events.first())
+        val error = events.last() as InferenceEvent.Error
+        assertTrue(error.message.contains("stopped making progress", ignoreCase = true))
+    }
+
+    @Test
     fun healthyStreamingPassesThroughWithoutCancellation() = runBlocking {
         val expected = listOf(
             InferenceEvent.Token("hello"),
@@ -101,7 +130,7 @@ class InferenceStallGuardRuntimeAdapterTest {
         private val generation: Flow<InferenceEvent>,
     ) : RuntimeAdapter {
         override val format: ModelFormat = ModelFormat.LITERT_LM
-        var cancelCalled = false
+        @Volatile var cancelCalled = false
 
         override suspend fun load(
             modelPath: String,
