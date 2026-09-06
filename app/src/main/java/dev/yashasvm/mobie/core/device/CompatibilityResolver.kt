@@ -8,6 +8,7 @@ import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
 import dev.yashasvm.mobie.core.model.estimateLiteRtRuntimeMemory
+import dev.yashasvm.mobie.core.runtime.LiteRtContextWindowPolicy
 import dev.yashasvm.mobie.core.runtime.RuntimeLoadStoragePolicy
 import kotlin.math.max
 
@@ -67,7 +68,22 @@ class CompatibilityResolver {
             )
         }
 
-        val memoryEstimate = requireNotNull(estimateLiteRtRuntimeMemory(artifact))
+        // Match recommendation math to the context allocation that production will actually pass
+        // to LiteRT. Extended-context packages are useful on smaller phones when their KV cache can
+        // be bounded safely; judging them at the full advertised 32K/64K context can otherwise mark
+        // a model incompatible even though Mobie would load the same artifact at a smaller context.
+        val advertisedContext = artifact.contextWindowTokens ?: DEFAULT_CONTEXT_TOKENS
+        val selectedContext = LiteRtContextWindowPolicy.select(
+            advertisedContextWindowTokens = advertisedContext,
+            modelWeightsBytes = artifact.sizeBytes,
+            totalRamBytes = device.totalRamBytes,
+            availableRamBytes = device.availableRamBytes,
+            lowMemoryThresholdBytes = device.lowMemoryThresholdBytes,
+            isLowRamDevice = device.isLowRamDevice,
+        )
+        val memoryEstimate = requireNotNull(
+            estimateLiteRtRuntimeMemory(artifact.copy(contextWindowTokens = selectedContext)),
+        )
         val estimatedRam = memoryEstimate.estimatedRamBytes
         val requiredStorage = requiredStorageBytes(artifact.sizeBytes)
         val memoryReserve = max(device.lowMemoryThresholdBytes, device.totalRamBytes / 20)
@@ -137,6 +153,7 @@ class CompatibilityResolver {
         modelWeightsBytes + RuntimeLoadStoragePolicy.requiredColdLoadFreeBytes(modelWeightsBytes)
 
     private companion object {
+        const val DEFAULT_CONTEXT_TOKENS = 4_096
         const val PREFERRED_CONTEXT_TOKENS = 4_096
         const val THERMAL_STATUS_SEVERE = 3
         const val THERMAL_STATUS_CRITICAL = 4
