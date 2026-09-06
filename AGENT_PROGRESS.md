@@ -9,13 +9,15 @@
 - Completed restored-vision context accounting, single-image-slot replacement handling, and real SmolVLM2-500M restore → text → replacement-image → text validation.
 - Added device-aware vision backend selection: real arm64 devices may try GPU first; emulators/x86 skip unsupported OpenCL probing and use CPU vision.
 - Isolated watchdog and explicit Stop cancellation from potentially non-cooperative native `cancelProcess()` calls so callers can regain control instead of hanging indefinitely.
-- Aligned recommendation RAM/KV estimates with the exact device-bounded context production passes to LiteRT, preventing 32K/64K artifacts from being rejected solely because their advertised maximum exceeds the usable runtime context; exact-tip Android CI passed.
+- Aligned recommendation RAM/KV estimates with the exact device-bounded context production passes to LiteRT, preventing 32K/64K artifacts from being rejected solely because their advertised maximum exceeds the usable runtime context.
+- Made explicit LiteRT context metadata a hard upper bound: packages below Mobie's 1,024-token practical minimum are rejected consistently instead of being silently expanded beyond the artifact's advertised capacity.
 
 ## Important work in progress
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second without enabling unvalidated main-model GPU/NPU execution.
 - Thermal protection, long-context pressure, and GPU vision still need representative physical-device testing.
 
 ## Tests actually performed
+- `6e7c6e8b`: full exact-tip Android CI passed: JVM tests/lint/debug APK, emulator smoke, real Qwen LiteRT-LM text E2E, and real SmolVLM2-500M vision E2E. Regression coverage verifies `c512` context preservation/rejection and selection of a valid 2K alternative.
 - `72c9f3fe`: exact-tip Android CI passed after recommendation/runtime context-parity coverage. Tests verify long-context down-sizing, the 1,024-token minimum under constrained RAM, safe selection of a long-context artifact, and equality between the recommendation-reported context and production runtime policy.
 - `0f2fc453`: exact-tip Android CI passed after bounded native-cancellation containment; JVM regressions deliberately block fake native cancellation for 750 ms and require watchdog and explicit Stop paths to regain control within a 50 ms configured bound.
 - `83db83db` / `9f06f837`: full Android CI passed: JVM tests/lint/debug APK, emulator smoke, real Qwen LiteRT-LM text E2E, and real SmolVLM2-500M vision E2E.
