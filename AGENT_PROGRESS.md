@@ -16,19 +16,19 @@
 - Scaled conversation-history replay below 4K so 1K-3K constrained contexts no longer inherit the old 4K replay floor; exact-tip Android CI validated the fix.
 
 ## Important work in progress
+- Harden the inference-stall watchdog so it returns control even when a native LiteRT collector ignores coroutine cancellation; regression coverage for a deliberately non-cooperative collector is awaiting exact-tip CI.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second without unvalidated main-model GPU/NPU execution.
 - Thermal protection still needs representative physical-device sustained-heat testing.
 
 ## Tests actually performed
+- `ef276beb` passed exact-tip Android CI after the constrained-context replay fix.
 - `0437aa22` passed exact-tip Android CI after the constrained-context replay fix; JVM coverage compares 1K, 2K, and 4K replay budgets and asserts constrained contexts stay below proportional UTF-8 history limits.
 - `c79df688` passed JVM tests/lint/debug APK build, emulator smoke, and real Qwen LiteRT-LM E2E with production device-aware context sizing wired into runtime.
 - `d8dd78f8` passed JVM tests/lint/debug APK build, emulator smoke, and real Qwen LiteRT-LM E2E with the device-aware context sizing policy present and its JVM coverage green before production wiring.
 - Device-aware context sizing JVM coverage checks full-context retention when RAM is sufficient, context reduction under current free-RAM pressure, stricter low-RAM-device behavior, stable 256-token sizing, and telemetry-unavailable fallback.
 - `4bc03ac9` passed JVM tests/lint/debug APK build, emulator smoke, and real Qwen LiteRT-LM E2E with recommendation behavior aligned to the validated SEVERE/CRITICAL runtime boundary.
-- JVM coverage asserts SEVERE recommendations describe continued throttled inference and CRITICAL recommendations describe blocked model loading.
 - `1268c26a` passed JVM tests/lint/debug APK build, emulator smoke, and real Qwen LiteRT-LM E2E with SEVERE thermal admission aligned to the existing 256-token throttle while CRITICAL+ still blocks model load/generation.
 - `615fe48d` passed JVM tests/lint/debug APK build, emulator smoke, and real Qwen LiteRT-LM E2E with the inference-stall guard wired around production LiteRT.
-- Inference-stall JVM coverage exercises stalled prefill, mid-stream stalls after token output, healthy Token → Stats → Complete pass-through, and streams ending without a terminal event.
 - `563aab15` passed JVM tests/lint/debug APK build, emulator smoke, and real Qwen LiteRT-LM E2E with the production two-thread CPU policy.
 - `6d969769` passed the same pipeline plus the real-model CPU-thread benchmark.
 
@@ -41,15 +41,15 @@
 
 ## Known problems / regressions
 - Physical-device thermal/LMK behavior, vision history, long-context pressure, and interrupted-generation recovery still need representative handset testing.
-- Upstream LiteRT-LM Android streaming has open reports of missing terminal callbacks; Mobie now fails and cancels stalled streams instead of waiting forever, but recovery from a native deadlock that ignores cancellation still needs a reproducible device case.
+- Upstream LiteRT-LM Android streaming can lose terminal callbacks. Mobie's watchdog now has a pending fix to return an error even if the native collector ignores coroutine cancellation; a truly wedged native call may still retain native resources until the app process restarts.
 - Representative 32K/64K handset validation is still needed before claiming a measured RAM/OOM improvement from device-aware context sizing.
 - GGUF remains intentionally unavailable; v1 relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU and more than two CPU inference threads remain disabled pending representative handset evidence.
 
 ## Items to inspect before merging
+- Reproduce a genuinely non-cooperative LiteRT stream and verify the UI regains control after the watchdog timeout; if native resources remain wedged, verify the restart guidance is clear and no ANR occurs.
 - On a RAM-constrained phone where context sizing drops below 4K, restore a long conversation and verify replay remains bounded, generation still has usable prompt/output headroom, and native context rebuilds cleanly when older turns are evicted.
 - On a representative low/free-RAM phone, compare a 32K/64K LiteRT artifact before/after context-budget wiring: verify load success/OOM behavior, selected usable context, app RAM, TTFT, and decode/prefill throughput.
 - Heat a representative phone to SEVERE before starting a prompt and verify recommendations mention throttling and Mobie still generates with the 256-token cap; at CRITICAL verify recommendations say loading is blocked, new generation is rejected, and active generation is cancelled.
-- Reproduce a real LiteRT stream whose terminal callback disappears and verify Mobie returns control, reports the stall, and can recover/reload without ANR or stale tokens.
 - Compare 2-thread production against runtime-default and 4+ threads on representative big.LITTLE phones, measuring TTFT, decode/prefill throughput, battery drain, and thermal throttling.
 - Interrupt/resume a large real model download and verify ambiguous `Content-Range .../*` resumes are rejected.
