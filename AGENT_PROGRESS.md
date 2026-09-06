@@ -9,18 +9,21 @@
 - Completed restored-vision context accounting and single-image-slot replacement handling.
 - Added device-aware vision backend selection: real arm64 devices may try GPU first; emulators/x86 skip unsupported OpenCL probing and use CPU vision.
 - Validated the complete real SmolVLM2-500M vision flow in Android CI: restored historical image → text follow-up → replacement image → text follow-up.
+- Isolated watchdog and explicit Stop cancellation from potentially non-cooperative native `cancelProcess()` calls so callers can regain control instead of hanging indefinitely.
 
 ## Important work in progress
+- Validate the new bounded native-cancellation path in exact-tip Android CI; the implementation and non-cooperative regression tests are pushed but not yet claimed green.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second without enabling unvalidated main-model GPU/NPU execution.
 - Thermal protection, long-context pressure, and GPU vision still need representative physical-device testing.
 
 ## Tests actually performed
-- `9f06f837`: full Android CI passed: JVM tests/lint/debug APK, emulator smoke, real Qwen LiteRT-LM text E2E, and real SmolVLM2-500M vision E2E. The vision test exercised restore-image → text → replacement-image → text through production Mobie runtime code.
+- `83db83db` / `9f06f837`: full Android CI passed: JVM tests/lint/debug APK, emulator smoke, real Qwen LiteRT-LM text E2E, and real SmolVLM2-500M vision E2E. The vision test exercised restore-image → text → replacement-image → text through production Mobie runtime code.
 - `23ce401e`: verification, emulator smoke, and real Qwen text E2E passed while isolated vision E2E failed before the device-aware backend fix.
 - `982f6ec7` and `1a2675f7`: exact-tip Android CI passed for single-image replacement and restored-vision context accounting.
 - `eadd96ff` / `5656f810`: exact-tip Android CI passed after non-cooperative native stall containment.
 - `ef276beb` / `0437aa22`: exact-tip Android CI passed constrained-context replay coverage at 1K/2K/4K.
 - `6d969769`: Android CI plus real-model CPU-thread benchmark passed.
+- New bounded-cancellation JVM coverage deliberately blocks fake native cancellation for 750 ms and requires both the watchdog and explicit Stop path to regain control within a 50 ms configured cancellation bound; exact-tip CI is pending.
 
 ## Real benchmarks / performance improvements
 - Real-Qwen CPU-thread comparison on the 2-vCPU Android runner: runtime default 8.02 decode tok/s and 19.32 prefill tok/s; explicit 2 threads 19.19 decode tok/s and 39.01 prefill tok/s (2.39x decode, 2.02x prefill).
@@ -32,13 +35,14 @@
 - Physical-device thermal/LMK behavior, long-context pressure, interrupted-generation recovery, and GPU vision need representative handset testing.
 - LiteRT-LM `maxNumImages` remains intentionally one image; replacement handling and the real replacement flow are now CI validated.
 - GPU vision on real arm64 remains enabled first but needs handset validation; CPU fallback is retained when GPU initialization fails.
-- Upstream LiteRT-LM streaming can lose terminal callbacks. Mobie returns an error even if the collector ignores coroutine cancellation, but a truly wedged native call may retain native resources until process restart.
+- Upstream LiteRT-LM streaming can lose terminal callbacks. Mobie returns an error even if collection or cancellation ignores coroutine cancellation, but a truly wedged native call may retain a detached worker/native resources until process restart.
 - Representative 32K/64K handset validation is still needed before claiming measured RAM/OOM improvement from context sizing.
 - GGUF remains intentionally unavailable; v1 relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU and more than two CPU inference threads remain disabled pending representative handset evidence.
 
 ## Items to inspect before merging
 - On representative arm64 hardware, repeat the vision restore → text → replacement-image → text flow and verify GPU initialization/fallback plus memory/thermal behavior.
+- During a long real generation, press Stop repeatedly and verify UI responsiveness, cancellation latency, post-cancel recovery, and process/native-resource behavior if the runtime itself wedges.
 - On a RAM-constrained phone, restore a long conversation and verify context sizing/replay remains bounded at 1K/2K/4K and native context rebuilds cleanly.
 - Compare a 32K/64K LiteRT artifact before/after context-budget wiring: load/OOM behavior, selected usable context, app RAM, TTFT, decode and prefill throughput.
 - Heat a phone to SEVERE and CRITICAL and verify 256-token throttling, generation cancellation, and no ANR.
