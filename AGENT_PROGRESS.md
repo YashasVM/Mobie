@@ -2,6 +2,7 @@
 
 ## Major changes completed this week
 - Hardened resumable Hugging Face downloads with strict range/size validation, retained partials, cancellation, integrity checks, and storage admission.
+- Pinned Hugging Face model-card and `.litertlm` artifact requests to the exact discovered Hub commit SHA, and made model-detail caching revision-aware so mutable `main` updates cannot mix metadata or resume bytes across revisions.
 - Verified real Qwen3-0.6B INT4 LiteRT-LM download → load → repeated generation → reset/history restore → unload/reload → generation.
 - Added real TTFT, latency, prefill/decode throughput, token-count, app-RAM, cold-load, and warm-cache telemetry.
 - Improved device/model recommendations using RAM pressure, storage headroom, quantization, artifact size, context/KV estimates, supported backend, and hardware-target filtering.
@@ -13,11 +14,12 @@
 - Made explicit LiteRT context metadata a hard upper bound; packages below Mobie's 1,024-token practical minimum are rejected consistently.
 
 ## Important work in progress
-- Pin Hugging Face model-card and artifact requests to the exact Hub revision returned by discovery so resumable downloads cannot silently cross mutable `main` revisions; exact-tip Android CI is pending.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second without enabling unvalidated main-model GPU/NPU execution.
-- Thermal protection, long-context pressure, and GPU vision still need representative physical-device testing.
+- Thermal protection, long-context pressure, interrupted-generation recovery, and GPU vision still need representative physical-device testing.
 
 ## Tests actually performed
+- `64a87e22`: Android CI passed revision-aware Hugging Face detail-cache coverage on top of commit-pinned Hub URLs.
+- `58e093c`: Android CI passed commit-pinned Hugging Face discovery/download coverage.
 - `6e7c6e8b`: full Android CI passed: JVM tests/lint/debug APK, emulator smoke, real Qwen LiteRT-LM text E2E, and real SmolVLM2-500M vision E2E.
 - `72c9f3fe`: Android CI passed recommendation/runtime context-parity coverage, including constrained-RAM context sizing.
 - `0f2fc453`: Android CI passed bounded native-cancellation tests with deliberately blocked fake native cancellation.
@@ -39,7 +41,7 @@
 - Main-model GPU/NPU and more than two CPU inference threads remain disabled pending representative handset evidence.
 
 ## Items to inspect before merging
-- Verify newly discovered Hugging Face artifacts use commit-pinned `/resolve/<sha>/...` URLs and that an interrupted large download resumes the same immutable revision.
+- Verify newly discovered Hugging Face artifacts use commit-pinned `/resolve/<sha>/...` URLs; publish a new repo revision during the cache TTL and confirm metadata/downloads switch atomically to the new SHA while an existing interrupted download stays on its original immutable revision.
 - On representative arm64 hardware, repeat the vision restore → text → replacement-image → text flow and verify GPU initialization/fallback plus memory/thermal behavior.
 - During a long real generation, press Stop repeatedly and verify UI responsiveness, cancellation latency, post-cancel recovery, and native-resource behavior.
 - Compare recommendation/runtime selected context for 32K/64K artifacts on a RAM-constrained phone and measure app RAM, TTFT, decode and prefill throughput.
