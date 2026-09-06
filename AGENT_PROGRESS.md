@@ -17,10 +17,13 @@
 - Hardened the inference-stall watchdog so Mobie returns control even when a native LiteRT collector ignores coroutine cancellation; exact-tip CI validated the non-cooperative regression coverage and real-Qwen E2E.
 
 ## Important work in progress
+- Fix multimodal context accounting: restored history images now have an explicit output-budget reserve with regression coverage; production runtime wiring and single-image-slot replacement behavior are still pending validation.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second without unvalidated main-model GPU/NPU execution.
 - Thermal protection still needs representative physical-device sustained-heat testing.
 
 ## Tests actually performed
+- `eadd96ff` passed exact-tip Android CI after non-cooperative stall containment, including JVM tests/lint/debug APK, emulator smoke, and real Qwen LiteRT-LM E2E.
+- Restored-vision context-budget JVM coverage now checks that a history image consumes the same reserve as a new image and that the single image slot is not double-counted when both flags are present; exact-tip CI is pending.
 - `5656f810` passed exact-tip Android CI: JVM tests/lint/debug APK build, emulator smoke, and real Qwen LiteRT-LM E2E after non-cooperative inference-stall containment.
 - Non-cooperative stall regression coverage deliberately blocks the fake native producer after emitting a token and verifies the public generation flow returns promptly instead of waiting for the blocked producer.
 - `ef276beb` passed exact-tip Android CI after the constrained-context replay fix.
@@ -43,12 +46,14 @@
 
 ## Known problems / regressions
 - Physical-device thermal/LMK behavior, vision history, long-context pressure, and interrupted-generation recovery still need representative handset testing.
+- LiteRT-LM `maxNumImages` is configured to one image for vision. Restored history can already occupy that slot, so a later prompt with a new image needs production handling that rebuilds history without the older image before sending the replacement.
 - Upstream LiteRT-LM Android streaming can lose terminal callbacks. Mobie now returns an error even if the collector ignores coroutine cancellation, but a truly wedged native call may still retain native resources until the app process restarts.
 - Representative 32K/64K handset validation is still needed before claiming a measured RAM/OOM improvement from device-aware context sizing.
 - GGUF remains intentionally unavailable; v1 relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU and more than two CPU inference threads remain disabled pending representative handset evidence.
 
 ## Items to inspect before merging
+- On a vision model, restore a chat containing an image, send a text-only follow-up, then send a replacement image; verify output budgeting accounts for the restored image and the new image replaces rather than exceeds the one-image engine slot.
 - Reproduce a genuinely non-cooperative LiteRT stream and verify the UI regains control after the watchdog timeout; if native resources remain wedged, verify the restart guidance is clear and no ANR occurs.
 - On a RAM-constrained phone where context sizing drops below 4K, restore a long conversation and verify replay remains bounded, generation still has usable prompt/output headroom, and native context rebuilds cleanly when older turns are evicted.
 - On a representative low/free-RAM phone, compare a 32K/64K LiteRT artifact before/after context-budget wiring: verify load success/OOM behavior, selected usable context, app RAM, TTFT, and decode/prefill throughput.
