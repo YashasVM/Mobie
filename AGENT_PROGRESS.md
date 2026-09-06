@@ -14,13 +14,15 @@
 - Added an inference-stall watchdog around production LiteRT streaming: 120 s initial prefill allowance, 30 s active-stream idle timeout, bounded cancellation, and explicit failure for streams that disappear without a terminal callback.
 - Wired device-aware LiteRT KV/context sizing into production: Mobie selects the largest context fitting the current RAM budget and consistently applies it to memory admission, native KV allocation, history trimming, and generation output budgeting while preserving full advertised context when safe.
 - Scaled conversation-history replay below 4K so 1K-3K constrained contexts no longer inherit the old 4K replay floor; exact-tip Android CI validated the fix.
+- Hardened the inference-stall watchdog so Mobie returns control even when a native LiteRT collector ignores coroutine cancellation; exact-tip CI validated the non-cooperative regression coverage and real-Qwen E2E.
 
 ## Important work in progress
-- Harden the inference-stall watchdog so it returns control even when a native LiteRT collector ignores coroutine cancellation; regression coverage for a deliberately non-cooperative collector is awaiting exact-tip CI.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second without unvalidated main-model GPU/NPU execution.
 - Thermal protection still needs representative physical-device sustained-heat testing.
 
 ## Tests actually performed
+- `5656f810` passed exact-tip Android CI: JVM tests/lint/debug APK build, emulator smoke, and real Qwen LiteRT-LM E2E after non-cooperative inference-stall containment.
+- Non-cooperative stall regression coverage deliberately blocks the fake native producer after emitting a token and verifies the public generation flow returns promptly instead of waiting for the blocked producer.
 - `ef276beb` passed exact-tip Android CI after the constrained-context replay fix.
 - `0437aa22` passed exact-tip Android CI after the constrained-context replay fix; JVM coverage compares 1K, 2K, and 4K replay budgets and asserts constrained contexts stay below proportional UTF-8 history limits.
 - `c79df688` passed JVM tests/lint/debug APK build, emulator smoke, and real Qwen LiteRT-LM E2E with production device-aware context sizing wired into runtime.
@@ -41,7 +43,7 @@
 
 ## Known problems / regressions
 - Physical-device thermal/LMK behavior, vision history, long-context pressure, and interrupted-generation recovery still need representative handset testing.
-- Upstream LiteRT-LM Android streaming can lose terminal callbacks. Mobie's watchdog now has a pending fix to return an error even if the native collector ignores coroutine cancellation; a truly wedged native call may still retain native resources until the app process restarts.
+- Upstream LiteRT-LM Android streaming can lose terminal callbacks. Mobie now returns an error even if the collector ignores coroutine cancellation, but a truly wedged native call may still retain native resources until the app process restarts.
 - Representative 32K/64K handset validation is still needed before claiming a measured RAM/OOM improvement from device-aware context sizing.
 - GGUF remains intentionally unavailable; v1 relies on published LiteRT-LM artifacts.
 - Main-model GPU/NPU and more than two CPU inference threads remain disabled pending representative handset evidence.
