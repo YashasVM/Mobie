@@ -9,21 +9,20 @@
 - Completed restored-vision context accounting and single-image-slot replacement handling.
 - Added device-aware vision backend selection: real arm64 devices may try GPU first; emulators/x86 skip unsupported OpenCL probing and use CPU vision.
 - Validated the complete real SmolVLM2-500M vision flow in Android CI: restored historical image → text follow-up → replacement image → text follow-up.
-- Isolated watchdog and explicit Stop cancellation from potentially non-cooperative native `cancelProcess()` calls so callers can regain control instead of hanging indefinitely.
+- Isolated watchdog and explicit Stop cancellation from potentially non-cooperative native `cancelProcess()` calls so callers can regain control instead of hanging indefinitely; exact-tip Android CI passed.
 
 ## Important work in progress
-- Validate the new bounded native-cancellation path in exact-tip Android CI; the implementation and non-cooperative regression tests are pushed but not yet claimed green.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second without enabling unvalidated main-model GPU/NPU execution.
 - Thermal protection, long-context pressure, and GPU vision still need representative physical-device testing.
 
 ## Tests actually performed
+- `0f2fc453`: exact-tip Android CI passed after bounded native-cancellation containment; JVM regression coverage deliberately blocks fake native cancellation for 750 ms and requires watchdog and explicit Stop paths to regain control within a 50 ms configured bound.
 - `83db83db` / `9f06f837`: full Android CI passed: JVM tests/lint/debug APK, emulator smoke, real Qwen LiteRT-LM text E2E, and real SmolVLM2-500M vision E2E. The vision test exercised restore-image → text → replacement-image → text through production Mobie runtime code.
 - `23ce401e`: verification, emulator smoke, and real Qwen text E2E passed while isolated vision E2E failed before the device-aware backend fix.
 - `982f6ec7` and `1a2675f7`: exact-tip Android CI passed for single-image replacement and restored-vision context accounting.
 - `eadd96ff` / `5656f810`: exact-tip Android CI passed after non-cooperative native stall containment.
 - `ef276beb` / `0437aa22`: exact-tip Android CI passed constrained-context replay coverage at 1K/2K/4K.
 - `6d969769`: Android CI plus real-model CPU-thread benchmark passed.
-- New bounded-cancellation JVM coverage deliberately blocks fake native cancellation for 750 ms and requires both the watchdog and explicit Stop path to regain control within a 50 ms configured cancellation bound; exact-tip CI is pending.
 
 ## Real benchmarks / performance improvements
 - Real-Qwen CPU-thread comparison on the 2-vCPU Android runner: runtime default 8.02 decode tok/s and 19.32 prefill tok/s; explicit 2 threads 19.19 decode tok/s and 39.01 prefill tok/s (2.39x decode, 2.02x prefill).
