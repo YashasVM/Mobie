@@ -36,7 +36,7 @@ class LiteRtVisionEndToEndTest {
     }
 
     @Test
-    fun restoresHistoricalImageThenHandlesTextFollowUpAndReplacementImage() = runBlocking {
+    fun restoresHistoricalImageThenHandlesTextFollowUpAndReplacementImage(): Unit = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("litertVisionE2E") == "true")
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val artifact = ModelArtifact(
