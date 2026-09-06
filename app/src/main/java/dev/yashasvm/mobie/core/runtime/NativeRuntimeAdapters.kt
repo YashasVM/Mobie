@@ -338,31 +338,44 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
             )
         }
 
-        return try {
-            LoadedEngine(
-                initializeEngine(modelPath, visionBackend = Backend.GPU(), contextWindowTokens = contextWindowTokens),
-                visionReady = true,
+        var gpuVisionError: Exception? = null
+        if (
+            LiteRtVisionBackendPolicy.shouldAttemptGpu(
+                supportedAbis = Build.SUPPORTED_ABIS,
+                fingerprint = Build.FINGERPRINT,
+                model = Build.MODEL,
+                hardware = Build.HARDWARE,
+                product = Build.PRODUCT,
             )
-        } catch (gpuVisionError: Exception) {
-            rethrowCancellation(gpuVisionError)
+        ) {
             try {
-                LoadedEngine(
-                    initializeEngine(modelPath, visionBackend = Backend.CPU(), contextWindowTokens = contextWindowTokens),
+                return LoadedEngine(
+                    initializeEngine(modelPath, visionBackend = Backend.GPU(), contextWindowTokens = contextWindowTokens),
                     visionReady = true,
                 )
-            } catch (cpuVisionError: Exception) {
-                rethrowCancellation(cpuVisionError)
-                try {
-                    LoadedEngine(
-                        initializeEngine(modelPath, visionBackend = null, contextWindowTokens = contextWindowTokens),
-                        visionReady = false,
-                    )
-                } catch (textOnlyError: Exception) {
-                    rethrowCancellation(textOnlyError)
-                    textOnlyError.addSuppressed(gpuVisionError)
-                    textOnlyError.addSuppressed(cpuVisionError)
-                    throw textOnlyError
-                }
+            } catch (error: Exception) {
+                rethrowCancellation(error)
+                gpuVisionError = error
+            }
+        }
+
+        return try {
+            LoadedEngine(
+                initializeEngine(modelPath, visionBackend = Backend.CPU(), contextWindowTokens = contextWindowTokens),
+                visionReady = true,
+            )
+        } catch (cpuVisionError: Exception) {
+            rethrowCancellation(cpuVisionError)
+            try {
+                LoadedEngine(
+                    initializeEngine(modelPath, visionBackend = null, contextWindowTokens = contextWindowTokens),
+                    visionReady = false,
+                )
+            } catch (textOnlyError: Exception) {
+                rethrowCancellation(textOnlyError)
+                gpuVisionError?.let(textOnlyError::addSuppressed)
+                textOnlyError.addSuppressed(cpuVisionError)
+                throw textOnlyError
             }
         }
     }
