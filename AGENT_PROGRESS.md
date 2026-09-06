@@ -17,11 +17,13 @@
 - Validated restored-vision context accounting and completed single-image-slot replacement handling so an old history image is replayed as text before a new image is submitted.
 
 ## Important work in progress
-- Real multimodal LiteRT-LM E2E uses `litert-community/SmolVLM2-500M`: restore historical image → text follow-up → replacement image → text follow-up. After fixing the JUnit signature, `badaeec1` reached the real-runtime stage but the combined text+vision runtime job failed while normal verification and emulator smoke stayed green. `de805113` now isolates text and vision into separate runtime jobs and always uploads connected-test diagnostics so the next failure identifies the actual model/runtime path instead of hiding it behind a combined invocation.
+- Real multimodal LiteRT-LM E2E uses `litert-community/SmolVLM2-500M`: restore historical image → text follow-up → replacement image → text follow-up. The isolated `23ce401e` run proved normal verification, emulator smoke, and the real Qwen text E2E are green while only the vision job fails. `149569be` now makes vision backend selection device-aware: real arm64 devices may try GPU first, while emulators/x86 skip the unsupported OpenCL probe and go directly to CPU vision. Exact-tip multimodal CI is pending.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second without unvalidated main-model GPU/NPU execution.
 - Thermal protection still needs representative physical-device sustained-heat testing.
 
 ## Tests actually performed
+- `23ce401e`: JVM tests/lint/debug APK, emulator smoke, and the isolated real Qwen LiteRT-LM text E2E passed; only the isolated SmolVLM2 vision E2E failed during real model execution.
+- `149569be`: exact-tip Android CI is in progress. New JVM coverage verifies GPU vision is allowed for a real arm64 profile and skipped for x86 and arm64 emulator profiles.
 - `badaeec1`: JVM tests/lint/debug APK and emulator smoke passed. The combined real-runtime job failed during LiteRT model execution after JUnit discovery was fixed; therefore the multimodal replacement path is still not claimed validated.
 - `67d2642b` passed JVM tests/lint/debug APK verification, but the first vision test attempt failed during JUnit discovery because its expression body inferred a non-void return type.
 - `982f6ec7` passed exact-tip Android CI after single-image replacement handling: JVM tests/lint/debug APK, emulator smoke, and the real Qwen LiteRT-LM E2E all completed successfully.
@@ -41,8 +43,8 @@
 
 ## Known problems / regressions
 - Physical-device thermal/LMK behavior, vision history, long-context pressure, and interrupted-generation recovery still need representative handset testing.
-- LiteRT-LM `maxNumImages` remains intentionally configured to one image. Replacement handling is text-path CI validated; the real SmolVLM2 multimodal replacement gate is still pending isolated runtime validation.
-- The x86_64 CI emulator uses SwiftShader while Mobie currently attempts the LiteRT GPU vision backend before CPU fallback; if isolated vision diagnostics show delegate/runtime failure after successful GPU initialization, backend selection must be made device-aware rather than merely increasing test timeouts.
+- LiteRT-LM `maxNumImages` remains intentionally configured to one image. Replacement handling is text-path CI validated; the real SmolVLM2 multimodal replacement gate is still pending exact-tip runtime validation.
+- Vision GPU selection now avoids emulator/x86 OpenCL probing and falls back directly to CPU there. GPU vision on real arm64 hardware remains intentionally enabled first but still needs representative handset validation.
 - Upstream LiteRT-LM Android streaming can lose terminal callbacks. Mobie returns an error even if the collector ignores coroutine cancellation, but a truly wedged native call may retain native resources until process restart.
 - Representative 32K/64K handset validation is still needed before claiming measured RAM/OOM improvement from device-aware context sizing.
 - GGUF remains intentionally unavailable; v1 relies on published LiteRT-LM artifacts.
@@ -50,6 +52,7 @@
 
 ## Items to inspect before merging
 - On a real vision model, restore a chat containing an image, send a text-only follow-up, then send a replacement image; verify the restored image receives context reserve, the old image is replayed as text only before replacement, and the new image does not exceed the one-image engine slot.
+- On representative arm64 hardware, verify LiteRT GPU vision initializes only when a usable OpenCL stack exists and that CPU fallback remains clean when GPU initialization fails.
 - Reproduce a genuinely non-cooperative LiteRT stream and verify the UI regains control after the watchdog timeout; if native resources remain wedged, verify the restart guidance is clear and no ANR occurs.
 - On a RAM-constrained phone where context sizing drops below 4K, restore a long conversation and verify replay remains bounded and native context rebuilds cleanly when older turns are evicted.
 - On a representative low/free-RAM phone, compare a 32K/64K LiteRT artifact before/after context-budget wiring: verify load success/OOM behavior, selected usable context, app RAM, TTFT, and decode/prefill throughput.
