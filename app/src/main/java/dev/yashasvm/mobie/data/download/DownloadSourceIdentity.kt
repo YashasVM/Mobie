@@ -17,6 +17,9 @@ object DownloadSourceIdentity {
     fun matches(properties: Properties?, sourceUrl: String): Boolean =
         properties?.getProperty(SOURCE_URL_PROPERTY)?.takeIf(String::isNotBlank) == sourceUrl
 
+    fun canReuseCompleted(properties: Properties?, sourceUrl: String, expectedSha256: String?): Boolean =
+        !expectedSha256.isNullOrBlank() || matches(properties, sourceUrl)
+
     fun stamp(properties: Properties, sourceUrl: String) {
         properties.setProperty(SOURCE_URL_PROPERTY, sourceUrl)
     }
