@@ -125,9 +125,10 @@ class ModelDownloadManager(context: Context) {
             val expectedSha = properties.getProperty("sha256")?.ifBlank { null }
             if (!verifiedOrValid(file, expectedSha, properties, metadataFile)) return@mapNotNull null
             val sourceFileName = properties.getProperty("sourceFileName")?.ifBlank { null } ?: storedFileName
+            val sourceUrl = properties.getProperty(DownloadSourceIdentity.SOURCE_URL_PROPERTY).orEmpty()
             val artifact = ModelArtifact(
                 fileName = sourceFileName,
-                downloadUrl = "",
+                downloadUrl = sourceUrl,
                 sizeBytes = file.length(),
                 sha256 = expectedSha,
                 format = ModelFormat.LITERT_LM,
@@ -220,18 +221,15 @@ class ModelDownloadManager(context: Context) {
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
-    private fun WorkInfo.toProgress(): DownloadProgress {
-        val data = if (state.isFinished) outputData else progress
-        return DownloadProgress(
-            state = state,
-            downloadedBytes = data.getLong(ModelDownloadWorker.KEY_DOWNLOADED, 0),
-            totalBytes = data.getLong(ModelDownloadWorker.KEY_SIZE, 0),
-            bytesPerSecond = data.getLong(ModelDownloadWorker.KEY_SPEED, 0),
-            localPath = outputData.getString(ModelDownloadWorker.KEY_PATH),
-            error = outputData.getString(ModelDownloadWorker.KEY_ERROR),
-        )
-    }
+    private fun workName(modelId: String, artifact: ModelArtifact): String =
+        "model-download:${DownloadFilePolicy.storageKey(modelId)}:${DownloadFilePolicy.storageFileName(artifact.fileName)}"
 
-    private fun workName(modelId: String, artifact: ModelArtifact) =
-        "model-${modelId.hashCode()}-${artifact.fileName.hashCode()}"
+    private fun WorkInfo.toProgress(): DownloadProgress = DownloadProgress(
+        state = state,
+        downloadedBytes = progress.getLong(ModelDownloadWorker.KEY_DOWNLOADED, 0),
+        totalBytes = progress.getLong(ModelDownloadWorker.KEY_TOTAL, 0),
+        bytesPerSecond = progress.getLong(ModelDownloadWorker.KEY_BYTES_PER_SECOND, 0),
+        localPath = outputData.getString(ModelDownloadWorker.KEY_PATH),
+        error = outputData.getString(ModelDownloadWorker.KEY_ERROR),
+    )
 }
