@@ -47,10 +47,11 @@ class InstalledMetadataRecoveryTest {
         assertTrue(!canonicalMetadata.exists())
 
         val installed = ModelDownloadManager(context).installedModels().single { it.model.id == modelId }
+        val recoveredArtifact = requireNotNull(installed.model.bestArtifact)
 
         assertEquals(modelFile.absolutePath, installed.localPath)
-        assertEquals(sourceFileName, installed.model.bestArtifact.fileName)
-        assertEquals(sourceUrl, installed.model.bestArtifact.downloadUrl)
+        assertEquals(sourceFileName, recoveredArtifact.fileName)
+        assertEquals(sourceUrl, recoveredArtifact.downloadUrl)
         assertTrue("Canonical metadata should be repaired atomically", canonicalMetadata.isFile)
         val repaired = Properties().apply { canonicalMetadata.inputStream().use(::load) }
         assertEquals(modelId, repaired.getProperty("modelId"))
