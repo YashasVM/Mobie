@@ -12,6 +12,7 @@ class DownloadSourceIdentityTest {
         val url = "https://huggingface.co/acme/model/resolve/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/model.litertlm"
         DownloadSourceIdentity.stamp(properties, url)
 
+        assertTrue(DownloadSourceIdentity.isImmutable(url))
         assertTrue(DownloadSourceIdentity.matches(properties, url))
         assertTrue(DownloadSourceIdentity.canReuseCompleted(properties, url, expectedSha256 = null))
     }
@@ -28,6 +29,30 @@ class DownloadSourceIdentityTest {
 
         assertFalse(DownloadSourceIdentity.matches(properties, newRevision))
         assertFalse(DownloadSourceIdentity.canReuseCompleted(properties, newRevision, expectedSha256 = null))
+    }
+
+    @Test
+    fun `mutable same url cannot reuse checksum-less completed or partial bytes`() {
+        val properties = Properties()
+        val mutableUrl = "https://example.com/models/current/model.litertlm"
+        DownloadSourceIdentity.stamp(properties, mutableUrl)
+
+        assertFalse(DownloadSourceIdentity.isImmutable(mutableUrl))
+        assertFalse(DownloadSourceIdentity.matches(properties, mutableUrl))
+        assertFalse(DownloadSourceIdentity.canReuseCompleted(properties, mutableUrl, expectedSha256 = null))
+        assertFalse(DownloadSourceIdentity.canRecoverInstalled(properties, mutableUrl))
+    }
+
+    @Test
+    fun `symbolic hugging face revision is mutable even when url matches`() {
+        val properties = Properties()
+        val branchUrl = "https://huggingface.co/acme/model/resolve/main/model.litertlm"
+        DownloadSourceIdentity.stamp(properties, branchUrl)
+
+        assertFalse(DownloadSourceIdentity.isImmutable(branchUrl))
+        assertFalse(DownloadSourceIdentity.matches(properties, branchUrl))
+        assertFalse(DownloadSourceIdentity.canReuseCompleted(properties, branchUrl, expectedSha256 = null))
+        assertFalse(DownloadSourceIdentity.canRecoverInstalled(properties, branchUrl))
     }
 
     @Test
