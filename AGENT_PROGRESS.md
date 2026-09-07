@@ -1,8 +1,8 @@
 # Agent progress
 
 ## Major changes completed this week
-- Hardened resumable Hugging Face downloads with strict range/size validation, retained partials, cancellation, integrity checks, and storage admission.
-- Pinned Hugging Face model-card and `.litertlm` artifact requests to the exact discovered Hub commit SHA, and made model-detail caching revision-aware so mutable `main` updates cannot mix metadata or resume bytes across revisions.
+- Hardened resumable Hugging Face downloads with strict range/size validation, retained partials, cancellation, integrity checks, storage admission, and revision-bound reuse.
+- Pinned Hugging Face model-card and `.litertlm` artifact requests to the exact discovered Hub commit SHA, made model-detail caching revision-aware, and bound completed unverified files plus resumable `.part` files to their exact source URL so mutable `main` updates cannot reuse or append stale bytes across revisions.
 - Verified real Qwen3-0.6B INT4 LiteRT-LM download → load → repeated generation → reset/history restore → unload/reload → generation.
 - Added real TTFT, latency, prefill/decode throughput, token-count, app-RAM, cold-load, and warm-cache telemetry.
 - Improved device/model recommendations using RAM pressure, storage headroom, quantization, artifact size, context/KV estimates, supported backend, and hardware-target filtering.
@@ -14,12 +14,13 @@
 - Made explicit LiteRT context metadata a hard upper bound; packages below Mobie's 1,024-token practical minimum are rejected consistently.
 
 ## Important work in progress
-- Revision-pin hardening now also binds completed unverified model files and resumable `.part` files to their exact source URL so a new Hub revision cannot silently reuse or append to old bytes; exact-tip Android CI is pending.
+- Continue auditing download/install identity and crash-recovery paths for stale or partially replaced artifacts.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second without enabling unvalidated main-model GPU/NPU execution.
 - Thermal protection, long-context pressure, interrupted-generation recovery, and GPU vision still need representative physical-device testing.
 
 ## Tests actually performed
-- New revision-bound download identity regression tests cover same-source reuse, cross-revision rejection, legacy metadata rejection, and checksum-proven completed-file reuse; exact-tip Android CI pending.
+- `8e9afbac`: full Android CI passed revision-bound completed-file/partial-download identity coverage, JVM tests/lint/debug APK, emulator smoke, real Qwen LiteRT-LM text E2E, and real SmolVLM2-500M vision E2E.
+- Revision-bound download identity regression tests cover same-source reuse, cross-revision rejection, legacy metadata rejection, and checksum-proven completed-file reuse.
 - `64a87e22`: Android CI passed revision-aware Hugging Face detail-cache coverage on top of commit-pinned Hub URLs.
 - `58e093c`: Android CI passed commit-pinned Hugging Face discovery/download coverage.
 - `6e7c6e8b`: full Android CI passed: JVM tests/lint/debug APK, emulator smoke, real Qwen LiteRT-LM text E2E, and real SmolVLM2-500M vision E2E.
