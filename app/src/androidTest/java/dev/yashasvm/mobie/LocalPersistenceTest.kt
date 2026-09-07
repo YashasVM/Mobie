@@ -54,7 +54,7 @@ class LocalPersistenceTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val modelId = "test/artifact-identity"
         val sourceFileName = "Qwen3-0.6B-int4-ekv2048.litertlm"
-        val sourceUrl = "https://huggingface.co/example/model/resolve/0123456789abcdef/$sourceFileName"
+        val sourceUrl = "https://huggingface.co/example/model/resolve/0123456789abcdef0123456789abcdef01234567/$sourceFileName"
         val directory = File(File(context.filesDir, "models"), DownloadFilePolicy.storageKey(modelId))
         directory.deleteRecursively()
         directory.mkdirs()
