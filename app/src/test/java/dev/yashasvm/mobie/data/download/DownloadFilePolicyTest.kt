@@ -17,6 +17,21 @@ class DownloadFilePolicyTest {
     }
 
     @Test
+    fun `download work identities resist java hash collisions`() {
+        assertEquals("Aa".hashCode(), "BB".hashCode())
+        assertNotEquals(
+            DownloadFilePolicy.workKey("Aa", "model.litertlm"),
+            DownloadFilePolicy.workKey("BB", "model.litertlm"),
+        )
+
+        assertEquals("Aa".hashCode(), "BB".hashCode())
+        assertNotEquals(
+            DownloadFilePolicy.workKey("owner/model", "Aa"),
+            DownloadFilePolicy.workKey("owner/model", "BB"),
+        )
+    }
+
+    @Test
     fun `artifact path is reduced to a safe leaf name`() {
         assertEquals("model.gguf", DownloadFilePolicy.safeFileName("weights/mobile/model.gguf"))
         assertEquals("model.bin", DownloadFilePolicy.safeFileName(".."))
