@@ -22,8 +22,10 @@ class CompletedFileSourceIdentityTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val modelId = "mobie-test/completed-file-source-identity"
         val fileName = "identity-test.litertlm"
-        val oldSource = "https://huggingface.co/example/model/resolve/oldsha/$fileName"
-        val newSource = "https://huggingface.co/example/model/resolve/newsha/$fileName"
+        val oldSource =
+            "https://huggingface.co/example/model/resolve/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/$fileName"
+        val newSource =
+            "https://huggingface.co/example/model/resolve/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/$fileName"
         val modelDir = File(File(context.filesDir, "models"), DownloadFilePolicy.storageKey(modelId))
         modelDir.deleteRecursively()
         modelDir.mkdirs()
@@ -53,8 +55,10 @@ class CompletedFileSourceIdentityTest {
         val modelId = "mobie-test/multi-artifact-source-identity"
         val firstName = "model-q4.litertlm"
         val secondName = "model-q8.litertlm"
-        val firstSource = "https://huggingface.co/example/model/resolve/rev-a/$firstName"
-        val secondSource = "https://huggingface.co/example/model/resolve/rev-b/$secondName"
+        val firstSource =
+            "https://huggingface.co/example/model/resolve/cccccccccccccccccccccccccccccccccccccccc/$firstName"
+        val secondSource =
+            "https://huggingface.co/example/model/resolve/dddddddddddddddddddddddddddddddddddddddd/$secondName"
         val modelDir = File(File(context.filesDir, "models"), DownloadFilePolicy.storageKey(modelId))
         modelDir.deleteRecursively()
         modelDir.mkdirs()
