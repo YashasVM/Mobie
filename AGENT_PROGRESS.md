@@ -8,6 +8,7 @@
 - Preserved independent source/checksum identity for every artifact sharing a model directory, so installing or downloading one artifact no longer overwrites another artifact's revision metadata or forces valid checksum-less files to re-download.
 - Recovered interrupted installs from validated per-artifact metadata when canonical `.model.properties` is missing or unusable, recreating canonical metadata locally without network transfer while preserving exact source identity.
 - Made model deletion wait for WorkManager download cancellation before removing model storage, and extended that cancellation to every artifact download sharing the model directory so concurrent multi-artifact writes cannot race recursive deletion; deletion fails closed if cancellation cannot be confirmed.
+- Replaced collision-prone Java `hashCode()` WorkManager download identities with collision-resistant SHA-based identities, preventing distinct model/artifact downloads from suppressing each other under `ExistingWorkPolicy.KEEP`.
 - Verified real Qwen3-0.6B INT4 LiteRT-LM download → load → repeated generation → reset/history restore → unload/reload → generation.
 - Added real TTFT, latency, prefill/decode throughput, token-count, app-RAM, cold-load, and warm-cache telemetry.
 - Improved device/model recommendations using RAM pressure, storage headroom, quantization, artifact size, context/KV estimates, supported backend, and hardware-target filtering.
@@ -24,6 +25,7 @@
 - Thermal protection, long-context pressure, interrupted-generation recovery, and GPU vision still need representative physical-device testing.
 
 ## Tests actually performed
+- `7c032ee4`: full Android CI passed collision-resistant WorkManager download identity coverage, including known Java hash collisions (`Aa`/`BB`), plus JVM tests/lint/debug APK, emulator smoke, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
 - `51866360`: full Android CI passed installed-metadata crash recovery after instrumentation compile fix: JVM tests/lint/debug APK, emulator smoke covering recovery from per-artifact metadata with canonical metadata missing, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
 - `44123014`: full Android CI passed per-artifact source identity retention: JVM tests/lint/debug APK, emulator smoke covering two checksum-less artifacts retaining independent exact-source identity and reuse, real Qwen LiteRT-LM text E2E, and real SmolVLM2-500M vision E2E.
 - `6127f5ab`: full Android CI passed multi-artifact cancellation-before-delete handling: JVM tests/lint/debug APK, emulator smoke with both artifact jobs reaching cancellation before model storage removal, real Qwen LiteRT-LM text E2E, and real SmolVLM2-500M vision E2E.
@@ -55,6 +57,7 @@
 - Main-model GPU/NPU and more than two CPU inference threads remain disabled pending representative handset evidence.
 
 ## Items to inspect before merging
+- Start downloads for model/artifact names that would collide under Java `hashCode()` and verify both independent WorkManager jobs coexist and complete.
 - Delete a model while multiple real artifact downloads are actively writing, and verify every job is cancelled before storage removal with no re-created `.part`/metadata files afterward.
 - Force-stop/kill Mobie immediately after a model finishes downloading but before installation state appears, relaunch it, and confirm the complete model is recovered without network transfer and the sidecar is removed only after metadata exists.
 - Publish a new Hugging Face repo revision with the same model ID/file name/size and confirm Mobie refuses to reuse the older completed file or `.part` bytes unless a checksum independently proves the completed artifact.
