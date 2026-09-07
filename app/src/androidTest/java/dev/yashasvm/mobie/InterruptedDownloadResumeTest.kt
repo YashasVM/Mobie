@@ -55,7 +55,7 @@ class InterruptedDownloadResumeTest {
                         } else {
                             observedSecondRange.set(range)
                             assertNull(
-                                "Mutable sources must restart instead of appending bytes from a later response",
+                                "Mutable checksum-less sources must restart instead of appending bytes from a later response",
                                 range,
                             )
                             writeResponseHeaders(socket, 200, payload.size, null)
@@ -72,7 +72,6 @@ class InterruptedDownloadResumeTest {
                 fileName = "resume-test.litertlm",
                 downloadUrl = "http://127.0.0.1:${server.localPort}/resume-test.litertlm",
                 sizeBytes = payload.size.toLong(),
-                sha256 = sha256(payload),
                 format = ModelFormat.LITERT_LM,
             )
             val downloads = ModelDownloadManager(context)
