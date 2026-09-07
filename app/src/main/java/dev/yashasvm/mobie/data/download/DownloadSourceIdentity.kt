@@ -20,6 +20,13 @@ object DownloadSourceIdentity {
     fun canReuseCompleted(properties: Properties?, sourceUrl: String, expectedSha256: String?): Boolean =
         !expectedSha256.isNullOrBlank() || matches(properties, sourceUrl)
 
+    /**
+     * A completed file may be recovered from an interrupted finalization only when the sidecar
+     * that accompanied its partial bytes still identifies the exact same immutable source.
+     */
+    fun canRecoverInstalled(resumeProperties: Properties?, sourceUrl: String): Boolean =
+        matches(resumeProperties, sourceUrl)
+
     fun stamp(properties: Properties, sourceUrl: String) {
         properties.setProperty(SOURCE_URL_PROPERTY, sourceUrl)
     }
