@@ -17,10 +17,7 @@ internal object DownloadFilePolicy {
 
     fun storageFileName(fileName: String): String {
         val safe = safeFileName(fileName)
-        val hash = MessageDigest.getInstance("SHA-256")
-            .digest(fileName.toByteArray(Charsets.UTF_8))
-            .joinToString("") { "%02x".format(it) }
-            .take(12)
+        val hash = fileIdentity(fileName)
         val extensionAt = safe.lastIndexOf('.')
         return if (extensionAt > 0) {
             "${safe.substring(0, extensionAt)}-$hash${safe.substring(extensionAt)}"
@@ -29,9 +26,17 @@ internal object DownloadFilePolicy {
         }
     }
 
+    fun artifactMetadataFile(directory: File, fileName: String): File =
+        File(directory, ".artifact-${fileIdentity(fileName)}.properties")
+
     fun remainingBytes(expectedSize: Long, partialSize: Long): Long =
         (expectedSize - partialSize).coerceAtLeast(0)
 
     fun hasSpaceForRemaining(totalBytes: Long, downloadedBytes: Long, usableSpaceBytes: Long): Boolean =
         totalBytes <= 0 || remainingBytes(totalBytes, downloadedBytes) <= usableSpaceBytes
+
+    private fun fileIdentity(fileName: String): String = MessageDigest.getInstance("SHA-256")
+        .digest(fileName.toByteArray(Charsets.UTF_8))
+        .joinToString("") { "%02x".format(it) }
+        .take(12)
 }
