@@ -20,7 +20,8 @@ class InstalledMetadataRecoveryTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val modelId = "mobie-test/artifact-metadata-recovery"
         val sourceFileName = "recovered-model.litertlm"
-        val sourceUrl = "https://huggingface.co/mobie-test/recovery/resolve/0123456789abcdef/$sourceFileName"
+        val sourceUrl =
+            "https://huggingface.co/mobie-test/recovery/resolve/0123456789abcdef0123456789abcdef01234567/$sourceFileName"
         val modelDir = File(File(context.filesDir, "models"), DownloadFilePolicy.storageKey(modelId))
         modelDir.deleteRecursively()
         modelDir.mkdirs()
