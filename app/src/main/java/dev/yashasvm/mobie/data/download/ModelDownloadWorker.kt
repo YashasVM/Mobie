@@ -57,6 +57,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
         val resumeMetadataFile = File(partial.path + DownloadSourceIdentity.RESUME_METADATA_SUFFIX)
         val metadataFile = File(modelDir, DownloadFilePolicy.METADATA_FILE)
         val verifiedMetadata = metadataFile.takeIf(File::isFile)?.let(::readProperties)
+        val resumeMetadata = resumeMetadataFile.takeIf(File::isFile)?.let(::readProperties)
 
         if (inputData.getBoolean(KEY_GATED, false) && HuggingFaceTokenStore(applicationContext).read().isNullOrBlank()) {
             return@withContext Result.failure(dataOf("This gated model requires a Hugging Face token"))
@@ -67,11 +68,22 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                 DownloadSourceIdentity.canReuseCompleted(verifiedMetadata, url, expectedSha) &&
                 isComplete(storageDestination, expectedSize, expectedSha, verifiedMetadata)
             ) {
-                return@withContext success(storageDestination, ModelFileVerification.localSha256(verifiedMetadata))
+                return@withContext completeInstall(
+                    storageDestination,
+                    resumeMetadataFile,
+                    ModelFileVerification.localSha256(verifiedMetadata),
+                )
             }
+
+            if (
+                DownloadSourceIdentity.canRecoverInstalled(resumeMetadata, url) &&
+                isComplete(storageDestination, expectedSize, expectedSha)
+            ) {
+                return@withContext completeInstall(storageDestination, resumeMetadataFile, sha256(storageDestination))
+            }
+
             if (storageDestination.exists()) storageDestination.delete()
 
-            val resumeMetadata = resumeMetadataFile.takeIf(File::isFile)?.let(::readProperties)
             if (partial.exists() && !DownloadSourceIdentity.matches(resumeMetadata, url)) {
                 partial.delete()
                 resumeMetadataFile.delete()
@@ -88,8 +100,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
             if (isComplete(partial, expectedSize, expectedSha)) {
                 val completedSha = sha256(partial)
                 finalizeFile(partial, storageDestination)
-                resumeMetadataFile.delete()
-                return@withContext success(storageDestination, completedSha)
+                return@withContext completeInstall(storageDestination, resumeMetadataFile, completedSha)
             }
 
             val remaining = DownloadFilePolicy.remainingBytes(expectedSize, downloaded)
@@ -114,8 +125,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                         if (isComplete(partial, expectedSize, expectedSha)) {
                             val completedSha = sha256(partial)
                             finalizeFile(partial, storageDestination)
-                            resumeMetadataFile.delete()
-                            return@withContext success(storageDestination, completedSha)
+                            return@withContext completeInstall(storageDestination, resumeMetadataFile, completedSha)
                         }
                         partial.delete()
                         resumeMetadataFile.delete()
@@ -199,8 +209,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                 return@withContext Result.failure(dataOf("Checksum validation failed"))
             }
             finalizeFile(partial, storageDestination)
-            resumeMetadataFile.delete()
-            success(storageDestination, transferSha)
+            completeInstall(storageDestination, resumeMetadataFile, transferSha)
         } catch (error: CancellationException) {
             throw error
         } catch (_: IOException) {
@@ -237,6 +246,12 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
         val partial = File(file.path + ".part")
         partial.outputStream().use { properties.store(it, null) }
         finalizeFile(partial, file)
+    }
+
+    private fun completeInstall(destination: File, resumeMetadataFile: File, verifiedSha256: String? = null): Result {
+        val result = success(destination, verifiedSha256)
+        resumeMetadataFile.delete()
+        return result
     }
 
     private fun finalizeFile(partial: File, destination: File) {
