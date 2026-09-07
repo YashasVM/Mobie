@@ -29,7 +29,8 @@ class CompletedInstallRecoveryTest {
         val modelId = "mobie-test/completed-install-recovery"
         val fileName = "recovery-test.litertlm"
         val payload = ByteArray(256 * 1024) { index -> (index * 17).toByte() }
-        val sourceUrl = "http://127.0.0.1:1/$fileName"
+        val sourceUrl =
+            "https://huggingface.co/mobie-test/recovery/resolve/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee/$fileName"
         val modelDir = File(File(context.filesDir, "models"), DownloadFilePolicy.storageKey(modelId))
         modelDir.deleteRecursively()
         modelDir.mkdirs()
