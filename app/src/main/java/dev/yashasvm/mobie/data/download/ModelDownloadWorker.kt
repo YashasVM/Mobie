@@ -55,8 +55,12 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
         val storageDestination = File(modelDir, DownloadFilePolicy.storageFileName(fileName))
         val partial = File(storageDestination.path + ".part")
         val resumeMetadataFile = File(partial.path + DownloadSourceIdentity.RESUME_METADATA_SUFFIX)
-        val metadataFile = File(modelDir, DownloadFilePolicy.METADATA_FILE)
-        val verifiedMetadata = metadataFile.takeIf(File::isFile)?.let(::readProperties)
+        val artifactMetadataFile = DownloadFilePolicy.artifactMetadataFile(modelDir, fileName)
+        val legacyMetadataFile = File(modelDir, DownloadFilePolicy.METADATA_FILE)
+        val verifiedMetadata = artifactMetadataFile.takeIf(File::isFile)?.let(::readProperties)
+            ?: legacyMetadataFile.takeIf(File::isFile)?.let(::readProperties)?.takeIf {
+                it.getProperty("sourceFileName") == fileName
+            }
         val resumeMetadata = resumeMetadataFile.takeIf(File::isFile)?.let(::readProperties)
 
         if (inputData.getBoolean(KEY_GATED, false) && HuggingFaceTokenStore(applicationContext).read().isNullOrBlank()) {
@@ -346,6 +350,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
     private fun writeMetadata(destination: File, verifiedSha256: String? = null) {
         val expectedSha = inputData.getString(KEY_SHA256).orEmpty()
         val trustedSha = verifiedSha256?.takeIf(String::isNotBlank) ?: expectedSha.takeIf(String::isNotBlank)
+        val sourceFileName = inputData.getString(KEY_FILE_NAME).orEmpty()
         val properties = Properties().apply {
             setProperty("modelId", inputData.getString(KEY_MODEL_ID).orEmpty())
             setProperty("title", inputData.getString(KEY_TITLE).orEmpty())
@@ -355,17 +360,22 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
             setProperty("license", inputData.getString(KEY_LICENSE).orEmpty())
             setProperty("gated", inputData.getBoolean(KEY_GATED, false).toString())
             setProperty("fileName", destination.name)
-            setProperty("sourceFileName", inputData.getString(KEY_FILE_NAME).orEmpty())
+            setProperty("sourceFileName", sourceFileName)
             setProperty("sha256", expectedSha)
             setProperty("quantization", inputData.getString(KEY_QUANTIZATION).orEmpty())
             DownloadSourceIdentity.stamp(this, inputData.getString(KEY_URL).orEmpty())
             ModelFileVerification.stampInstalledLength(this, destination)
             if (!trustedSha.isNullOrBlank()) ModelFileVerification.stamp(this, destination, trustedSha)
         }
-        val metadata = File(destination.parentFile, DownloadFilePolicy.METADATA_FILE)
-        val partial = File(metadata.path + ".part")
+        val parent = destination.parentFile ?: return
+        writePropertiesAtomically(DownloadFilePolicy.artifactMetadataFile(parent, sourceFileName), properties)
+        writePropertiesAtomically(File(parent, DownloadFilePolicy.METADATA_FILE), properties)
+    }
+
+    private fun writePropertiesAtomically(destination: File, properties: Properties) {
+        val partial = File(destination.path + ".part")
         partial.outputStream().use { properties.store(it, null) }
-        finalizeFile(partial, metadata)
+        finalizeFile(partial, destination)
     }
 
     private fun invalidInput(message: String) = Result.failure(dataOf(message))
