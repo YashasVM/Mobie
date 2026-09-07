@@ -57,7 +57,16 @@ jobs:
           profile: pixel_7_pro
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: ./gradlew --no-daemon connectedDebugAndroidTest
+          script: |
+            set +e
+            ./gradlew --no-daemon connectedDebugAndroidTest
+            status=$?
+            if [ "$status" -ne 0 ]; then
+              echo "::group::Instrumentation failure reports"
+              find app/build/outputs/androidTest-results/connected -type f -name '*.xml' -print -exec cat {} \; 2>/dev/null || true
+              echo "::endgroup::"
+            fi
+            exit "$status"
 
   runtime-e2e:
     needs: verify
