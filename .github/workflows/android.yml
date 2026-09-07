@@ -57,16 +57,7 @@ jobs:
           profile: pixel_7_pro
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: |
-            set +e
-            ./gradlew --no-daemon connectedDebugAndroidTest
-            status=$?
-            if [ "$status" -ne 0 ]; then
-              echo "::group::Instrumentation failure reports"
-              find app/build/outputs/androidTest-results/connected -type f -name '*.xml' -print -exec cat {} \; 2>/dev/null || true
-              echo "::endgroup::"
-            fi
-            exit "$status"
+          script: ./gradlew --no-daemon connectedDebugAndroidTest
       - name: Upload emulator smoke diagnostics
         if: always()
         uses: actions/upload-artifact@v4
