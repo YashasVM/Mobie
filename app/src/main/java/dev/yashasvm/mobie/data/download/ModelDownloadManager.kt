@@ -123,13 +123,11 @@ class ModelDownloadManager(context: Context) {
         .listFiles(File::isDirectory)
         .orEmpty()
         .mapNotNull { directory ->
-            val metadataFile = File(directory, DownloadFilePolicy.METADATA_FILE).takeIf(File::isFile)
-                ?: return@mapNotNull null
-            val properties = readProperties(metadataFile)
-            val storedFileName = properties.getProperty("fileName") ?: return@mapNotNull null
-            val file = File(directory, storedFileName).takeIf(File::isFile) ?: return@mapNotNull null
-            val expectedSha = properties.getProperty("sha256")?.ifBlank { null }
-            if (!verifiedOrValid(file, expectedSha, properties, metadataFile)) return@mapNotNull null
+            val resolved = resolveInstalledMetadata(directory) ?: return@mapNotNull null
+            val properties = resolved.properties
+            val file = resolved.file
+            val expectedSha = resolved.expectedSha
+            val storedFileName = file.name
             val sourceFileName = properties.getProperty("sourceFileName")?.ifBlank { null } ?: storedFileName
             val sourceUrl = properties.getProperty(DownloadSourceIdentity.SOURCE_URL_PROPERTY).orEmpty()
             val artifact = ModelArtifact(
@@ -172,6 +170,31 @@ class ModelDownloadManager(context: Context) {
         if (!cancelled) return@withContext false
 
         !directory.exists() || directory.deleteRecursively()
+    }
+
+    private fun resolveInstalledMetadata(directory: File): ResolvedInstall? {
+        val canonicalMetadataFile = File(directory, DownloadFilePolicy.METADATA_FILE)
+        val candidateMetadataFiles = buildList {
+            if (canonicalMetadataFile.isFile) add(canonicalMetadataFile)
+            directory.listFiles { file ->
+                file.isFile && file.name.startsWith(".artifact-") && file.name.endsWith(".properties")
+            }.orEmpty().forEach(::add)
+        }.distinctBy(File::getAbsolutePath)
+
+        for (metadataFile in candidateMetadataFiles) {
+            val properties = runCatching { readProperties(metadataFile) }.getOrNull() ?: continue
+            val modelId = properties.getProperty("modelId")?.takeIf(String::isNotBlank) ?: continue
+            if (directory.name != DownloadFilePolicy.storageKey(modelId)) continue
+            val storedFileName = properties.getProperty("fileName")?.takeIf(String::isNotBlank) ?: continue
+            val file = File(directory, storedFileName).takeIf(File::isFile) ?: continue
+            val expectedSha = properties.getProperty("sha256")?.ifBlank { null }
+            if (!verifiedOrValid(file, expectedSha, properties, metadataFile)) continue
+            if (metadataFile != canonicalMetadataFile) {
+                writePropertiesAtomically(canonicalMetadataFile, properties)
+            }
+            return ResolvedInstall(properties, file, expectedSha)
+        }
+        return null
     }
 
     private fun verifiedOrValid(
@@ -248,6 +271,12 @@ class ModelDownloadManager(context: Context) {
         "model-${modelId.hashCode()}-${artifact.fileName.hashCode()}"
 
     private fun modelWorkTag(modelId: String) = "model-storage-${DownloadFilePolicy.storageKey(modelId)}"
+
+    private data class ResolvedInstall(
+        val properties: Properties,
+        val file: File,
+        val expectedSha: String?,
+    )
 
     companion object {
         private const val CANCEL_WAIT_SECONDS = 10L
