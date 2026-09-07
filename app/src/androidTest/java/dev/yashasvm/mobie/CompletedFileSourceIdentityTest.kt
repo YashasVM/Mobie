@@ -31,23 +31,10 @@ class CompletedFileSourceIdentityTest {
         val destination = File(modelDir, DownloadFilePolicy.storageFileName(fileName))
         destination.writeBytes(ByteArray(64 * 1024) { index -> (index * 29).toByte() })
         val metadataFile = File(modelDir, DownloadFilePolicy.METADATA_FILE)
-        Properties().apply {
-            setProperty("modelId", modelId)
-            setProperty("fileName", destination.name)
-            setProperty("sourceFileName", fileName)
-            setProperty("installedLength", destination.length().toString())
-            DownloadSourceIdentity.stamp(this, oldSource)
-            metadataFile.outputStream().use { store(it, null) }
-        }
+        writeIdentityMetadata(metadataFile, modelId, fileName, destination, oldSource)
 
         val downloads = ModelDownloadManager(context)
-        val oldArtifact = ModelArtifact(
-            fileName = fileName,
-            downloadUrl = oldSource,
-            sizeBytes = destination.length(),
-            sha256 = null,
-            format = ModelFormat.LITERT_LM,
-        )
+        val oldArtifact = artifact(fileName, oldSource, destination.length())
         val newArtifact = oldArtifact.copy(downloadUrl = newSource)
 
         assertEquals(destination.absolutePath, downloads.completedFile(modelId, oldArtifact)?.absolutePath)
@@ -58,5 +45,85 @@ class CompletedFileSourceIdentityTest {
 
         modelDir.deleteRecursively()
         Unit
+    }
+
+    @Test
+    fun perArtifactIdentitySurvivesAnotherArtifactBecomingCanonical() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val modelId = "mobie-test/multi-artifact-source-identity"
+        val firstName = "model-q4.litertlm"
+        val secondName = "model-q8.litertlm"
+        val firstSource = "https://huggingface.co/example/model/resolve/rev-a/$firstName"
+        val secondSource = "https://huggingface.co/example/model/resolve/rev-b/$secondName"
+        val modelDir = File(File(context.filesDir, "models"), DownloadFilePolicy.storageKey(modelId))
+        modelDir.deleteRecursively()
+        modelDir.mkdirs()
+
+        val firstFile = File(modelDir, DownloadFilePolicy.storageFileName(firstName)).apply {
+            writeBytes(ByteArray(48 * 1024) { index -> (index * 11).toByte() })
+        }
+        val secondFile = File(modelDir, DownloadFilePolicy.storageFileName(secondName)).apply {
+            writeBytes(ByteArray(72 * 1024) { index -> (index * 17).toByte() })
+        }
+
+        writeIdentityMetadata(
+            DownloadFilePolicy.artifactMetadataFile(modelDir, firstName),
+            modelId,
+            firstName,
+            firstFile,
+            firstSource,
+        )
+        writeIdentityMetadata(
+            DownloadFilePolicy.artifactMetadataFile(modelDir, secondName),
+            modelId,
+            secondName,
+            secondFile,
+            secondSource,
+        )
+        writeIdentityMetadata(
+            File(modelDir, DownloadFilePolicy.METADATA_FILE),
+            modelId,
+            secondName,
+            secondFile,
+            secondSource,
+        )
+
+        val downloads = ModelDownloadManager(context)
+        assertEquals(
+            firstFile.absolutePath,
+            downloads.completedFile(modelId, artifact(firstName, firstSource, firstFile.length()))?.absolutePath,
+        )
+        assertEquals(
+            secondFile.absolutePath,
+            downloads.completedFile(modelId, artifact(secondName, secondSource, secondFile.length()))?.absolutePath,
+        )
+
+        modelDir.deleteRecursively()
+        Unit
+    }
+
+    private fun artifact(fileName: String, source: String, size: Long) = ModelArtifact(
+        fileName = fileName,
+        downloadUrl = source,
+        sizeBytes = size,
+        sha256 = null,
+        format = ModelFormat.LITERT_LM,
+    )
+
+    private fun writeIdentityMetadata(
+        metadataFile: File,
+        modelId: String,
+        sourceFileName: String,
+        destination: File,
+        source: String,
+    ) {
+        Properties().apply {
+            setProperty("modelId", modelId)
+            setProperty("fileName", destination.name)
+            setProperty("sourceFileName", sourceFileName)
+            setProperty("installedLength", destination.length().toString())
+            DownloadSourceIdentity.stamp(this, source)
+            metadataFile.outputStream().use { store(it, null) }
+        }
     }
 }
