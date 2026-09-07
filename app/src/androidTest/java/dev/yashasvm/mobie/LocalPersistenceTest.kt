@@ -5,6 +5,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import dev.yashasvm.mobie.data.history.ChatHistoryStore
 import dev.yashasvm.mobie.data.history.HistoryMessage
 import dev.yashasvm.mobie.data.download.DownloadFilePolicy
+import dev.yashasvm.mobie.data.download.DownloadSourceIdentity
 import dev.yashasvm.mobie.data.download.ModelDownloadManager
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -53,6 +54,7 @@ class LocalPersistenceTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val modelId = "test/artifact-identity"
         val sourceFileName = "Qwen3-0.6B-int4-ekv2048.litertlm"
+        val sourceUrl = "https://huggingface.co/example/model/resolve/0123456789abcdef/$sourceFileName"
         val directory = File(File(context.filesDir, "models"), DownloadFilePolicy.storageKey(modelId))
         directory.deleteRecursively()
         directory.mkdirs()
@@ -67,6 +69,8 @@ class LocalPersistenceTest {
             setProperty("fileName", artifactFile.name)
             setProperty("sourceFileName", sourceFileName)
             setProperty("quantization", "INT4")
+            setProperty("installedLength", artifactFile.length().toString())
+            DownloadSourceIdentity.stamp(this, sourceUrl)
         }.also { properties ->
             File(directory, DownloadFilePolicy.METADATA_FILE).outputStream().use { properties.store(it, null) }
         }
@@ -75,6 +79,7 @@ class LocalPersistenceTest {
         val entry = manager.installedModels().single { it.model.id == modelId }
         val artifact = entry.model.artifacts.single()
         assertEquals(sourceFileName, artifact.fileName)
+        assertEquals(sourceUrl, artifact.downloadUrl)
         assertEquals(2_048, artifact.contextWindowTokens)
         assertEquals("INT4", artifact.quantization)
         assertEquals(artifactFile.absolutePath, manager.completedFile(modelId, artifact)?.absolutePath)
