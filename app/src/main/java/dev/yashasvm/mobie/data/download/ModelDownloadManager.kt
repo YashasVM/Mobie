@@ -268,7 +268,7 @@ class ModelDownloadManager(context: Context) {
     }
 
     private fun workName(modelId: String, artifact: ModelArtifact) =
-        "model-${modelId.hashCode()}-${artifact.fileName.hashCode()}"
+        DownloadFilePolicy.workKey(modelId, artifact.fileName)
 
     private fun modelWorkTag(modelId: String) = "model-storage-${DownloadFilePolicy.storageKey(modelId)}"
 
