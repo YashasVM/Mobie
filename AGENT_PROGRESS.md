@@ -5,6 +5,7 @@
 - Pinned Hugging Face model-card and `.litertlm` artifact requests to the exact discovered Hub commit SHA, made model-detail caching revision-aware, and bound completed unverified files plus resumable `.part` files to their exact source URL so mutable `main` updates cannot reuse or append stale bytes across revisions.
 - Made completed model installs crash-recoverable: exact-source sidecars now survive until installed metadata is atomically committed, so a process death after the final model move can repair metadata locally without re-downloading; mismatched revisions remain untrusted.
 - Enforced exact source identity when reusing completed checksum-less models through `ModelDownloadManager.completedFile()`, and restored persisted source URLs when reconstructing installed artifacts so legitimate same-revision models remain reusable after app restart.
+- Preserved independent source/checksum identity for every artifact sharing a model directory, so installing or downloading one artifact no longer overwrites another artifact's revision metadata or forces valid checksum-less files to re-download.
 - Made model deletion wait for WorkManager download cancellation before removing model storage, and extended that cancellation to every artifact download sharing the model directory so concurrent multi-artifact writes cannot race recursive deletion; deletion fails closed if cancellation cannot be confirmed.
 - Verified real Qwen3-0.6B INT4 LiteRT-LM download → load → repeated generation → reset/history restore → unload/reload → generation.
 - Added real TTFT, latency, prefill/decode throughput, token-count, app-RAM, cold-load, and warm-cache telemetry.
@@ -22,6 +23,7 @@
 - Thermal protection, long-context pressure, interrupted-generation recovery, and GPU vision still need representative physical-device testing.
 
 ## Tests actually performed
+- `44123014`: full Android CI passed per-artifact source identity retention: JVM tests/lint/debug APK, emulator smoke covering two checksum-less artifacts retaining independent exact-source identity and reuse, real Qwen LiteRT-LM text E2E, and real SmolVLM2-500M vision E2E.
 - `6127f5ab`: full Android CI passed multi-artifact cancellation-before-delete handling: JVM tests/lint/debug APK, emulator smoke with both artifact jobs reaching cancellation before model storage removal, real Qwen LiteRT-LM text E2E, and real SmolVLM2-500M vision E2E.
 - `1d2ee10b`: full Android CI passed cancellation-before-delete handling: JVM tests/lint/debug APK, emulator smoke, real Qwen LiteRT-LM text E2E, and real SmolVLM2-500M vision E2E.
 - `42a8bd2a`: full Android CI passed completed-model source-identity reconstruction and reuse after restart: JVM tests/lint/debug APK, emulator smoke, real Qwen LiteRT-LM text E2E, and real SmolVLM2-500M vision E2E.
@@ -54,6 +56,7 @@
 - Delete a model while multiple real artifact downloads are actively writing, and verify every job is cancelled before storage removal with no re-created `.part`/metadata files afterward.
 - Force-stop/kill Mobie immediately after a model finishes downloading but before installation state appears, relaunch it, and confirm the complete model is recovered without network transfer and the sidecar is removed only after metadata exists.
 - Publish a new Hugging Face repo revision with the same model ID/file name/size and confirm Mobie refuses to reuse the older completed file or `.part` bytes unless a checksum independently proves the completed artifact.
+- Verify multiple checksum-less artifacts for one model retain independent persisted source URLs after app restart and each remains reusable only for its own revision.
 - Verify a checksum-less installed model still resolves to the persisted exact source URL after app restart, and that `completedFile()` accepts only the same revision while rejecting an otherwise-identical different revision.
 - Verify newly discovered Hugging Face artifacts use commit-pinned `/resolve/<sha>/...` URLs and metadata/detail caching switches atomically to new SHAs.
 - On representative arm64 hardware, repeat the vision restore → text → replacement-image → text flow and verify GPU initialization/fallback plus memory/thermal behavior.
