@@ -54,4 +54,29 @@ class DownloadSourceIdentityTest {
         assertFalse(DownloadSourceIdentity.matches(Properties(), url))
         assertFalse(DownloadSourceIdentity.canReuseCompleted(Properties(), url, expectedSha256 = null))
     }
+
+    @Test
+    fun `matching resume sidecar can recover interrupted installed file`() {
+        val properties = Properties()
+        val url = "https://huggingface.co/acme/model/resolve/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/model.litertlm"
+        DownloadSourceIdentity.stamp(properties, url)
+
+        assertTrue(DownloadSourceIdentity.canRecoverInstalled(properties, url))
+    }
+
+    @Test
+    fun `resume sidecar from another revision cannot recover installed file`() {
+        val properties = Properties()
+        DownloadSourceIdentity.stamp(
+            properties,
+            "https://huggingface.co/acme/model/resolve/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/model.litertlm",
+        )
+
+        assertFalse(
+            DownloadSourceIdentity.canRecoverInstalled(
+                properties,
+                "https://huggingface.co/acme/model/resolve/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/model.litertlm",
+            ),
+        )
+    }
 }
