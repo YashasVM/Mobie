@@ -3,6 +3,7 @@
 ## Major changes completed this week
 - Hardened resumable Hugging Face downloads with strict range/size validation, retained partials, cancellation, integrity checks, storage admission, and revision-bound reuse.
 - Pinned Hugging Face model-card and `.litertlm` artifact requests to the exact discovered Hub commit SHA, made model-detail caching revision-aware, and bound completed unverified files plus resumable `.part` files to their exact source URL so mutable `main` updates cannot reuse or append stale bytes across revisions.
+- Made completed model installs crash-recoverable: exact-source sidecars now survive until installed metadata is atomically committed, so a process death after the final model move can repair metadata locally without re-downloading; mismatched revisions remain untrusted.
 - Verified real Qwen3-0.6B INT4 LiteRT-LM download → load → repeated generation → reset/history restore → unload/reload → generation.
 - Added real TTFT, latency, prefill/decode throughput, token-count, app-RAM, cold-load, and warm-cache telemetry.
 - Improved device/model recommendations using RAM pressure, storage headroom, quantization, artifact size, context/KV estimates, supported backend, and hardware-target filtering.
@@ -19,6 +20,7 @@
 - Thermal protection, long-context pressure, interrupted-generation recovery, and GPU vision still need representative physical-device testing.
 
 ## Tests actually performed
+- `cdfa0b06`: full Android CI passed completed-install crash recovery: JVM tests/lint/debug APK, emulator smoke with a no-network recovery test for a fully moved model lacking final metadata, real Qwen LiteRT-LM text E2E, and real SmolVLM2-500M vision E2E.
 - `8e9afbac`: full Android CI passed revision-bound completed-file/partial-download identity coverage, JVM tests/lint/debug APK, emulator smoke, real Qwen LiteRT-LM text E2E, and real SmolVLM2-500M vision E2E.
 - Revision-bound download identity regression tests cover same-source reuse, cross-revision rejection, legacy metadata rejection, and checksum-proven completed-file reuse.
 - `64a87e22`: Android CI passed revision-aware Hugging Face detail-cache coverage on top of commit-pinned Hub URLs.
@@ -44,6 +46,7 @@
 - Main-model GPU/NPU and more than two CPU inference threads remain disabled pending representative handset evidence.
 
 ## Items to inspect before merging
+- Force-stop/kill Mobie immediately after a model finishes downloading but before installation state appears, relaunch it, and confirm the complete model is recovered without network transfer and the sidecar is removed only after metadata exists.
 - Publish a new Hugging Face repo revision with the same model ID/file name/size and confirm Mobie refuses to reuse the older completed file or `.part` bytes unless a checksum independently proves the completed artifact.
 - Verify newly discovered Hugging Face artifacts use commit-pinned `/resolve/<sha>/...` URLs and metadata/detail caching switches atomically to new SHAs.
 - On representative arm64 hardware, repeat the vision restore → text → replacement-image → text flow and verify GPU initialization/fallback plus memory/thermal behavior.
