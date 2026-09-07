@@ -47,8 +47,13 @@ class ModelDownloadManager(context: Context) {
 
     suspend fun completedFile(modelId: String, artifact: ModelArtifact): File? = kotlinx.coroutines.withContext(Dispatchers.IO) {
         val directory = File(File(appContext.filesDir, "models"), DownloadFilePolicy.storageKey(modelId))
-        val metadataFile = File(directory, DownloadFilePolicy.METADATA_FILE)
+        val metadataFile = DownloadFilePolicy.artifactMetadataFile(directory, artifact.fileName)
+        val legacyMetadataFile = File(directory, DownloadFilePolicy.METADATA_FILE)
         val metadata = metadataFile.takeIf(File::isFile)?.let(::readProperties)
+            ?: legacyMetadataFile.takeIf(File::isFile)?.let(::readProperties)?.takeIf {
+                it.getProperty("sourceFileName") == artifact.fileName
+            }
+        val verificationMetadataFile = metadataFile.takeIf(File::isFile) ?: legacyMetadataFile
         listOf(DownloadFilePolicy.storageFileName(artifact.fileName), DownloadFilePolicy.safeFileName(artifact.fileName))
             .asSequence()
             .map { File(directory, it) }
@@ -56,7 +61,7 @@ class ModelDownloadManager(context: Context) {
                 file.isFile &&
                     (artifact.sizeBytes <= 0 || file.length() == artifact.sizeBytes) &&
                     DownloadSourceIdentity.canReuseCompleted(metadata, artifact.downloadUrl, artifact.sha256) &&
-                    verifiedOrValid(file, artifact.sha256, metadata, metadataFile)
+                    verifiedOrValid(file, artifact.sha256, metadata, verificationMetadataFile)
             }
     }
 
