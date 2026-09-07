@@ -93,6 +93,7 @@ class ModelDownloadManager(context: Context) {
             .setInputData(input)
             .setBackoffCriteria(androidx.work.BackoffPolicy.EXPONENTIAL, 15, TimeUnit.SECONDS)
             .addTag("model-download")
+            .addTag(modelWorkTag(model.id))
             .build()
         workManager.enqueueUniqueWork(workName(model.id, artifact), ExistingWorkPolicy.KEEP, request)
         return request.id
@@ -152,7 +153,6 @@ class ModelDownloadManager(context: Context) {
         .sortedBy { it.model.title.lowercase() }
 
     suspend fun deleteInstalled(model: AiModel): Boolean = kotlinx.coroutines.withContext(Dispatchers.IO) {
-        val artifact = model.bestArtifact ?: return@withContext false
         val directory = File(File(appContext.filesDir, "models"), DownloadFilePolicy.storageKey(model.id))
         val metadata = File(directory, DownloadFilePolicy.METADATA_FILE)
         val storedId = metadata.takeIf(File::isFile)?.inputStream()?.use { input ->
@@ -161,7 +161,7 @@ class ModelDownloadManager(context: Context) {
         if (directory.exists() && storedId != model.id) return@withContext false
 
         val cancelled = runCatching {
-            workManager.cancelUniqueWork(workName(model.id, artifact)).result.get(CANCEL_WAIT_SECONDS, TimeUnit.SECONDS)
+            workManager.cancelAllWorkByTag(modelWorkTag(model.id)).result.get(CANCEL_WAIT_SECONDS, TimeUnit.SECONDS)
             true
         }.getOrDefault(false)
         if (!cancelled) return@withContext false
@@ -241,6 +241,8 @@ class ModelDownloadManager(context: Context) {
 
     private fun workName(modelId: String, artifact: ModelArtifact) =
         "model-${modelId.hashCode()}-${artifact.fileName.hashCode()}"
+
+    private fun modelWorkTag(modelId: String) = "model-storage-${DownloadFilePolicy.storageKey(modelId)}"
 
     companion object {
         private const val CANCEL_WAIT_SECONDS = 10L
