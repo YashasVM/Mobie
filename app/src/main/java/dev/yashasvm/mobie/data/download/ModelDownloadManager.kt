@@ -55,6 +55,7 @@ class ModelDownloadManager(context: Context) {
             .firstOrNull { file ->
                 file.isFile &&
                     (artifact.sizeBytes <= 0 || file.length() == artifact.sizeBytes) &&
+                    DownloadSourceIdentity.canReuseCompleted(metadata, artifact.downloadUrl, artifact.sha256) &&
                     verifiedOrValid(file, artifact.sha256, metadata, metadataFile)
             }
     }
