@@ -5,6 +5,7 @@
 - Pinned Hugging Face model-card and `.litertlm` artifact requests to the exact discovered Hub commit SHA, made model-detail caching revision-aware, and bound completed unverified files plus resumable `.part` files to their exact source URL so mutable `main` updates cannot reuse or append stale bytes across revisions.
 - Made completed model installs crash-recoverable: exact-source sidecars now survive until installed metadata is atomically committed, so a process death after the final model move can repair metadata locally without re-downloading; mismatched revisions remain untrusted.
 - Enforced exact source identity when reusing completed checksum-less models through `ModelDownloadManager.completedFile()`, and restored persisted source URLs when reconstructing installed artifacts so legitimate same-revision models remain reusable after app restart.
+- Made model deletion wait for WorkManager download cancellation before removing model storage, preventing active download I/O from racing recursive deletion; deletion fails closed if cancellation cannot be confirmed.
 - Verified real Qwen3-0.6B INT4 LiteRT-LM download → load → repeated generation → reset/history restore → unload/reload → generation.
 - Added real TTFT, latency, prefill/decode throughput, token-count, app-RAM, cold-load, and warm-cache telemetry.
 - Improved device/model recommendations using RAM pressure, storage headroom, quantization, artifact size, context/KV estimates, supported backend, and hardware-target filtering.
@@ -16,11 +17,12 @@
 - Made explicit LiteRT context metadata a hard upper bound; packages below Mobie's 1,024-token practical minimum are rejected consistently.
 
 ## Important work in progress
-- Continue auditing download/install identity and crash-recovery paths for stale or partially replaced artifacts.
+- Continue auditing download/install identity, deletion, and crash-recovery paths for stale, partially replaced, or concurrently accessed artifacts.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second without enabling unvalidated main-model GPU/NPU execution.
 - Thermal protection, long-context pressure, interrupted-generation recovery, and GPU vision still need representative physical-device testing.
 
 ## Tests actually performed
+- `1d2ee10b`: full Android CI passed cancellation-before-delete handling: JVM tests/lint/debug APK, emulator smoke, real Qwen LiteRT-LM text E2E, and real SmolVLM2-500M vision E2E.
 - `42a8bd2a`: full Android CI passed completed-model source-identity reconstruction and reuse after restart: JVM tests/lint/debug APK, emulator smoke, real Qwen LiteRT-LM text E2E, and real SmolVLM2-500M vision E2E.
 - `cdfa0b06`: full Android CI passed completed-install crash recovery: JVM tests/lint/debug APK, emulator smoke with a no-network recovery test for a fully moved model lacking final metadata, real Qwen LiteRT-LM text E2E, and real SmolVLM2-500M vision E2E.
 - `8e9afbac`: full Android CI passed revision-bound completed-file/partial-download identity coverage, JVM tests/lint/debug APK, emulator smoke, real Qwen LiteRT-LM text E2E, and real SmolVLM2-500M vision E2E.
@@ -48,6 +50,7 @@
 - Main-model GPU/NPU and more than two CPU inference threads remain disabled pending representative handset evidence.
 
 ## Items to inspect before merging
+- Delete a model while a real download is actively writing, and verify cancellation completes before storage removal with no re-created `.part`/metadata files afterward.
 - Force-stop/kill Mobie immediately after a model finishes downloading but before installation state appears, relaunch it, and confirm the complete model is recovered without network transfer and the sidecar is removed only after metadata exists.
 - Publish a new Hugging Face repo revision with the same model ID/file name/size and confirm Mobie refuses to reuse the older completed file or `.part` bytes unless a checksum independently proves the completed artifact.
 - Verify a checksum-less installed model still resolves to the persisted exact source URL after app restart, and that `completedFile()` accepts only the same revision while rejecting an otherwise-identical different revision.
