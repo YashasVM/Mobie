@@ -153,14 +153,20 @@ class ModelDownloadManager(context: Context) {
 
     suspend fun deleteInstalled(model: AiModel): Boolean = kotlinx.coroutines.withContext(Dispatchers.IO) {
         val artifact = model.bestArtifact ?: return@withContext false
-        cancel(model, artifact)
         val directory = File(File(appContext.filesDir, "models"), DownloadFilePolicy.storageKey(model.id))
-        if (!directory.exists()) return@withContext true
         val metadata = File(directory, DownloadFilePolicy.METADATA_FILE)
         val storedId = metadata.takeIf(File::isFile)?.inputStream()?.use { input ->
             Properties().apply { load(input) }.getProperty("modelId")
         }
-        storedId == model.id && directory.deleteRecursively()
+        if (directory.exists() && storedId != model.id) return@withContext false
+
+        val cancelled = runCatching {
+            workManager.cancelUniqueWork(workName(model.id, artifact)).result.get(CANCEL_WAIT_SECONDS, TimeUnit.SECONDS)
+            true
+        }.getOrDefault(false)
+        if (!cancelled) return@withContext false
+
+        !directory.exists() || directory.deleteRecursively()
     }
 
     private fun verifiedOrValid(
@@ -235,4 +241,8 @@ class ModelDownloadManager(context: Context) {
 
     private fun workName(modelId: String, artifact: ModelArtifact) =
         "model-${modelId.hashCode()}-${artifact.fileName.hashCode()}"
+
+    companion object {
+        private const val CANCEL_WAIT_SECONDS = 10L
+    }
 }
