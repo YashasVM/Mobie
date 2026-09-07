@@ -14,10 +14,12 @@
 - Made explicit LiteRT context metadata a hard upper bound; packages below Mobie's 1,024-token practical minimum are rejected consistently.
 
 ## Important work in progress
+- Revision-pin hardening now also binds completed unverified model files and resumable `.part` files to their exact source URL so a new Hub revision cannot silently reuse or append to old bytes; exact-tip Android CI is pending.
 - Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second without enabling unvalidated main-model GPU/NPU execution.
 - Thermal protection, long-context pressure, interrupted-generation recovery, and GPU vision still need representative physical-device testing.
 
 ## Tests actually performed
+- New revision-bound download identity regression tests cover same-source reuse, cross-revision rejection, legacy metadata rejection, and checksum-proven completed-file reuse; exact-tip Android CI pending.
 - `64a87e22`: Android CI passed revision-aware Hugging Face detail-cache coverage on top of commit-pinned Hub URLs.
 - `58e093c`: Android CI passed commit-pinned Hugging Face discovery/download coverage.
 - `6e7c6e8b`: full Android CI passed: JVM tests/lint/debug APK, emulator smoke, real Qwen LiteRT-LM text E2E, and real SmolVLM2-500M vision E2E.
@@ -41,7 +43,8 @@
 - Main-model GPU/NPU and more than two CPU inference threads remain disabled pending representative handset evidence.
 
 ## Items to inspect before merging
-- Verify newly discovered Hugging Face artifacts use commit-pinned `/resolve/<sha>/...` URLs; publish a new repo revision during the cache TTL and confirm metadata/downloads switch atomically to the new SHA while an existing interrupted download stays on its original immutable revision.
+- Publish a new Hugging Face repo revision with the same model ID/file name/size and confirm Mobie refuses to reuse the older completed file or `.part` bytes unless a checksum independently proves the completed artifact.
+- Verify newly discovered Hugging Face artifacts use commit-pinned `/resolve/<sha>/...` URLs and metadata/detail caching switches atomically to new SHAs.
 - On representative arm64 hardware, repeat the vision restore → text → replacement-image → text flow and verify GPU initialization/fallback plus memory/thermal behavior.
 - During a long real generation, press Stop repeatedly and verify UI responsiveness, cancellation latency, post-cancel recovery, and native-resource behavior.
 - Compare recommendation/runtime selected context for 32K/64K artifacts on a RAM-constrained phone and measure app RAM, TTFT, decode and prefill throughput.
