@@ -6,6 +6,7 @@
 - Made completed model installs crash-recoverable: exact-source sidecars now survive until installed metadata is atomically committed, so a process death after the final model move can repair metadata locally without re-downloading; mismatched revisions remain untrusted.
 - Enforced exact source identity when reusing completed checksum-less models through `ModelDownloadManager.completedFile()`, and restored persisted source URLs when reconstructing installed artifacts so legitimate same-revision models remain reusable after app restart.
 - Preserved independent source/checksum identity for every artifact sharing a model directory, so installing or downloading one artifact no longer overwrites another artifact's revision metadata or forces valid checksum-less files to re-download.
+- Recovered interrupted installs from validated per-artifact metadata when canonical `.model.properties` is missing or unusable, recreating canonical metadata locally without network transfer while preserving exact source identity.
 - Made model deletion wait for WorkManager download cancellation before removing model storage, and extended that cancellation to every artifact download sharing the model directory so concurrent multi-artifact writes cannot race recursive deletion; deletion fails closed if cancellation cannot be confirmed.
 - Verified real Qwen3-0.6B INT4 LiteRT-LM download → load → repeated generation → reset/history restore → unload/reload → generation.
 - Added real TTFT, latency, prefill/decode throughput, token-count, app-RAM, cold-load, and warm-cache telemetry.
@@ -23,6 +24,7 @@
 - Thermal protection, long-context pressure, interrupted-generation recovery, and GPU vision still need representative physical-device testing.
 
 ## Tests actually performed
+- `51866360`: full Android CI passed installed-metadata crash recovery after instrumentation compile fix: JVM tests/lint/debug APK, emulator smoke covering recovery from per-artifact metadata with canonical metadata missing, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
 - `44123014`: full Android CI passed per-artifact source identity retention: JVM tests/lint/debug APK, emulator smoke covering two checksum-less artifacts retaining independent exact-source identity and reuse, real Qwen LiteRT-LM text E2E, and real SmolVLM2-500M vision E2E.
 - `6127f5ab`: full Android CI passed multi-artifact cancellation-before-delete handling: JVM tests/lint/debug APK, emulator smoke with both artifact jobs reaching cancellation before model storage removal, real Qwen LiteRT-LM text E2E, and real SmolVLM2-500M vision E2E.
 - `1d2ee10b`: full Android CI passed cancellation-before-delete handling: JVM tests/lint/debug APK, emulator smoke, real Qwen LiteRT-LM text E2E, and real SmolVLM2-500M vision E2E.
