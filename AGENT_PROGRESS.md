@@ -14,13 +14,14 @@
 - Made LiteRT generation Flow state collection-local so recollecting the same request cannot reuse prior output or contaminate committed conversation history.
 - Guarded model load/unload/reset lifecycle work with monotonic operation IDs so stale queued work cannot publish READY or unload a newer model after rapid model switches, history changes, or leave/re-enter transitions.
 - Serialized selected-model deletion with the runtime lifecycle so native resources are released before model storage is removed.
+- Tracked native runtime ownership independently from UI selection and fail closed while ownership is uncertain, so rapid model switching cannot delete files that a native runtime may still hold.
 
 ## Important work in progress
-- Close the remaining deletion transition race where model A can become unselected before its native runtime has actually finished unloading; native runtime ownership is now tracked independently from UI selection and exact-tip CI is pending.
 - Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts.
 - Physical-device validation is still needed for thermal/LMK behavior, long-context pressure, interrupted generation, GPU vision, and CPU thread policy.
 
 ## Tests actually performed
+- `ad7e5789`: full Android CI passed native runtime ownership/deletion protection: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
 - `dee93cce`: full Android CI passed selected-model deletion/runtime serialization: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
 - `114d45d2`: full Android CI passed stale runtime lifecycle protection: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
 - `30e8568d`: full Android CI passed the repeated-generation-Flow regression with a real Qwen LiteRT model, plus JVM tests/lint/debug APK, emulator instrumentation, and real LiteRT-LM vision E2E.
@@ -45,7 +46,6 @@
 - Upstream LiteRT-LM streaming can lose terminal callbacks; a truly wedged native call may retain detached worker/native resources until process restart.
 - GGUF remains intentionally unavailable for v1; supported published LiteRT-LM artifacts are the priority.
 - Main-model GPU/NPU execution remains disabled pending representative handset evidence.
-- Unselected-model deletion during rapid model switching has a branch-tip fix pending CI validation; until validated, treat that transition as an active lifecycle risk.
 
 ## Items to inspect before merging
 - Interrupt a checksum-less download from a mutable Hub revision, move that revision to different bytes, and verify Mobie restarts rather than appending/reusing the old partial; repeat with an immutable commit-pinned URL and verify safe resume/reuse.
