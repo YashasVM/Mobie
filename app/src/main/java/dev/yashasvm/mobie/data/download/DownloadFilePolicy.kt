@@ -26,6 +26,9 @@ internal object DownloadFilePolicy {
     fun artifactMetadataFile(directory: File, fileName: String): File =
         File(directory, ".artifact-${fileIdentity(fileName)}.properties")
 
+    fun metadataPartialFile(destination: File, operationId: String): File =
+        File(destination.parentFile, "${destination.name}.$operationId.part")
+
     fun workKey(modelId: String, fileName: String): String =
         "model-${storageKey(modelId)}-${fileIdentity(fileName)}"
 
