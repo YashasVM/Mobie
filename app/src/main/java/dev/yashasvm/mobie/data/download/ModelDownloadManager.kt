@@ -163,11 +163,19 @@ class ModelDownloadManager(context: Context) {
 
     suspend fun deleteInstalled(model: AiModel): Boolean = kotlinx.coroutines.withContext(Dispatchers.IO) {
         val directory = File(File(appContext.filesDir, "models"), DownloadFilePolicy.storageKey(model.id))
-        val metadata = File(directory, DownloadFilePolicy.METADATA_FILE)
-        val storedId = metadata.takeIf(File::isFile)?.inputStream()?.use { input ->
-            Properties().apply { load(input) }.getProperty("modelId")
-        }
-        if (directory.exists() && storedId != model.id) return@withContext false
+        val canonicalMetadata = File(directory, DownloadFilePolicy.METADATA_FILE)
+        val ownershipMetadata = buildList {
+            if (canonicalMetadata.isFile) add(canonicalMetadata)
+            directory.listFiles { file ->
+                file.isFile && file.name.startsWith(".artifact-") && file.name.endsWith(".properties")
+            }.orEmpty().forEach(::add)
+        }.distinctBy(File::getAbsolutePath)
+        val storedIds = ownershipMetadata.mapNotNull { metadataFile ->
+            runCatching { readProperties(metadataFile).getProperty("modelId") }
+                .getOrNull()
+                ?.takeIf(String::isNotBlank)
+        }.toSet()
+        if (directory.exists() && storedIds != setOf(model.id)) return@withContext false
 
         val cancelled = runCatching {
             workManager.cancelAllWorkByTag(modelWorkTag(model.id)).result.get(CANCEL_WAIT_SECONDS, TimeUnit.SECONDS)
