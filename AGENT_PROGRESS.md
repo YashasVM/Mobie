@@ -15,13 +15,15 @@
 - Guarded model load/unload/reset lifecycle work with monotonic operation IDs so stale queued work cannot publish READY or unload a newer model after rapid model switches, history changes, or leave/re-enter transitions.
 - Serialized selected-model deletion with the runtime lifecycle so native resources are released before model storage is removed.
 - Tracked native runtime ownership independently from UI selection and fail closed while ownership is uncertain, so rapid model switching cannot delete files that a native runtime may still hold.
+- Completed fail-closed recovery after stalled native inference: watchdog timeouts mark the runtime unsafe, block reuse, and bound native unload so model switching/deletion cannot wait forever behind a wedged generation call; reuse is allowed only after cleanup succeeds.
 
 ## Important work in progress
-- `9ec0d9b7`: fail-closed recovery after a stalled native inference is pending exact-tip CI. Watchdog timeouts now mark the runtime unsafe, block reuse, and bound native unload so model switching/deletion cannot wait forever behind a wedged generation call; reuse is allowed again only after cleanup actually succeeds.
+- Fix concurrent metadata publication for multi-artifact downloads: workers currently share the same `.model.properties.part` temporary path when writing canonical model metadata, so simultaneous artifact completion can race even though the artifact files themselves are independent.
 - Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts.
 - Physical-device validation is still needed for thermal/LMK behavior, long-context pressure, interrupted generation, GPU vision, and CPU thread policy.
 
 ## Tests actually performed
+- `0fedffd2`: full Android CI passed deterministic stalled-unload recovery coverage: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
 - `ad7e5789`: full Android CI passed native runtime ownership/deletion protection: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
 - `dee93cce`: full Android CI passed selected-model deletion/runtime serialization: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
 - `114d45d2`: full Android CI passed stale runtime lifecycle protection: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
@@ -44,12 +46,14 @@
 
 ## Known problems / regressions
 - Physical-device thermal/LMK behavior, 32K/64K context pressure, interrupted-generation recovery, GPU vision, and >2 CPU-thread performance remain unvalidated on representative phones.
-- Upstream LiteRT-LM streaming can lose terminal callbacks; a truly wedged JNI call may still retain detached worker/native resources until process restart. The new fail-closed lifecycle protection prevents reuse/deletion over uncertain native state but is pending exact-tip CI.
+- Upstream LiteRT-LM streaming can lose terminal callbacks; a truly wedged JNI call may still retain detached worker/native resources until process restart. Mobie now fails closed after watchdog timeout so it does not reuse/delete over uncertain native state.
+- Concurrent artifact workers can currently collide while atomically replacing the shared canonical `.model.properties` metadata because they use the same sibling `.part` filename; artifact-specific metadata remains independently recoverable, but a worker can still fail spuriously during simultaneous completion.
 - GGUF remains intentionally unavailable for v1; supported published LiteRT-LM artifacts are the priority.
 - Main-model GPU/NPU execution remains disabled pending representative handset evidence.
 
 ## Items to inspect before merging
 - Interrupt a checksum-less download from a mutable Hub revision, move that revision to different bytes, and verify Mobie restarts rather than appending/reusing the old partial; repeat with an immutable commit-pinned URL and verify safe resume/reuse.
+- Complete two artifact downloads for the same model at nearly the same time and verify canonical metadata publication cannot make either otherwise-successful worker fail; artifact-specific metadata must remain valid for both files.
 - Delete a model while multiple real artifact downloads are writing and verify all jobs cancel before storage removal with no recreated `.part` or metadata afterward.
 - Load model A, switch to model B, immediately delete A while the native transition is still in flight, and verify A is unloaded before its files are removed without unloading a fully loaded B.
 - Delete the currently selected/loaded model and immediately switch/re-enter chat; verify native resources close before storage removal and no stale load can reopen the deleted artifact.
