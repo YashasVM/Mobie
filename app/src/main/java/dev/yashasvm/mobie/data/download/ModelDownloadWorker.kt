@@ -64,6 +64,9 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                 it.getProperty("sourceFileName") == fileName
             }
         val resumeMetadata = resumeMetadataFile.takeIf(File::isFile)?.let(::readProperties)
+        val recoverySize = expectedSize.takeIf { it > 0 }
+            ?: DownloadSourceIdentity.resolvedLength(resumeMetadata)
+            ?: 0L
 
         if (inputData.getBoolean(KEY_GATED, false) && HuggingFaceTokenStore(applicationContext).read().isNullOrBlank()) {
             return@withContext Result.failure(dataOf("This gated model requires a Hugging Face token"))
@@ -83,7 +86,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
 
             if (
                 DownloadSourceIdentity.canRecoverInstalled(resumeMetadata, url) &&
-                isComplete(storageDestination, expectedSize, expectedSha)
+                isComplete(storageDestination, recoverySize, expectedSha)
             ) {
                 return@withContext completeInstall(storageDestination, resumeMetadataFile, sha256(storageDestination))
             }
@@ -98,20 +101,20 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
             }
 
             var downloaded = partial.takeIf(File::exists)?.length() ?: 0
-            if (expectedSize > 0 && downloaded > expectedSize) {
+            if (recoverySize > 0 && downloaded > recoverySize) {
                 partial.delete()
                 resumeMetadataFile.delete()
                 downloaded = 0
             }
-            if (isComplete(partial, expectedSize, expectedSha)) {
+            if (isComplete(partial, recoverySize, expectedSha)) {
                 val completedSha = sha256(partial)
                 currentCoroutineContext().ensureActive()
                 finalizeFile(partial, storageDestination)
                 return@withContext completeInstall(storageDestination, resumeMetadataFile, completedSha)
             }
 
-            val remaining = DownloadFilePolicy.remainingBytes(expectedSize, downloaded)
-            if (expectedSize > 0 && remaining > modelDir.usableSpace) {
+            val remaining = DownloadFilePolicy.remainingBytes(recoverySize, downloaded)
+            if (recoverySize > 0 && remaining > modelDir.usableSpace) {
                 return@withContext Result.failure(dataOf("Not enough free storage"))
             }
 
@@ -120,7 +123,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                 HuggingFaceTokenStore(applicationContext).read()?.let { header("Authorization", "Bearer $it") }
             }.build()
 
-            var transferTotal = expectedSize
+            var transferTotal = recoverySize
             var transferSha: String? = null
             client.newCall(request).awaitResponse().use { response ->
                 when (response.code) {
@@ -129,7 +132,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                     )
                     404 -> return@withContext Result.failure(dataOf("Model artifact was not found"))
                     416 -> {
-                        if (isComplete(partial, expectedSize, expectedSha)) {
+                        if (isComplete(partial, recoverySize, expectedSha)) {
                             val completedSha = sha256(partial)
                             currentCoroutineContext().ensureActive()
                             finalizeFile(partial, storageDestination)
@@ -149,7 +152,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                 if (isPartialResponse && !DownloadResponsePolicy.isValidResumeResponse(
                         contentRangeHeader = response.header("Content-Range"),
                         expectedStart = downloaded,
-                        expectedTotalBytes = expectedSize,
+                        expectedTotalBytes = recoverySize,
                     )
                 ) {
                     partial.delete()
@@ -167,7 +170,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                 val body = response.body ?: return@withContext Result.retry()
                 val startAt = if (append) downloaded else 0
                 transferTotal = DownloadResponsePolicy.resolvedTotalBytes(
-                    expectedTotalBytes = expectedSize,
+                    expectedTotalBytes = recoverySize,
                     contentRangeHeader = response.header("Content-Range"),
                     bodyLength = body.contentLength(),
                     startAt = startAt,
@@ -176,7 +179,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                     return@withContext Result.failure(dataOf("Not enough free storage"))
                 }
 
-                writeResumeMetadata(resumeMetadataFile, url)
+                writeResumeMetadata(resumeMetadataFile, url, transferTotal.takeIf { it > 0 })
                 val digest = MessageDigest.getInstance("SHA-256")
                 if (startAt > 0) updateDigestFromPrefix(partial, startAt, digest)
                 RandomAccessFile(partial, "rw").use { output ->
@@ -251,8 +254,10 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
         Properties().apply { file.inputStream().use(::load) }
     }.getOrNull()
 
-    private fun writeResumeMetadata(file: File, sourceUrl: String) {
-        val properties = Properties().apply { DownloadSourceIdentity.stamp(this, sourceUrl) }
+    private fun writeResumeMetadata(file: File, sourceUrl: String, resolvedLength: Long? = null) {
+        val properties = Properties().apply {
+            DownloadSourceIdentity.stamp(this, sourceUrl, resolvedLength)
+        }
         val partial = File(file.path + ".part")
         partial.outputStream().use { properties.store(it, null) }
         finalizeFile(partial, file)
