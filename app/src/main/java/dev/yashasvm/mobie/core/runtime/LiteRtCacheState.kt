@@ -8,18 +8,19 @@ import java.util.Properties
  * Conservative proof that LiteRT's persistent optimized cache still belongs to the exact installed
  * model artifact and runtime configuration that created it.
  *
- * Warm-cache storage admission must fail closed: if the model fingerprint, LiteRT version marker,
- * or any cache entry changes, Mobie treats the next load as cold and reserves full cache-build
- * headroom again. This avoids trusting a stale/shared `.litert-cache` merely because it exists.
+ * Warm-cache storage admission must fail closed: if the model fingerprint, selected KV/context
+ * capacity, LiteRT version marker, or any cache entry changes, Mobie treats the next load as cold
+ * and reserves full cache-build headroom again. This avoids trusting a stale/shared `.litert-cache`
+ * merely because it exists.
  */
 internal object LiteRtCacheState {
     const val LITERT_LM_VERSION = "0.16.1"
-    private const val MARKER_SCHEMA = "1"
+    private const val MARKER_SCHEMA = "2"
     private const val MARKER_FILE = ".mobie-cache-ready.properties"
 
-    fun canReuse(cacheDirectory: File, modelFile: File): Boolean {
+    fun canReuse(cacheDirectory: File, modelFile: File, contextWindowTokens: Int): Boolean {
         val markerFile = File(cacheDirectory, MARKER_FILE)
-        if (!modelFile.isFile || !markerFile.isFile) return false
+        if (!modelFile.isFile || !markerFile.isFile || contextWindowTokens <= 0) return false
         val properties = runCatching {
             Properties().apply { markerFile.inputStream().use(::load) }
         }.getOrNull() ?: return false
@@ -29,6 +30,7 @@ internal object LiteRtCacheState {
         if (properties.getProperty("modelPath") != modelFile.absoluteFile.normalize().path) return false
         if (properties.getProperty("modelLength")?.toLongOrNull() != modelFile.length()) return false
         if (properties.getProperty("modelLastModified")?.toLongOrNull() != modelFile.lastModified()) return false
+        if (properties.getProperty("contextWindowTokens")?.toIntOrNull() != contextWindowTokens) return false
 
         val manifest = cacheManifest(cacheDirectory) ?: return false
         if (manifest.entryCount <= 0 || manifest.totalBytes <= 0) return false
@@ -37,8 +39,8 @@ internal object LiteRtCacheState {
             properties.getProperty("cacheManifestSha256") == manifest.sha256
     }
 
-    fun markReady(cacheDirectory: File, modelFile: File): Boolean {
-        if (!modelFile.isFile || !cacheDirectory.isDirectory) return false
+    fun markReady(cacheDirectory: File, modelFile: File, contextWindowTokens: Int): Boolean {
+        if (!modelFile.isFile || !cacheDirectory.isDirectory || contextWindowTokens <= 0) return false
         val manifest = cacheManifest(cacheDirectory) ?: return false
         if (manifest.entryCount <= 0 || manifest.totalBytes <= 0) return false
 
@@ -48,6 +50,7 @@ internal object LiteRtCacheState {
             setProperty("modelPath", modelFile.absoluteFile.normalize().path)
             setProperty("modelLength", modelFile.length().toString())
             setProperty("modelLastModified", modelFile.lastModified().toString())
+            setProperty("contextWindowTokens", contextWindowTokens.toString())
             setProperty("cacheEntryCount", manifest.entryCount.toString())
             setProperty("cacheBytes", manifest.totalBytes.toString())
             setProperty("cacheManifestSha256", manifest.sha256)
