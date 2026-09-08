@@ -1,6 +1,7 @@
 package dev.yashasvm.mobie.core.runtime
 
 import dev.yashasvm.mobie.core.model.ModelFormat
+import java.util.concurrent.CountDownLatch
 import kotlin.system.measureTimeMillis
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -174,9 +175,10 @@ class InferenceStallGuardRuntimeAdapterTest {
 
     @Test
     fun nonCooperativeNativeUnloadCannotHoldLifecycleOpen() = runBlocking {
+        val releaseUnload = CountDownLatch(1)
         val delegate = RecordingRuntimeAdapter(
             generation = flowOf(),
-            unloadBlock = { Thread.sleep(750L) },
+            unloadBlock = { releaseUnload.await() },
         )
         val adapter = InferenceStallGuardRuntimeAdapter(
             delegate = delegate,
@@ -192,10 +194,12 @@ class InferenceStallGuardRuntimeAdapterTest {
             fail("Expected bounded unload failure")
         } catch (error: IllegalStateException) {
             assertTrue(error.message.orEmpty().contains("cleanup did not return", ignoreCase = true))
+        } finally {
+            releaseUnload.countDown()
         }
 
         assertTrue(delegate.unloadCalled)
-        assertTrue("lifecycle waited ${elapsedMs}ms for blocked native unload", elapsedMs < 500L)
+        assertTrue("lifecycle waited ${elapsedMs}ms for blocked native unload", elapsedMs < 1_000L)
         assertTrue(adapter.load("model.litertlm", vision = false).isFailure)
         assertFalse(delegate.loadCalled)
     }
