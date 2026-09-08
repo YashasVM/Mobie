@@ -1,7 +1,9 @@
 package dev.yashasvm.mobie.data.download
 
 import java.util.Properties
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -103,5 +105,25 @@ class DownloadSourceIdentityTest {
                 "https://huggingface.co/acme/model/resolve/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/model.litertlm",
             ),
         )
+    }
+
+    @Test
+    fun `resume sidecar persists resolved transfer length for crash recovery`() {
+        val properties = Properties()
+        val url = "https://huggingface.co/acme/model/resolve/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/model.litertlm"
+
+        DownloadSourceIdentity.stamp(properties, url, resolvedLength = 987654321L)
+
+        assertEquals(987654321L, DownloadSourceIdentity.resolvedLength(properties))
+        assertTrue(DownloadSourceIdentity.canRecoverInstalled(properties, url))
+    }
+
+    @Test
+    fun `invalid resolved length is not trusted`() {
+        val properties = Properties().apply {
+            setProperty(DownloadSourceIdentity.RESOLVED_LENGTH_PROPERTY, "-1")
+        }
+
+        assertNull(DownloadSourceIdentity.resolvedLength(properties))
     }
 }
