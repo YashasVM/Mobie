@@ -228,17 +228,21 @@ class ModelDownloadManager(context: Context) {
     }
 
     private fun writePropertiesAtomically(destination: File, properties: Properties) {
-        val partial = File(destination.path + ".part")
-        partial.outputStream().use { properties.store(it, null) }
+        val partial = DownloadFilePolicy.metadataPartialFile(destination, UUID.randomUUID().toString())
         try {
-            Files.move(
-                partial.toPath(),
-                destination.toPath(),
-                StandardCopyOption.ATOMIC_MOVE,
-                StandardCopyOption.REPLACE_EXISTING,
-            )
-        } catch (_: AtomicMoveNotSupportedException) {
-            Files.move(partial.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            partial.outputStream().use { properties.store(it, null) }
+            try {
+                Files.move(
+                    partial.toPath(),
+                    destination.toPath(),
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING,
+                )
+            } catch (_: AtomicMoveNotSupportedException) {
+                Files.move(partial.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            }
+        } finally {
+            partial.delete()
         }
     }
 
