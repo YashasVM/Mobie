@@ -13,6 +13,7 @@ import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.runtime.InferenceEvent
 import dev.yashasvm.mobie.core.runtime.InferenceStats
 import dev.yashasvm.mobie.core.runtime.RuntimeMessage
+import dev.yashasvm.mobie.core.runtime.RuntimeModelOwnership
 import dev.yashasvm.mobie.data.download.DownloadProgress
 import dev.yashasvm.mobie.data.download.InstalledModelEntry
 import dev.yashasvm.mobie.data.history.ChatHistorySession
@@ -81,6 +82,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     private var inferenceJob: Job? = null
     private val runtimeLifecycle = Mutex()
     private val runtimeOperation = AtomicLong(0L)
+    private val runtimeOwnership = RuntimeModelOwnership()
 
     init {
         refreshInstalled()
@@ -288,11 +290,21 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         }
         val result = runtimeLifecycle.withLock {
             if (!isCurrentRuntimeOperation(operation)) return
-            if (preferReset) {
+            if (preferReset && runtimeOwnership.owns(model.id)) {
                 val reset = adapter.resetConversation(restored)
-                if (reset.isSuccess) reset else adapter.load(path, model.supportsVision, restored)
+                if (reset.isSuccess) {
+                    reset
+                } else {
+                    runtimeOwnership.clear()
+                    adapter.load(path, model.supportsVision, restored).also { loaded ->
+                        if (loaded.isSuccess) runtimeOwnership.markLoaded(model.id)
+                    }
+                }
             } else {
-                adapter.load(path, model.supportsVision, restored)
+                runtimeOwnership.clear()
+                adapter.load(path, model.supportsVision, restored).also { loaded ->
+                    if (loaded.isSuccess) runtimeOwnership.markLoaded(model.id)
+                }
             }
         }
         if (!isCurrentRuntimeOperation(operation)) return
@@ -417,14 +429,13 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         if (deletingSelectedModel) inferenceJob?.cancel()
         val operation = if (deletingSelectedModel) nextRuntimeOperation() else null
         viewModelScope.launch {
-            val deleted = if (operation != null) {
-                runtimeLifecycle.withLock {
-                    if (!isCurrentRuntimeOperation(operation)) return@withLock false
+            val deleted = runtimeLifecycle.withLock {
+                if (operation != null && !isCurrentRuntimeOperation(operation)) return@withLock false
+                if (deletingSelectedModel || runtimeOwnership.owns(entry.model.id)) {
                     container.runtimes.all().forEach { it.unload() }
-                    if (!isCurrentRuntimeOperation(operation)) return@withLock false
-                    container.downloads.deleteInstalled(entry.model)
+                    runtimeOwnership.clear()
                 }
-            } else {
+                if (operation != null && !isCurrentRuntimeOperation(operation)) return@withLock false
                 container.downloads.deleteInstalled(entry.model)
             }
             if (deleted) {
@@ -459,6 +470,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         runtimeLifecycle.withLock {
             if (!isCurrentRuntimeOperation(operation)) return
             container.runtimes.all().forEach { it.unload() }
+            runtimeOwnership.clear()
         }
     }
 
