@@ -13,10 +13,12 @@
 - Made active model transfer, worker checksum loops, and manager-side completed-file verification cooperatively observe coroutine cancellation so cancelled work does not keep consuming network/CPU until an unrelated suspend point.
 
 ## Important work in progress
+- Validate deletion recovery when canonical install metadata is missing/corrupt but valid per-artifact metadata still proves directory ownership.
 - Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts.
 - Physical-device validation is still needed for thermal/LMK behavior, long-context pressure, interrupted generation, GPU vision, and CPU thread policy.
 
 ## Tests actually performed
+- Added Android regression coverage for deleting a crash-recovered install that has only per-artifact ownership metadata; exact-tip CI is pending.
 - `25c8e489`: full Android CI passed manager-side cancellation-aware completed-file SHA-256 verification: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E. The preceding run's only failure was transient debug-APK artifact upload infrastructure.
 - Added a deterministic JVM regression that aborts manager SHA-256 verification on the third cancellation check instead of reading the full file.
 - `4e32fc92`: full Android CI passed cooperative worker download/checksum cancellation.
@@ -41,6 +43,7 @@
 - Main-model GPU/NPU execution remains disabled pending representative handset evidence.
 
 ## Items to inspect before merging
+- Delete an install after removing/corrupting canonical `.model.properties` while valid per-artifact metadata remains; verify deletion still succeeds, but conflicting/absent ownership metadata fails closed.
 - Cancel/delete a large active model download and verify network/CPU activity stops promptly while the resumable partial remains reusable.
 - Cancel during checksum verification of a large completed/partial file and verify cancellation returns promptly without finalizing stale metadata.
 - Complete two artifacts for the same model nearly simultaneously and verify both workers succeed and canonical/artifact metadata remains valid.
