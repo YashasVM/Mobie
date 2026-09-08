@@ -13,12 +13,12 @@
 - Made active model transfer and worker checksum loops cooperatively observe coroutine cancellation so Stop/delete requests do not leave network or CPU work running until the next suspend point.
 
 ## Important work in progress
-- Manager-side completed-file SHA-256 verification now checks coroutine cancellation between read chunks; exact-tip CI validation is pending.
-- Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts after manager-side verification is validated.
+- Manager-side completed-file SHA-256 verification now checks coroutine cancellation between read chunks. JVM tests, lint, and debug APK build passed at `2612ee59`; full exact-tip validation is pending because GitHub Actions failed afterward while uploading the already-built debug APK.
+- Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts after manager-side verification receives a clean full CI run.
 - Physical-device validation is still needed for thermal/LMK behavior, long-context pressure, interrupted generation, GPU vision, and CPU thread policy.
 
 ## Tests actually performed
-- Added a deterministic JVM regression that aborts manager SHA-256 verification on the third cancellation check instead of reading the full file; exact-tip CI is pending.
+- Added a deterministic JVM regression that aborts manager SHA-256 verification on the third cancellation check instead of reading the full file. At `2612ee59`, JVM tests/lint/debug APK build passed; downstream emulator/runtime jobs were skipped only because the debug-APK artifact upload step failed.
 - `4e32fc92`: full Android CI passed cooperative worker download/checksum cancellation: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
 - `18d4561f`: full Android CI passed manager-side metadata repair/verification collision protection.
 - `ef67c99e`: full Android CI passed the concurrent worker metadata-publication fix.
@@ -35,7 +35,7 @@
 - Representative cold load: 3263.1 ms with 339,217,207 bytes cache growth; unload/reload: 1695.9 ms with no additional cache growth.
 
 ## Known problems / regressions
-- Manager-side cancellation-aware verification is implemented but not yet exact-tip CI validated.
+- Manager-side cancellation-aware verification has passed JVM tests/lint/debug build but not yet a clean full exact-tip CI run; the latest run failed in GitHub artifact upload after the build completed successfully.
 - Physical-device thermal/LMK behavior, 32K/64K context pressure, interrupted-generation recovery, GPU vision, and >2 CPU-thread performance remain unvalidated on representative phones.
 - Upstream LiteRT-LM streaming can lose terminal callbacks; a truly wedged JNI call may still retain detached native resources until process restart. Mobie now fails closed after watchdog timeout.
 - GGUF remains intentionally unavailable for v1; supported published LiteRT-LM artifacts are the priority.
