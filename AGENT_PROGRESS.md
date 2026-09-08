@@ -12,13 +12,15 @@
 - Bound LiteRT persistent-cache reuse to the selected context/KV capacity so a cache created for one runtime context cannot relax cold-load storage admission for another.
 - Completed restored-vision context accounting and replacement-image handling; arm64 may try GPU vision while emulators/x86 skip unsupported OpenCL probing.
 - Made LiteRT generation Flow state collection-local so recollecting the same request cannot reuse prior output or contaminate committed conversation history.
+- Guarded model load/unload/reset lifecycle work with monotonic operation IDs so stale queued work cannot publish READY or unload a newer model after rapid model switches, history changes, or leave/re-enter transitions.
 
 ## Important work in progress
-- Continue runtime/backend reliability and lifecycle auditing, especially stale load/unload work when switching models or leaving/re-entering chat.
+- Continue runtime/storage lifecycle auditing, especially deleting or replacing an installed model while its native runtime is loaded or transitioning.
 - Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts.
 - Physical-device validation is still needed for thermal/LMK behavior, long-context pressure, interrupted generation, GPU vision, and CPU thread policy.
 
 ## Tests actually performed
+- `114d45d2`: full Android CI passed stale runtime lifecycle protection: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
 - `30e8568d`: full Android CI passed the repeated-generation-Flow regression with a real Qwen LiteRT model, plus JVM tests/lint/debug APK, emulator instrumentation, and real LiteRT-LM vision E2E.
 - `3ba91da4`: full Android CI passed context-bound LiteRT cache reuse coverage: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
 - `42ac2630`: full Android CI passed after correcting emulator-smoke command execution; this validates the mutable-source restart/reuse protection and its regression fixtures.
@@ -41,11 +43,12 @@
 - Upstream LiteRT-LM streaming can lose terminal callbacks; a truly wedged native call may retain detached worker/native resources until process restart.
 - GGUF remains intentionally unavailable for v1; supported published LiteRT-LM artifacts are the priority.
 - Main-model GPU/NPU execution remains disabled pending representative handset evidence.
-- Runtime lifecycle work still needs guarding against stale load/unload completion when the user rapidly switches models or leaves and immediately re-enters chat.
+- Installed-model deletion is download-job safe, but runtime/file-lifecycle coordination still needs explicit audit so model storage cannot be removed while the selected native runtime is loading or holding the file open.
 
 ## Items to inspect before merging
 - Interrupt a checksum-less download from a mutable Hub revision, move that revision to different bytes, and verify Mobie restarts rather than appending/reusing the old partial; repeat with an immutable commit-pinned URL and verify safe resume/reuse.
 - Delete a model while multiple real artifact downloads are writing and verify all jobs cancel before storage removal with no recreated `.part` or metadata afterward.
+- Delete the currently selected/loaded model and immediately switch/re-enter chat; verify native resources close before storage removal and no stale load can reopen the deleted artifact.
 - Kill Mobie immediately after model download completion but before install metadata is committed, relaunch, and verify local recovery without network transfer.
 - Verify multiple checksum-less artifacts for one model retain independent source identities across app restart.
 - Rapidly switch between two installed models and leave/re-enter chat during model loading; verify stale lifecycle work cannot unload the newly selected runtime or leave old model weights resident.
