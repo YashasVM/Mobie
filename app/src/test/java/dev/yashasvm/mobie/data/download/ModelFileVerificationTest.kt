@@ -2,9 +2,11 @@ package dev.yashasvm.mobie.data.download
 
 import java.io.File
 import java.util.Properties
+import java.util.concurrent.CancellationException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 
 class ModelFileVerificationTest {
@@ -92,6 +94,29 @@ class ModelFileVerificationTest {
         try {
             file.writeBytes(byteArrayOf(1, 2, 3))
             assertTrue(ModelFileVerification.matchesInstalledLength(Properties(), file))
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun `sha verification checks cancellation between file chunks`() {
+        val file = File.createTempFile("mobie-cancellable-sha", ".litertlm")
+        try {
+            file.outputStream().use { output ->
+                repeat(8) { output.write(ByteArray(DEFAULT_BUFFER_SIZE)) }
+            }
+            var checks = 0
+
+            try {
+                ModelFileVerification.sha256(file) {
+                    checks += 1
+                    if (checks == 3) throw CancellationException("cancelled")
+                }
+                fail("Expected verification to stop when cancelled")
+            } catch (_: CancellationException) {
+                assertEquals(3, checks)
+            }
         } finally {
             file.delete()
         }
