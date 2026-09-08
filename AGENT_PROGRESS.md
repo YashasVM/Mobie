@@ -9,15 +9,17 @@
 - Improved recommendations using RAM pressure, storage headroom, quantization, artifact size, context/KV estimates, backend support, and hardware targets; runtime context sizing now follows the same device constraints.
 - Added real LiteRT-LM telemetry for TTFT, latency, prefill/decode throughput, token count, app RAM, cold load, and warm-cache load.
 - Added thermal protection, inference-stall containment, bounded cancellation, constrained-context replay, and a CI-validated two-thread CPU policy.
+- Bound LiteRT persistent-cache reuse to the selected context/KV capacity so a cache created for one runtime context cannot relax cold-load storage admission for another.
 - Completed restored-vision context accounting and replacement-image handling; arm64 may try GPU vision while emulators/x86 skip unsupported OpenCL probing.
 
 ## Important work in progress
+- Continue runtime/backend reliability and generation-state auditing before further performance tuning.
 - Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts.
-- Continue runtime/backend optimization for reliable TTFT and tokens/sec without enabling unvalidated main-model GPU/NPU execution.
 - Physical-device validation is still needed for thermal/LMK behavior, long-context pressure, interrupted generation, GPU vision, and CPU thread policy.
 
 ## Tests actually performed
-- `42ac2630`: full Android CI passed after correcting emulator-smoke command execution: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E. This validates the mutable-source restart/reuse protection and its regression fixtures.
+- `3ba91da4`: full Android CI passed context-bound LiteRT cache reuse coverage: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
+- `42ac2630`: full Android CI passed after correcting emulator-smoke command execution; this validates the mutable-source restart/reuse protection and its regression fixtures.
 - `7c032ee4`: full Android CI passed collision-resistant WorkManager identity coverage, including known Java hash collisions (`Aa`/`BB`).
 - `51866360`: full Android CI passed installed-metadata crash recovery from per-artifact metadata with canonical metadata missing.
 - `44123014`: full Android CI passed independent per-artifact source identity retention/reuse.
