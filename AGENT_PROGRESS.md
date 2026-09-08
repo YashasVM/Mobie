@@ -17,6 +17,7 @@
 - Tracked native runtime ownership independently from UI selection and fail closed while ownership is uncertain, so rapid model switching cannot delete files that a native runtime may still hold.
 
 ## Important work in progress
+- `9ec0d9b7`: fail-closed recovery after a stalled native inference is pending exact-tip CI. Watchdog timeouts now mark the runtime unsafe, block reuse, and bound native unload so model switching/deletion cannot wait forever behind a wedged generation call; reuse is allowed again only after cleanup actually succeeds.
 - Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts.
 - Physical-device validation is still needed for thermal/LMK behavior, long-context pressure, interrupted generation, GPU vision, and CPU thread policy.
 
@@ -43,7 +44,7 @@
 
 ## Known problems / regressions
 - Physical-device thermal/LMK behavior, 32K/64K context pressure, interrupted-generation recovery, GPU vision, and >2 CPU-thread performance remain unvalidated on representative phones.
-- Upstream LiteRT-LM streaming can lose terminal callbacks; a truly wedged native call may retain detached worker/native resources until process restart.
+- Upstream LiteRT-LM streaming can lose terminal callbacks; a truly wedged JNI call may still retain detached worker/native resources until process restart. The new fail-closed lifecycle protection prevents reuse/deletion over uncertain native state but is pending exact-tip CI.
 - GGUF remains intentionally unavailable for v1; supported published LiteRT-LM artifacts are the priority.
 - Main-model GPU/NPU execution remains disabled pending representative handset evidence.
 
@@ -52,6 +53,7 @@
 - Delete a model while multiple real artifact downloads are writing and verify all jobs cancel before storage removal with no recreated `.part` or metadata afterward.
 - Load model A, switch to model B, immediately delete A while the native transition is still in flight, and verify A is unloaded before its files are removed without unloading a fully loaded B.
 - Delete the currently selected/loaded model and immediately switch/re-enter chat; verify native resources close before storage removal and no stale load can reopen the deleted artifact.
+- Force a stalled generation/native unload, then switch or delete the model; verify Mobie returns a bounded cleanup error and does not load over or delete storage under uncertain native ownership. After a successful cleanup, verify model loading is allowed again.
 - Kill Mobie immediately after model download completion but before install metadata is committed, relaunch, and verify local recovery without network transfer.
 - Verify multiple checksum-less artifacts for one model retain independent source identities across app restart.
 - Rapidly switch between two installed models and leave/re-enter chat during model loading; verify stale lifecycle work cannot unload the newly selected runtime or leave old model weights resident.
