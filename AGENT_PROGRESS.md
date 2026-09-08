@@ -10,16 +10,16 @@
 - Hardened runtime lifecycle ownership so stale load/unload/reset/delete work cannot unload a newer model or remove files still held by native resources.
 - Added fail-closed recovery after stalled native inference so Mobie blocks reuse/deletion over uncertain native state until cleanup succeeds.
 - Eliminated temp-file collisions in both worker metadata publication and manager-side metadata repair/verification.
-- Made active model transfer and worker checksum loops cooperatively observe coroutine cancellation so Stop/delete requests do not leave network or CPU work running until the next suspend point.
+- Made active model transfer, worker checksum loops, and manager-side completed-file verification cooperatively observe coroutine cancellation so cancelled work does not keep consuming network/CPU until an unrelated suspend point.
 
 ## Important work in progress
-- Manager-side completed-file SHA-256 verification now checks coroutine cancellation between read chunks. JVM tests, lint, and debug APK build passed at `2612ee59`; full exact-tip validation is pending because GitHub Actions failed afterward while uploading the already-built debug APK.
-- Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts after manager-side verification receives a clean full CI run.
+- Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts.
 - Physical-device validation is still needed for thermal/LMK behavior, long-context pressure, interrupted generation, GPU vision, and CPU thread policy.
 
 ## Tests actually performed
-- Added a deterministic JVM regression that aborts manager SHA-256 verification on the third cancellation check instead of reading the full file. At `2612ee59`, JVM tests/lint/debug APK build passed; downstream emulator/runtime jobs were skipped only because the debug-APK artifact upload step failed.
-- `4e32fc92`: full Android CI passed cooperative worker download/checksum cancellation: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
+- `25c8e489`: full Android CI passed manager-side cancellation-aware completed-file SHA-256 verification: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E. The preceding run's only failure was transient debug-APK artifact upload infrastructure.
+- Added a deterministic JVM regression that aborts manager SHA-256 verification on the third cancellation check instead of reading the full file.
+- `4e32fc92`: full Android CI passed cooperative worker download/checksum cancellation.
 - `18d4561f`: full Android CI passed manager-side metadata repair/verification collision protection.
 - `ef67c99e`: full Android CI passed the concurrent worker metadata-publication fix.
 - `0fedffd2`: full Android CI passed deterministic stalled-unload recovery coverage.
@@ -35,7 +35,6 @@
 - Representative cold load: 3263.1 ms with 339,217,207 bytes cache growth; unload/reload: 1695.9 ms with no additional cache growth.
 
 ## Known problems / regressions
-- Manager-side cancellation-aware verification has passed JVM tests/lint/debug build but not yet a clean full exact-tip CI run; the latest run failed in GitHub artifact upload after the build completed successfully.
 - Physical-device thermal/LMK behavior, 32K/64K context pressure, interrupted-generation recovery, GPU vision, and >2 CPU-thread performance remain unvalidated on representative phones.
 - Upstream LiteRT-LM streaming can lose terminal callbacks; a truly wedged JNI call may still retain detached native resources until process restart. Mobie now fails closed after watchdog timeout.
 - GGUF remains intentionally unavailable for v1; supported published LiteRT-LM artifacts are the priority.
@@ -44,7 +43,6 @@
 ## Items to inspect before merging
 - Cancel/delete a large active model download and verify network/CPU activity stops promptly while the resumable partial remains reusable.
 - Cancel during checksum verification of a large completed/partial file and verify cancellation returns promptly without finalizing stale metadata.
-- Cancel model selection while completed-file SHA-256 verification is running and verify CPU work terminates promptly without stamping stale verification metadata.
 - Complete two artifacts for the same model nearly simultaneously and verify both workers succeed and canonical/artifact metadata remains valid.
 - Trigger concurrent installed-model scans/verification repair while an artifact finishes and verify metadata remains readable with no shared-temp collisions.
 - Interrupt checksum-less mutable and commit-pinned Hub downloads and verify mutable sources restart while immutable sources resume/reuse safely.
