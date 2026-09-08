@@ -143,6 +143,64 @@ class InferenceStallGuardRuntimeAdapterTest {
     }
 
     @Test
+    fun stalledRuntimeRejectsReuseUntilUnloadCompletes() = runBlocking {
+        val delegate = RecordingRuntimeAdapter(
+            generation = flow {
+                emit(InferenceEvent.Token("partial"))
+                delay(1_000L)
+            },
+        )
+        val adapter = InferenceStallGuardRuntimeAdapter(
+            delegate = delegate,
+            firstEventTimeoutMs = 100L,
+            activeIdleTimeoutMs = 20L,
+            cancellationTimeoutMs = 100L,
+            lifecycleTimeoutMs = 100L,
+        )
+
+        adapter.generate("prompt").toList()
+
+        val blockedLoad = adapter.load("model.litertlm", vision = false)
+        assertTrue(blockedLoad.isFailure)
+        assertFalse(delegate.loadCalled)
+
+        adapter.unload()
+        assertTrue(delegate.unloadCalled)
+
+        val recoveredLoad = adapter.load("model.litertlm", vision = false)
+        assertTrue(recoveredLoad.isSuccess)
+        assertTrue(delegate.loadCalled)
+    }
+
+    @Test
+    fun nonCooperativeNativeUnloadCannotHoldLifecycleOpen() = runBlocking {
+        val delegate = RecordingRuntimeAdapter(
+            generation = flowOf(),
+            unloadBlock = { Thread.sleep(750L) },
+        )
+        val adapter = InferenceStallGuardRuntimeAdapter(
+            delegate = delegate,
+            firstEventTimeoutMs = 100L,
+            activeIdleTimeoutMs = 100L,
+            cancellationTimeoutMs = 50L,
+            lifecycleTimeoutMs = 50L,
+        )
+        var elapsedMs = 0L
+
+        try {
+            elapsedMs = measureTimeMillis { adapter.unload() }
+            fail("Expected bounded unload failure")
+        } catch (error: IllegalStateException) {
+            assertTrue(error.message.orEmpty().contains("cleanup did not return", ignoreCase = true))
+        }
+
+        assertTrue(delegate.unloadCalled)
+        assertTrue("lifecycle waited ${elapsedMs}ms for blocked native unload", elapsedMs < 500L)
+        assertTrue(adapter.load("model.litertlm", vision = false).isFailure)
+        assertFalse(delegate.loadCalled)
+    }
+
+    @Test
     fun healthyStreamingPassesThroughWithoutCancellation() = runBlocking {
         val expected = listOf(
             InferenceEvent.Token("hello"),
@@ -183,15 +241,21 @@ class InferenceStallGuardRuntimeAdapterTest {
     private class RecordingRuntimeAdapter(
         private val generation: Flow<InferenceEvent>,
         private val cancelBlock: (() -> Unit)? = null,
+        private val unloadBlock: (() -> Unit)? = null,
     ) : RuntimeAdapter {
         override val format: ModelFormat = ModelFormat.LITERT_LM
         @Volatile var cancelCalled = false
+        @Volatile var loadCalled = false
+        @Volatile var unloadCalled = false
 
         override suspend fun load(
             modelPath: String,
             vision: Boolean,
             history: List<RuntimeMessage>,
-        ): Result<Unit> = Result.success(Unit)
+        ): Result<Unit> {
+            loadCalled = true
+            return Result.success(Unit)
+        }
 
         override suspend fun resetConversation(history: List<RuntimeMessage>): Result<Unit> = Result.success(Unit)
 
@@ -206,6 +270,9 @@ class InferenceStallGuardRuntimeAdapterTest {
             cancelBlock?.invoke()
         }
 
-        override suspend fun unload() = Unit
+        override suspend fun unload() {
+            unloadCalled = true
+            unloadBlock?.invoke()
+        }
     }
 }
