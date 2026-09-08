@@ -413,13 +413,34 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun deleteInstalled(entry: InstalledModelEntry) {
+        val deletingSelectedModel = state.value.selected?.id == entry.model.id
+        if (deletingSelectedModel) inferenceJob?.cancel()
+        val operation = if (deletingSelectedModel) nextRuntimeOperation() else null
         viewModelScope.launch {
-            val deleted = container.downloads.deleteInstalled(entry.model)
-            if (deleted) {
-                mutableState.update {
-                    it.copy(installedModels = it.installedModels.filterNot { installed -> installed.model.id == entry.model.id })
+            val deleted = if (operation != null) {
+                runtimeLifecycle.withLock {
+                    if (!isCurrentRuntimeOperation(operation)) return@withLock false
+                    container.runtimes.all().forEach { it.unload() }
+                    if (!isCurrentRuntimeOperation(operation)) return@withLock false
+                    container.downloads.deleteInstalled(entry.model)
                 }
             } else {
+                container.downloads.deleteInstalled(entry.model)
+            }
+            if (deleted) {
+                mutableState.update { current ->
+                    val deletedSelectedModel = current.selected?.id == entry.model.id
+                    current.copy(
+                        installedModels = current.installedModels.filterNot { installed -> installed.model.id == entry.model.id },
+                        download = if (deletedSelectedModel) null else current.download,
+                        downloadedPath = if (deletedSelectedModel) null else current.downloadedPath,
+                        chatting = if (deletedSelectedModel) false else current.chatting,
+                        runtimeState = if (deletedSelectedModel) RuntimeState.IDLE else current.runtimeState,
+                        stats = if (deletedSelectedModel) null else current.stats,
+                        error = null,
+                    )
+                }
+            } else if (operation == null || isCurrentRuntimeOperation(operation)) {
                 mutableState.update { it.copy(error = "${entry.model.title} could not be deleted.") }
             }
         }
