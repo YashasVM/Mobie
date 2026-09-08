@@ -64,9 +64,9 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                 it.getProperty("sourceFileName") == fileName
             }
         val resumeMetadata = resumeMetadataFile.takeIf(File::isFile)?.let(::readProperties)
-        val recoverySize = expectedSize.takeIf { it > 0 }
-            ?: DownloadSourceIdentity.resolvedLength(resumeMetadata)
-            ?: 0L
+        val resumeResolvedSize = DownloadSourceIdentity.resolvedLength(resumeMetadata)
+            ?.takeIf { DownloadSourceIdentity.matches(resumeMetadata, url) }
+        val recoverySize = expectedSize.takeIf { it > 0 } ?: resumeResolvedSize ?: 0L
 
         if (inputData.getBoolean(KEY_GATED, false) && HuggingFaceTokenStore(applicationContext).read().isNullOrBlank()) {
             return@withContext Result.failure(dataOf("This gated model requires a Hugging Face token"))
