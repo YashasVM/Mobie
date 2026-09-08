@@ -29,6 +29,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.concurrent.atomic.AtomicLong
 
 enum class RuntimeState { IDLE, LOADING, READY, GENERATING, STOPPING, ERROR }
 
@@ -79,6 +80,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     private var downloadObserverJob: Job? = null
     private var inferenceJob: Job? = null
     private val runtimeLifecycle = Mutex()
+    private val runtimeOperation = AtomicLong(0L)
 
     init {
         refreshInstalled()
@@ -152,7 +154,8 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     fun select(model: AiModel?) {
         downloadObserverJob?.cancel()
         inferenceJob?.cancel()
-        if (model == null) viewModelScope.launch { unloadRuntime() }
+        val operation = nextRuntimeOperation()
+        viewModelScope.launch { unloadRuntime(operation) }
         val device = container.deviceProfile.current()
         val artifact = model?.let { artifactForDevice(it, device) }
         val presentedModel = model?.preferArtifact(artifact)
@@ -242,6 +245,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val artifact = current.selectedArtifact ?: return
         val history = readHistory(model)
         val sessions = container.chatHistory.sessions(model.id)
+        val operation = nextRuntimeOperation()
         mutableState.update {
             it.copy(
                 chatting = true,
@@ -255,7 +259,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         }
         inferenceJob?.cancel()
         inferenceJob = viewModelScope.launch {
-            loadRuntimeConversation(model, artifact, path, history, preferReset = false)
+            loadRuntimeConversation(model, artifact, path, history, preferReset = false, operation = operation)
         }
     }
 
@@ -265,10 +269,13 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         path: String,
         history: List<ChatMessage>,
         preferReset: Boolean,
+        operation: Long,
     ) {
         val adapter = container.runtimes.adapterFor(artifact.format)
         if (adapter == null) {
-            mutableState.update { it.copy(runtimeState = RuntimeState.ERROR, error = "No runtime for this model") }
+            if (isCurrentRuntimeOperation(operation)) {
+                mutableState.update { it.copy(runtimeState = RuntimeState.ERROR, error = "No runtime for this model") }
+            }
             return
         }
         val restored = history.map {
@@ -280,6 +287,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             )
         }
         val result = runtimeLifecycle.withLock {
+            if (!isCurrentRuntimeOperation(operation)) return
             if (preferReset) {
                 val reset = adapter.resetConversation(restored)
                 if (reset.isSuccess) reset else adapter.load(path, model.supportsVision, restored)
@@ -287,6 +295,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 adapter.load(path, model.supportsVision, restored)
             }
         }
+        if (!isCurrentRuntimeOperation(operation)) return
         result.fold(
             onSuccess = { mutableState.update { it.copy(runtimeState = RuntimeState.READY) } },
             onFailure = { error ->
@@ -380,6 +389,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val path = current.downloadedPath ?: return
         val canReuseLoadedModel = current.runtimeState == RuntimeState.READY
         inferenceJob?.cancel()
+        val operation = nextRuntimeOperation()
         val sessionId = container.chatHistory.startNewSession(model.id)
         mutableState.update {
             it.copy(
@@ -392,7 +402,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             )
         }
         inferenceJob = viewModelScope.launch {
-            loadRuntimeConversation(model, artifact, path, emptyList(), preferReset = canReuseLoadedModel)
+            loadRuntimeConversation(model, artifact, path, emptyList(), preferReset = canReuseLoadedModel, operation = operation)
         }
     }
 
@@ -417,14 +427,18 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
 
     fun leaveChat() {
         inferenceJob?.cancel()
-        viewModelScope.launch { unloadRuntime() }
+        val operation = nextRuntimeOperation()
+        viewModelScope.launch { unloadRuntime(operation) }
         mutableState.update {
             it.copy(chatting = false, runtimeState = RuntimeState.IDLE, stats = null, error = null)
         }
     }
 
-    private suspend fun unloadRuntime() {
-        runtimeLifecycle.withLock { container.runtimes.all().forEach { it.unload() } }
+    private suspend fun unloadRuntime(operation: Long) {
+        runtimeLifecycle.withLock {
+            if (!isCurrentRuntimeOperation(operation)) return
+            container.runtimes.all().forEach { it.unload() }
+        }
     }
 
     fun selectHistory(sessionId: String) {
@@ -436,6 +450,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         container.chatHistory.activate(model.id, sessionId)
         val history = readHistory(model)
         inferenceJob?.cancel()
+        val operation = nextRuntimeOperation()
         mutableState.update {
             it.copy(
                 messages = history,
@@ -447,7 +462,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             )
         }
         inferenceJob = viewModelScope.launch {
-            loadRuntimeConversation(model, artifact, path, history, preferReset = canReuseLoadedModel)
+            loadRuntimeConversation(model, artifact, path, history, preferReset = canReuseLoadedModel, operation = operation)
         }
     }
 
@@ -509,6 +524,10 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             },
         )
     }
+
+    private fun nextRuntimeOperation(): Long = runtimeOperation.incrementAndGet()
+
+    private fun isCurrentRuntimeOperation(operation: Long): Boolean = runtimeOperation.get() == operation
 
     companion object {
         fun factory(container: AppContainer): ViewModelProvider.Factory =
