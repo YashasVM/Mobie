@@ -16,6 +16,7 @@ import java.util.Properties
  */
 object DownloadSourceIdentity {
     const val SOURCE_URL_PROPERTY = "sourceUrl"
+    const val RESOLVED_LENGTH_PROPERTY = "resolvedLength"
     const val RESUME_METADATA_SUFFIX = ".resume"
 
     private val HUGGING_FACE_COMMIT_RESOLVE =
@@ -38,7 +39,17 @@ object DownloadSourceIdentity {
     fun canRecoverInstalled(resumeProperties: Properties?, sourceUrl: String): Boolean =
         matches(resumeProperties, sourceUrl)
 
-    fun stamp(properties: Properties, sourceUrl: String) {
+    fun resolvedLength(properties: Properties?): Long? = properties
+        ?.getProperty(RESOLVED_LENGTH_PROPERTY)
+        ?.toLongOrNull()
+        ?.takeIf { it > 0 }
+
+    fun stamp(properties: Properties, sourceUrl: String, resolvedLength: Long? = null) {
         properties.setProperty(SOURCE_URL_PROPERTY, sourceUrl)
+        if (resolvedLength != null && resolvedLength > 0) {
+            properties.setProperty(RESOLVED_LENGTH_PROPERTY, resolvedLength.toString())
+        } else {
+            properties.remove(RESOLVED_LENGTH_PROPERTY)
+        }
     }
 }
