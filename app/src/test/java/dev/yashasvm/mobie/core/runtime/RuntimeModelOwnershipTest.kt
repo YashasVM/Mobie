@@ -16,19 +16,21 @@ class RuntimeModelOwnershipTest {
     }
 
     @Test
-    fun clearingOwnershipReleasesPreviousModel() {
+    fun uncertainOwnershipFailsClosedUntilNextSuccessfulLoad() {
         val ownership = RuntimeModelOwnership()
         ownership.markLoaded("model-a")
 
         ownership.clear()
 
-        assertFalse(ownership.owns("model-a"))
+        assertTrue(ownership.owns("model-a"))
+        assertTrue(ownership.owns("model-b"))
     }
 
     @Test
-    fun newerLoadReplacesPreviousOwnership() {
+    fun newerLoadReestablishesPreciseOwnership() {
         val ownership = RuntimeModelOwnership()
         ownership.markLoaded("model-a")
+        ownership.clear()
 
         ownership.markLoaded("model-b")
 
