@@ -1,7 +1,7 @@
 # Agent progress
 
 ## Major changes completed this week
-- Hardened Hugging Face downloads against stale/corrupt resume and reuse with immutable-source identity, size/checksum validation, retained partials, cancellation, storage checks, commit-pinned Hub URLs, and per-artifact metadata.
+- Hardened Hugging Face downloads against stale/corrupt resume and reuse with immutable-source identity, size/checksum validation, retained partials, cancellation, storage checks, commit-pinned Hub URLs, per-artifact metadata, and crash recovery for commit-pinned artifacts whose catalog size/checksum is unknown by persisting the resolved HTTP transfer length only for the same immutable source.
 - Made completed installs crash-recoverable from validated per-artifact metadata and made model deletion coordinate with WorkManager artifact jobs before removing storage.
 - Replaced collision-prone Java `hashCode()` WorkManager identities with SHA-based identities.
 - Improved recommendations and runtime context sizing using RAM pressure, storage headroom, quantization, artifact size, context/KV estimates, backend support, and hardware targets.
@@ -14,12 +14,12 @@
 - Made deletion recover ownership from valid per-artifact metadata when canonical install metadata is missing/corrupt, while still failing closed on absent/conflicting ownership.
 
 ## Important work in progress
-- Finish exact-tip validation for crash recovery of commit-pinned downloads whose catalog size/checksum is unknown by persisting the resolved HTTP transfer length in the resume sidecar and trusting it only for the same immutable source; verify/text/vision now pass, with emulator smoke being retried after transient SDK-image corruption during provisioning.
-- Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts.
+- Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts; no new code change is being made without a reproducible correctness/reliability defect.
 - Physical-device validation is still needed for thermal/LMK behavior, long-context pressure, interrupted generation, GPU vision, and CPU thread policy.
 
 ## Tests actually performed
-- `19ecbc71`: JVM tests/lint/debug APK, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E passed resolved-length crash recovery. Emulator smoke did not reach Mobie tests because GitHub Android SDK provisioning failed with `Intel x86_64 Atom System Image: Error on ZipFile unknown archive`; only that infrastructure-failed job is being retried.
+- `0de8146f`: full Android CI passed resolved-length crash recovery: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
+- `19ecbc71`: JVM tests/lint/debug APK, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E passed resolved-length crash recovery. Emulator smoke did not reach Mobie tests because GitHub Android SDK provisioning failed with `Intel x86_64 Atom System Image: Error on ZipFile unknown archive`; the subsequent exact-tip run passed emulator smoke.
 - `652173df`: JVM tests/lint/debug APK, emulator instrumentation, and real LiteRT-LM text E2E passed resolved-length crash recovery. Vision E2E reached the 55-minute job timeout and was cancelled without reporting a test failure; the subsequent exact-tip run passed vision.
 - `8ca93542`: full Android CI passed artifact-metadata deletion recovery: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
 - Added JVM coverage for resolved transfer-length resume metadata and immutable-source identity matching.
