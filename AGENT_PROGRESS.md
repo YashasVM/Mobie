@@ -11,14 +11,16 @@
 - Added fail-closed recovery after stalled native inference so Mobie blocks reuse/deletion over uncertain native state until cleanup succeeds.
 - Eliminated temp-file collisions in both worker metadata publication and manager-side metadata repair/verification.
 - Made active model transfer, worker checksum loops, and manager-side completed-file verification cooperatively observe coroutine cancellation so cancelled work does not keep consuming network/CPU until an unrelated suspend point.
+- Made deletion recover ownership from valid per-artifact metadata when canonical install metadata is missing/corrupt, while still failing closed on absent/conflicting ownership.
 
 ## Important work in progress
-- Validate deletion recovery when canonical install metadata is missing/corrupt but valid per-artifact metadata still proves directory ownership.
+- Validate crash recovery for commit-pinned downloads whose catalog size/checksum is unknown by persisting the resolved HTTP transfer length in the resume sidecar and trusting it only for the same immutable source.
 - Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts.
 - Physical-device validation is still needed for thermal/LMK behavior, long-context pressure, interrupted generation, GPU vision, and CPU thread policy.
 
 ## Tests actually performed
-- Added Android regression coverage for deleting a crash-recovered install that has only per-artifact ownership metadata; exact-tip CI is pending.
+- `8ca93542`: full Android CI passed artifact-metadata deletion recovery: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
+- Added JVM coverage for resolved transfer-length resume metadata; exact-tip validation for the complete recovery change is pending.
 - `25c8e489`: full Android CI passed manager-side cancellation-aware completed-file SHA-256 verification: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E. The preceding run's only failure was transient debug-APK artifact upload infrastructure.
 - Added a deterministic JVM regression that aborts manager SHA-256 verification on the third cancellation check instead of reading the full file.
 - `4e32fc92`: full Android CI passed cooperative worker download/checksum cancellation.
@@ -43,6 +45,8 @@
 - Main-model GPU/NPU execution remains disabled pending representative handset evidence.
 
 ## Items to inspect before merging
+- Interrupt a commit-pinned download with no catalog size/checksum after final-file promotion but before install metadata publication; verify restart recovers the completed file from the matching immutable-source sidecar without re-downloading it.
+- Verify stale/mutable resume metadata never supplies a recovered length to a fresh download.
 - Delete an install after removing/corrupting canonical `.model.properties` while valid per-artifact metadata remains; verify deletion still succeeds, but conflicting/absent ownership metadata fails closed.
 - Cancel/delete a large active model download and verify network/CPU activity stops promptly while the resumable partial remains reusable.
 - Cancel during checksum verification of a large completed/partial file and verify cancellation returns promptly without finalizing stale metadata.
