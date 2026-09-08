@@ -10,6 +10,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -20,37 +21,49 @@ import kotlinx.coroutines.withTimeoutOrNull
  * Native collection and cancellation intentionally run outside the caller's structured scope: if
  * LiteRT ignores coroutine cancellation while blocked in native code, the watchdog and explicit
  * Stop action must still regain control instead of waiting for that native call forever. Abandoned
- * native work is cancelled best-effort; native resources may still require an app restart if the
- * underlying call itself never returns.
+ * native work is cancelled best-effort. Once a watchdog timeout makes native ownership uncertain,
+ * the adapter fails closed until a bounded unload actually completes; this prevents a later model
+ * load or storage deletion from assuming that a wedged native runtime released its resources.
  */
 class InferenceStallGuardRuntimeAdapter(
     private val delegate: RuntimeAdapter,
     private val firstEventTimeoutMs: Long = FIRST_EVENT_TIMEOUT_MS,
     private val activeIdleTimeoutMs: Long = ACTIVE_IDLE_TIMEOUT_MS,
     private val cancellationTimeoutMs: Long = CANCELLATION_TIMEOUT_MS,
+    private val lifecycleTimeoutMs: Long = LIFECYCLE_TIMEOUT_MS,
 ) : RuntimeAdapter {
     override val format: ModelFormat = delegate.format
+    @Volatile private var recoveryRequired = false
 
     init {
         require(firstEventTimeoutMs > 0L)
         require(activeIdleTimeoutMs > 0L)
         require(cancellationTimeoutMs > 0L)
+        require(lifecycleTimeoutMs > 0L)
     }
 
     override suspend fun load(
         modelPath: String,
         vision: Boolean,
         history: List<RuntimeMessage>,
-    ): Result<Unit> = delegate.load(modelPath, vision, history)
+    ): Result<Unit> {
+        if (recoveryRequired) return Result.failure(recoveryRequiredError())
+        return delegate.load(modelPath, vision, history)
+    }
 
     override suspend fun resetConversation(history: List<RuntimeMessage>): Result<Unit> =
-        delegate.resetConversation(history)
+        if (recoveryRequired) Result.failure(recoveryRequiredError()) else delegate.resetConversation(history)
 
     override fun generate(
         prompt: String,
         imagePath: String?,
         config: GenerationConfig,
     ): Flow<InferenceEvent> = flow {
+        if (recoveryRequired) {
+            emit(InferenceEvent.Error(recoveryRequiredError().message.orEmpty()))
+            return@flow
+        }
+
         val events = Channel<InferenceEvent>(Channel.BUFFERED)
         val producerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val producer = producerScope.launch {
@@ -69,15 +82,16 @@ class InferenceStallGuardRuntimeAdapter(
                 val timeoutMs = if (sawProgress) activeIdleTimeoutMs else firstEventTimeoutMs
                 val result = withTimeoutOrNull(timeoutMs) { events.receiveCatching() }
                 if (result == null) {
+                    recoveryRequired = true
                     requestBoundedCancellation()
                     producer.cancel()
                     producerScope.cancel()
                     emit(
                         InferenceEvent.Error(
                             if (sawProgress) {
-                                "Local inference stopped making progress and was cancelled. Retry the prompt; restart Mobie if the model will not reload."
+                                "Local inference stopped making progress and was cancelled. Reload the model before retrying; restart Mobie if it cannot unload cleanly."
                             } else {
-                                "Local inference did not start within the safety timeout and was cancelled. Retry with a smaller compatible model; restart Mobie if the model will not reload."
+                                "Local inference did not start within the safety timeout and was cancelled. Reload the model before retrying; restart Mobie if it cannot unload cleanly."
                             },
                         ),
                     )
@@ -117,30 +131,56 @@ class InferenceStallGuardRuntimeAdapter(
         result.getOrThrow()
     }
 
-    override suspend fun unload() = delegate.unload()
+    override suspend fun unload() {
+        val result = requestBoundedLifecycleCall { delegate.unload() }
+        if (result == null) {
+            recoveryRequired = true
+            throw IllegalStateException(
+                "Local runtime cleanup did not return within the safety timeout. Restart Mobie before loading or deleting this model.",
+            )
+        }
+        result.fold(
+            onSuccess = { recoveryRequired = false },
+            onFailure = { error ->
+                recoveryRequired = true
+                throw error
+            },
+        )
+    }
 
     /**
      * A coroutine timeout alone cannot contain a JNI call that blocks without cooperating with
      * cancellation. Run native cancellation in a detached supervisor and only await its result for
      * the configured bound, so the caller can regain control even if that worker remains wedged.
      */
-    private suspend fun requestBoundedCancellation(): Result<Unit>? {
+    private suspend fun requestBoundedCancellation(): Result<Unit>? =
+        requestBoundedCall(cancellationTimeoutMs) { delegate.cancel() }
+
+    private suspend fun requestBoundedLifecycleCall(block: suspend () -> Unit): Result<Unit>? =
+        requestBoundedCall(lifecycleTimeoutMs, block)
+
+    private suspend fun requestBoundedCall(timeoutMs: Long, block: suspend () -> Unit): Result<Unit>? {
         val completion = CompletableDeferred<Result<Unit>>()
-        val cancellationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        val worker = cancellationScope.launch {
-            completion.complete(runCatching { delegate.cancel() })
+        val detachedScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val worker = detachedScope.launch {
+            completion.complete(runCatching { block() })
         }
         return try {
-            withTimeoutOrNull(cancellationTimeoutMs) { completion.await() }
+            withTimeoutOrNull(timeoutMs) { completion.await() }
         } finally {
             worker.cancel()
-            cancellationScope.cancel()
+            detachedScope.cancel()
         }
     }
+
+    private fun recoveryRequiredError() = IllegalStateException(
+        "The previous local inference did not stop cleanly. Reload the model first; restart Mobie if runtime cleanup fails.",
+    )
 
     private companion object {
         const val FIRST_EVENT_TIMEOUT_MS = 120_000L
         const val ACTIVE_IDLE_TIMEOUT_MS = 30_000L
         const val CANCELLATION_TIMEOUT_MS = 2_000L
+        const val LIFECYCLE_TIMEOUT_MS = 30_000L
     }
 }
