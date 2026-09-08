@@ -13,15 +13,15 @@ import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
 import dev.yashasvm.mobie.core.model.ModelType
 import java.io.File
-import java.io.FileInputStream
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
-import java.security.MessageDigest
 import java.util.Properties
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
@@ -46,6 +46,7 @@ class ModelDownloadManager(context: Context) {
     private val workManager = WorkManager.getInstance(context)
 
     suspend fun completedFile(modelId: String, artifact: ModelArtifact): File? = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val cancellationContext = currentCoroutineContext()
         val directory = File(File(appContext.filesDir, "models"), DownloadFilePolicy.storageKey(modelId))
         val metadataFile = DownloadFilePolicy.artifactMetadataFile(directory, artifact.fileName)
         val legacyMetadataFile = File(directory, DownloadFilePolicy.METADATA_FILE)
@@ -61,7 +62,12 @@ class ModelDownloadManager(context: Context) {
                 file.isFile &&
                     (artifact.sizeBytes <= 0 || file.length() == artifact.sizeBytes) &&
                     DownloadSourceIdentity.canReuseCompleted(metadata, artifact.downloadUrl, artifact.sha256) &&
-                    verifiedOrValid(file, artifact.sha256, metadata, verificationMetadataFile)
+                    verifiedOrValid(
+                        file,
+                        artifact.sha256,
+                        metadata,
+                        verificationMetadataFile,
+                    ) { cancellationContext.ensureActive() }
             }
     }
 
@@ -202,7 +208,9 @@ class ModelDownloadManager(context: Context) {
         expectedSha: String?,
         properties: Properties?,
         metadataFile: File,
+        cancellationCheck: () -> Unit = {},
     ): Boolean {
+        cancellationCheck()
         if (!ModelFileVerification.matchesInstalledLength(properties, file)) return false
         val remoteSha = expectedSha?.trim()?.lowercase()?.takeIf(String::isNotBlank)
         val localSha = ModelFileVerification.localSha256(properties)
@@ -215,7 +223,8 @@ class ModelDownloadManager(context: Context) {
             }
             if (fingerprintMatches) return true
         }
-        if (sha256(file) != trustedSha) return false
+        if (ModelFileVerification.sha256(file, cancellationCheck) != trustedSha) return false
+        cancellationCheck()
         if (properties != null && metadataFile.isFile) {
             ModelFileVerification.stamp(properties, file, trustedSha)
             writePropertiesAtomically(metadataFile, properties)
@@ -244,19 +253,6 @@ class ModelDownloadManager(context: Context) {
         } finally {
             partial.delete()
         }
-    }
-
-    private fun sha256(file: File): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        FileInputStream(file).use { input ->
-            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-            while (true) {
-                val count = input.read(buffer)
-                if (count < 0) break
-                digest.update(buffer, 0, count)
-            }
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     private fun WorkInfo.toProgress(): DownloadProgress {
