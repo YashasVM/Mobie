@@ -373,9 +373,13 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
     }
 
     private fun writePropertiesAtomically(destination: File, properties: Properties) {
-        val partial = File(destination.path + ".part")
-        partial.outputStream().use { properties.store(it, null) }
-        finalizeFile(partial, destination)
+        val partial = File(destination.path + ".${id}.part")
+        try {
+            partial.outputStream().use { properties.store(it, null) }
+            finalizeFile(partial, destination)
+        } finally {
+            partial.delete()
+        }
     }
 
     private fun invalidInput(message: String) = Result.failure(dataOf(message))
