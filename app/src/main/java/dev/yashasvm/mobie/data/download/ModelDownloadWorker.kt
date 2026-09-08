@@ -26,6 +26,8 @@ import java.util.Properties
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -103,6 +105,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
             }
             if (isComplete(partial, expectedSize, expectedSha)) {
                 val completedSha = sha256(partial)
+                currentCoroutineContext().ensureActive()
                 finalizeFile(partial, storageDestination)
                 return@withContext completeInstall(storageDestination, resumeMetadataFile, completedSha)
             }
@@ -128,6 +131,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                     416 -> {
                         if (isComplete(partial, expectedSize, expectedSha)) {
                             val completedSha = sha256(partial)
+                            currentCoroutineContext().ensureActive()
                             finalizeFile(partial, storageDestination)
                             return@withContext completeInstall(storageDestination, resumeMetadataFile, completedSha)
                         }
@@ -184,6 +188,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                         val startedAt = SystemClock.elapsedRealtime()
                         updateForeground(fileName, current, transferTotal)
                         while (true) {
+                            currentCoroutineContext().ensureActive()
                             val read = input.read(buffer)
                             if (read < 0) break
                             output.write(buffer, 0, read)
@@ -212,6 +217,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                 resumeMetadataFile.delete()
                 return@withContext Result.failure(dataOf("Checksum validation failed"))
             }
+            currentCoroutineContext().ensureActive()
             finalizeFile(partial, storageDestination)
             completeInstall(storageDestination, resumeMetadataFile, transferSha)
         } catch (error: CancellationException) {
@@ -223,7 +229,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
         }
     }
 
-    private fun isComplete(
+    private suspend fun isComplete(
         file: File,
         expectedSize: Long,
         expectedSha: String?,
@@ -271,11 +277,12 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
         }
     }
 
-    private fun updateDigestFromPrefix(file: File, length: Long, digest: MessageDigest) {
+    private suspend fun updateDigestFromPrefix(file: File, length: Long, digest: MessageDigest) {
         var remaining = length
         FileInputStream(file).use { input ->
             val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
             while (remaining > 0) {
+                currentCoroutineContext().ensureActive()
                 val count = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
                 if (count < 0) throw IOException("Partial model ended before resume offset")
                 digest.update(buffer, 0, count)
@@ -284,7 +291,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
         }
     }
 
-    private fun sha256(file: File): String {
+    private suspend fun sha256(file: File): String {
         val digest = MessageDigest.getInstance("SHA-256")
         updateDigestFromPrefix(file, file.length(), digest)
         return digestHex(digest)
