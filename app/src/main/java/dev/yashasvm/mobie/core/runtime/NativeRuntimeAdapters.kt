@@ -103,7 +103,11 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                             conversationDirty = false
                             cancelRequested = false
                             val modelFile = File(modelPath)
-                            LiteRtCacheState.markReady(liteRtCacheDirectory(modelFile), modelFile)
+                            LiteRtCacheState.markReady(
+                                liteRtCacheDirectory(modelFile),
+                                modelFile,
+                                configuredContextWindowTokens,
+                            )
                             Unit
                         } catch (error: Throwable) {
                             runRuntimeCleanupUnlessFatal(error) { loadedEngine.engine.close() }
@@ -529,7 +533,11 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         )
         if (memoryReason != null) throw IllegalStateException(memoryReason)
 
-        val reusableCache = LiteRtCacheState.canReuse(liteRtCacheDirectory(modelFile), modelFile)
+        val reusableCache = LiteRtCacheState.canReuse(
+            liteRtCacheDirectory(modelFile),
+            modelFile,
+            contextWindowTokens,
+        )
         val storageReason = RuntimeLoadStoragePolicy.blockReason(
             modelWeightsBytes = modelFile.length(),
             availableStorageBytes = modelFile.absoluteFile.parentFile?.usableSpace ?: -1,
