@@ -50,6 +50,39 @@ class ThermalGuardRuntimeAdapterTest {
     }
 
     @Test
+    fun thermalDecisionIsSampledWhenColdFlowCollectionStarts() = runBlocking {
+        var thermalStatus = 2
+        val delegate = RecordingRuntimeAdapter()
+        val adapter = ThermalGuardRuntimeAdapter(delegate) { thermalStatus }
+        val generation = adapter.generate("hello")
+
+        thermalStatus = 4
+        val events = generation.toList()
+
+        assertFalse(delegate.generateCalled)
+        val error = events.single() as InferenceEvent.Error
+        assertTrue(error.message.contains("too hot", ignoreCase = true))
+    }
+
+    @Test
+    fun recollectingGenerationFlowReevaluatesThermalState() = runBlocking {
+        var thermalStatus = 2
+        val delegate = RecordingRuntimeAdapter()
+        val adapter = ThermalGuardRuntimeAdapter(delegate) { thermalStatus }
+        val generation = adapter.generate("hello")
+
+        assertEquals(listOf(InferenceEvent.Complete), generation.toList())
+        assertEquals(1, delegate.generateCallCount)
+
+        thermalStatus = 4
+        val secondEvents = generation.toList()
+
+        assertEquals(1, delegate.generateCallCount)
+        val error = secondEvents.single() as InferenceEvent.Error
+        assertTrue(error.message.contains("too hot", ignoreCase = true))
+    }
+
+    @Test
     fun criticalEscalationCancelsRuntimeEvenWhenGenerationStopsEmittingTokens() = runBlocking {
         var thermalStatus = 2
         val delegate = RecordingRuntimeAdapter(
@@ -85,6 +118,7 @@ class ThermalGuardRuntimeAdapterTest {
     ) : RuntimeAdapter {
         override val format: ModelFormat = ModelFormat.LITERT_LM
         var generateCalled = false
+        var generateCallCount = 0
         var cancelCalled = false
         var lastGenerationConfig: GenerationConfig? = null
 
@@ -102,6 +136,7 @@ class ThermalGuardRuntimeAdapterTest {
             config: GenerationConfig,
         ): Flow<InferenceEvent> {
             generateCalled = true
+            generateCallCount += 1
             lastGenerationConfig = config
             val callback = onAfterFirstToken ?: return flowOf(InferenceEvent.Complete)
             return flow {
