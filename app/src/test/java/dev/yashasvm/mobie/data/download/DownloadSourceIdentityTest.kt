@@ -4,6 +4,7 @@ import java.util.Properties
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -80,6 +81,56 @@ class DownloadSourceIdentityTest {
 
         assertFalse(DownloadSourceIdentity.matches(Properties(), url))
         assertFalse(DownloadSourceIdentity.canReuseCompleted(Properties(), url, expectedSha256 = null))
+    }
+
+    @Test
+    fun `stale artifact metadata falls back to matching canonical metadata`() {
+        val fileName = "model.litertlm"
+        val stale = Properties().apply {
+            setProperty("sourceFileName", fileName)
+            DownloadSourceIdentity.stamp(
+                this,
+                "https://huggingface.co/acme/model/resolve/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/$fileName",
+            )
+        }
+        val currentUrl =
+            "https://huggingface.co/acme/model/resolve/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/$fileName"
+        val canonical = Properties().apply {
+            setProperty("sourceFileName", fileName)
+            DownloadSourceIdentity.stamp(this, currentUrl)
+        }
+
+        assertSame(
+            canonical,
+            DownloadSourceIdentity.selectReusableCompletedMetadata(
+                perArtifact = stale,
+                canonical = canonical,
+                sourceFileName = fileName,
+                sourceUrl = currentUrl,
+                expectedSha256 = null,
+            ),
+        )
+    }
+
+    @Test
+    fun `canonical metadata for another artifact is not selected`() {
+        val requestedFile = "model-q4.litertlm"
+        val currentUrl =
+            "https://huggingface.co/acme/model/resolve/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/$requestedFile"
+        val canonical = Properties().apply {
+            setProperty("sourceFileName", "model-q8.litertlm")
+            DownloadSourceIdentity.stamp(this, currentUrl)
+        }
+
+        assertNull(
+            DownloadSourceIdentity.selectReusableCompletedMetadata(
+                perArtifact = null,
+                canonical = canonical,
+                sourceFileName = requestedFile,
+                sourceUrl = currentUrl,
+                expectedSha256 = null,
+            ),
+        )
     }
 
     @Test
