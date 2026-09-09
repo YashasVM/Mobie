@@ -10,6 +10,7 @@
 - Made active download/checksum verification cancellation-aware and removed metadata temp-file collision risks.
 
 ## Important work in progress
+- The worker now applies the same reusable-metadata selection rule as completed-file lookup, so a stale per-artifact sidecar cannot make `ModelDownloadWorker` delete and redownload a valid installed file when matching canonical metadata proves the requested source. JVM regression coverage is committed; exact-tip Android CI is pending.
 - Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts; no speculative changes without a reproducible defect.
 - Continue runtime/recommendation failure-mode audit.
 - Physical-device validation is still needed for thermal/LMK behavior, long-context pressure, interrupted generation, GPU vision, and CPU thread policy.
@@ -37,7 +38,7 @@
 - Main-model GPU/NPU execution remains disabled pending representative handset evidence.
 
 ## Items to inspect before merging
-- Verify stale or corrupt per-artifact `.properties` sidecars cannot block reuse when matching canonical metadata validates the requested immutable source.
+- Verify stale or corrupt per-artifact `.properties` sidecars cannot block reuse in either lookup or worker execution when matching canonical metadata validates the requested immutable source.
 - Confirm portable LiteRT-LM `gpu`/`opencl` bundles remain CPU-recommendable while MediaTek/QNN/Adreno and desktop/web-specific bundles remain excluded.
 - Repeatedly stop long generation and verify bounded native cancellation plus fail-closed cleanup behavior.
 - Interrupt commit-pinned and mutable downloads at resume/finalization boundaries; immutable sources should recover safely while mutable sources restart.
