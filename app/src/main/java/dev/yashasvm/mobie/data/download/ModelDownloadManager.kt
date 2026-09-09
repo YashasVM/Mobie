@@ -50,10 +50,18 @@ class ModelDownloadManager(context: Context) {
         val directory = File(File(appContext.filesDir, "models"), DownloadFilePolicy.storageKey(modelId))
         val metadataFile = DownloadFilePolicy.artifactMetadataFile(directory, artifact.fileName)
         val legacyMetadataFile = File(directory, DownloadFilePolicy.METADATA_FILE)
-        val resolvedMetadata = readPropertiesOrNull(metadataFile)?.let { MetadataSource(it, metadataFile) }
-            ?: readPropertiesOrNull(legacyMetadataFile)?.takeIf {
+        val resolvedMetadata = sequenceOf(
+            readPropertiesOrNull(metadataFile)?.let { MetadataSource(it, metadataFile) },
+            readPropertiesOrNull(legacyMetadataFile)?.takeIf {
                 it.getProperty("sourceFileName") == artifact.fileName
-            }?.let { MetadataSource(it, legacyMetadataFile) }
+            }?.let { MetadataSource(it, legacyMetadataFile) },
+        ).filterNotNull().firstOrNull { source ->
+            DownloadSourceIdentity.canReuseCompleted(
+                source.properties,
+                artifact.downloadUrl,
+                artifact.sha256,
+            )
+        }
         val metadata = resolvedMetadata?.properties
         val verificationMetadataFile = resolvedMetadata?.file ?: metadataFile
         listOf(DownloadFilePolicy.storageFileName(artifact.fileName), DownloadFilePolicy.safeFileName(artifact.fileName))
