@@ -3,6 +3,7 @@
 ## Major changes completed this week
 - Hardened Hugging Face downloads and installs with immutable source identity, commit-pinned URLs, size/checksum validation, resumable partials, cancellation, storage checks, per-artifact metadata, crash recovery, and SHA-based WorkManager identities.
 - Made completed installs and deletion recover safely from corrupt or stale canonical/per-artifact metadata, including fallback to matching canonical metadata when a parseable stale artifact sidecar would otherwise force a redownload, while keeping ownership checks fail-closed.
+- Applied the same reusable-metadata selection rule inside `ModelDownloadWorker`, preventing a stale per-artifact sidecar from deleting and redownloading a valid installed file when matching canonical metadata proves the requested immutable source.
 - Improved recommendations/runtime sizing using RAM pressure, storage headroom, quantization, artifact size, context/KV estimates, backend support, and hardware targets; portable LiteRT-LM `gpu`/`opencl` bundles remain eligible while vendor/platform-specific bundles remain excluded.
 - Added LiteRT-LM telemetry for TTFT, latency, prefill/decode throughput, token count, app RAM, cold load, and warm-cache load.
 - Added thermal protection, inference-stall containment, bounded cancellation/unload, constrained-context replay, and a CI-validated two-thread CPU policy.
@@ -10,13 +11,13 @@
 - Made active download/checksum verification cancellation-aware and removed metadata temp-file collision risks.
 
 ## Important work in progress
-- The worker now applies the same reusable-metadata selection rule as completed-file lookup, so a stale per-artifact sidecar cannot make `ModelDownloadWorker` delete and redownload a valid installed file when matching canonical metadata proves the requested source. JVM regression coverage is committed; exact-tip Android CI is pending.
 - Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts; no speculative changes without a reproducible defect.
 - Continue runtime/recommendation failure-mode audit.
 - Physical-device validation is still needed for thermal/LMK behavior, long-context pressure, interrupted generation, GPU vision, and CPU thread policy.
 
 ## Tests actually performed
-- `5de23bb5`: full Android CI passed stale completed-file metadata recovery: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
+- `b0191ba8`: full Android CI passed worker stale-metadata fallback: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
+- `5de23bb5`: full Android CI passed stale completed-file metadata recovery across the same four gates.
 - `5b6018e5`: full Android CI passed corrupt completed-file metadata recovery across the same four gates.
 - `9d9ae1fe`: full Android CI passed portable LiteRT recommendation selection across the same four gates.
 - `29a68e25`: full Android CI passed stopped-generation bounded native cancellation across the same four gates.
