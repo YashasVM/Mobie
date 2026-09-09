@@ -14,6 +14,7 @@
 - Made deletion recover ownership from valid per-artifact metadata when canonical install metadata is missing/corrupt, while still failing closed on absent/conflicting ownership.
 
 ## Important work in progress
+- Validate bounded native cancellation when the caller stops an active guarded generation. The guard now explicitly requests native cancellation on non-terminal Flow exit and fails closed if that bounded cancellation cannot complete.
 - Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts; no new code change is being made without a reproducible correctness/reliability defect.
 - Physical-device validation is still needed for thermal/LMK behavior, long-context pressure, interrupted generation, GPU vision, and CPU thread policy.
 
@@ -47,6 +48,7 @@
 - Main-model GPU/NPU execution remains disabled pending representative handset evidence.
 
 ## Items to inspect before merging
+- Stop an active long generation repeatedly and verify native cancellation returns promptly; if native cancellation wedges, verify Mobie blocks runtime reuse until unload succeeds instead of returning to unsafe reuse.
 - Interrupt a commit-pinned download with no catalog size/checksum after final-file promotion but before install metadata publication; verify restart recovers the completed file from the matching immutable-source sidecar without re-downloading it.
 - Verify stale/mutable resume metadata never supplies a recovered length to a fresh download.
 - Delete an install after removing/corrupting canonical `.model.properties` while valid per-artifact metadata remains; verify deletion still succeeds, but conflicting/absent ownership metadata fails closed.
