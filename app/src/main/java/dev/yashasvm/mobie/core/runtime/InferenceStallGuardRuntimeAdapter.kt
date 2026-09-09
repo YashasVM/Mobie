@@ -4,6 +4,7 @@ import dev.yashasvm.mobie.core.model.ModelFormat
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
@@ -12,6 +13,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -77,6 +79,7 @@ class InferenceStallGuardRuntimeAdapter(
         }
         var sawProgress = false
         var sawTerminalEvent = false
+        var boundedCancellationRequested = false
         try {
             while (true) {
                 val timeoutMs = if (sawProgress) activeIdleTimeoutMs else firstEventTimeoutMs
@@ -84,6 +87,7 @@ class InferenceStallGuardRuntimeAdapter(
                 if (result == null) {
                     recoveryRequired = true
                     requestBoundedCancellation()
+                    boundedCancellationRequested = true
                     producer.cancel()
                     producerScope.cancel()
                     emit(
@@ -117,6 +121,12 @@ class InferenceStallGuardRuntimeAdapter(
                 }
             }
         } finally {
+            if (!sawTerminalEvent && !boundedCancellationRequested) {
+                val cancellationResult = withContext(NonCancellable) { requestBoundedCancellation() }
+                if (cancellationResult == null || cancellationResult.isFailure) {
+                    recoveryRequired = true
+                }
+            }
             producer.cancel()
             producerScope.cancel()
             events.cancel()
