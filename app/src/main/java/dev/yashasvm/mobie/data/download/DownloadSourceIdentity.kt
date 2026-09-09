@@ -31,6 +31,17 @@ object DownloadSourceIdentity {
     fun canReuseCompleted(properties: Properties?, sourceUrl: String, expectedSha256: String?): Boolean =
         !expectedSha256.isNullOrBlank() || matches(properties, sourceUrl)
 
+    fun selectReusableCompletedMetadata(
+        perArtifact: Properties?,
+        canonical: Properties?,
+        sourceFileName: String,
+        sourceUrl: String,
+        expectedSha256: String?,
+    ): Properties? = sequenceOf(
+        perArtifact,
+        canonical?.takeIf { it.getProperty("sourceFileName") == sourceFileName },
+    ).filterNotNull().firstOrNull { canReuseCompleted(it, sourceUrl, expectedSha256) }
+
     /**
      * A completed file may be recovered from an interrupted finalization only when the sidecar
      * identifies the same immutable source. Mutable URLs are deliberately restarted instead of
