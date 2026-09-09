@@ -11,11 +11,13 @@
 - Made active download/checksum verification cancellation-aware and removed metadata temp-file collision risks.
 
 ## Important work in progress
+- Validate fail-closed handling for a present but malformed `installedLength` metadata value; legacy metadata with the property absent remains readable, while corrupted length metadata must no longer silently bypass checksum-less file-integrity checks.
 - Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts; no speculative changes without a reproducible defect.
 - Continue runtime/recommendation failure-mode audit.
 - Physical-device validation is still needed for thermal/LMK behavior, long-context pressure, interrupted generation, GPU vision, and CPU thread policy.
 
 ## Tests actually performed
+- `a418464c`: full Android CI passed the validated worker-metadata recovery progress tip.
 - `b0191ba8`: full Android CI passed worker stale-metadata fallback: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
 - `5de23bb5`: full Android CI passed stale completed-file metadata recovery across the same four gates.
 - `5b6018e5`: full Android CI passed corrupt completed-file metadata recovery across the same four gates.
@@ -39,6 +41,7 @@
 - Main-model GPU/NPU execution remains disabled pending representative handset evidence.
 
 ## Items to inspect before merging
+- Corrupt `installedLength` metadata should fail closed instead of weakening checksum-less installed-file verification; legacy metadata with no `installedLength` should remain readable.
 - Verify stale or corrupt per-artifact `.properties` sidecars cannot block reuse in either lookup or worker execution when matching canonical metadata validates the requested immutable source.
 - Confirm portable LiteRT-LM `gpu`/`opencl` bundles remain CPU-recommendable while MediaTek/QNN/Adreno and desktop/web-specific bundles remain excluded.
 - Repeatedly stop long generation and verify bounded native cancellation plus fail-closed cleanup behavior.
