@@ -16,6 +16,7 @@
 - Made deletion recover ownership from valid per-artifact metadata when canonical install metadata is missing/corrupt, while still failing closed on absent/conflicting ownership.
 
 ## Important work in progress
+- Fixing completed-file recovery when a per-artifact Java properties sidecar is truncated/corrupt: `completedFile()` now ignores unreadable artifact metadata and may fall back to matching canonical metadata instead of throwing. Added emulator regression coverage; exact-tip Android CI is pending.
 - Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts; no new code change is being made without a reproducible correctness/reliability defect.
 - Continue auditing runtime/recommendation failure modes after validating portable LiteRT artifact selection and stopped-generation native cancellation; prioritize reproducible failures over speculative refactors.
 - Physical-device validation is still needed for thermal/LMK behavior, long-context pressure, interrupted generation, GPU vision, and CPU thread policy.
@@ -53,6 +54,7 @@
 - Main-model GPU/NPU execution remains disabled pending representative handset evidence.
 
 ## Items to inspect before merging
+- Corrupt/truncate a per-artifact `.properties` sidecar while matching canonical install metadata remains valid; verify completed-file lookup falls back safely instead of crashing or forcing a needless redownload.
 - Confirm official portable LiteRT-LM bundles such as `llama3_2_1b_mixed_int4_gpu.litertlm` remain eligible for CPU-backed recommendation, while MediaTek/QNN/Adreno and desktop/web-specific bundles remain excluded from automatic selection.
 - Stop an active long generation repeatedly and verify native cancellation returns promptly; if native cancellation wedges, verify Mobie blocks runtime reuse until unload succeeds instead of returning to unsafe reuse.
 - Interrupt a commit-pinned download with no catalog size/checksum after final-file promotion but before install metadata publication; verify restart recovers the completed file from the matching immutable-source sidecar without re-downloading it.
