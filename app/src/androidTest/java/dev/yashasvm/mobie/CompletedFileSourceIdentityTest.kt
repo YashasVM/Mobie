@@ -139,6 +139,47 @@ class CompletedFileSourceIdentityTest {
         Unit
     }
 
+    @Test
+    fun stalePerArtifactMetadataFallsBackToMatchingCanonicalMetadata() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val modelId = "mobie-test/stale-artifact-metadata-fallback"
+        val fileName = "stale-fallback-test.litertlm"
+        val staleSource =
+            "https://huggingface.co/example/model/resolve/ffffffffffffffffffffffffffffffffffffffff/$fileName"
+        val currentSource =
+            "https://huggingface.co/example/model/resolve/1111111111111111111111111111111111111111/$fileName"
+        val modelDir = File(File(context.filesDir, "models"), DownloadFilePolicy.storageKey(modelId))
+        modelDir.deleteRecursively()
+        modelDir.mkdirs()
+
+        val destination = File(modelDir, DownloadFilePolicy.storageFileName(fileName)).apply {
+            writeBytes(ByteArray(40 * 1024) { index -> (index * 13).toByte() })
+        }
+        writeIdentityMetadata(
+            DownloadFilePolicy.artifactMetadataFile(modelDir, fileName),
+            modelId,
+            fileName,
+            destination,
+            staleSource,
+        )
+        writeIdentityMetadata(
+            File(modelDir, DownloadFilePolicy.METADATA_FILE),
+            modelId,
+            fileName,
+            destination,
+            currentSource,
+        )
+
+        val completed = ModelDownloadManager(context).completedFile(
+            modelId,
+            artifact(fileName, currentSource, destination.length()),
+        )
+
+        assertEquals(destination.absolutePath, completed?.absolutePath)
+        modelDir.deleteRecursively()
+        Unit
+    }
+
     private fun artifact(fileName: String, source: String, size: Long) = ModelArtifact(
         fileName = fileName,
         downloadUrl = source,
