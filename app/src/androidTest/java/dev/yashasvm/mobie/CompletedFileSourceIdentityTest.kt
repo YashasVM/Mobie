@@ -106,6 +106,39 @@ class CompletedFileSourceIdentityTest {
         Unit
     }
 
+    @Test
+    fun corruptPerArtifactMetadataFallsBackToMatchingCanonicalMetadata() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val modelId = "mobie-test/corrupt-artifact-metadata-fallback"
+        val fileName = "fallback-test.litertlm"
+        val source =
+            "https://huggingface.co/example/model/resolve/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee/$fileName"
+        val modelDir = File(File(context.filesDir, "models"), DownloadFilePolicy.storageKey(modelId))
+        modelDir.deleteRecursively()
+        modelDir.mkdirs()
+
+        val destination = File(modelDir, DownloadFilePolicy.storageFileName(fileName)).apply {
+            writeBytes(ByteArray(32 * 1024) { index -> (index * 7).toByte() })
+        }
+        DownloadFilePolicy.artifactMetadataFile(modelDir, fileName).writeText("broken=\\u12G4\n")
+        writeIdentityMetadata(
+            File(modelDir, DownloadFilePolicy.METADATA_FILE),
+            modelId,
+            fileName,
+            destination,
+            source,
+        )
+
+        val completed = ModelDownloadManager(context).completedFile(
+            modelId,
+            artifact(fileName, source, destination.length()),
+        )
+
+        assertEquals(destination.absolutePath, completed?.absolutePath)
+        modelDir.deleteRecursively()
+        Unit
+    }
+
     private fun artifact(fileName: String, source: String, size: Long) = ModelArtifact(
         fileName = fileName,
         downloadUrl = source,
