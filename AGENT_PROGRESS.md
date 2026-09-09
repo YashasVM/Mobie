@@ -5,6 +5,7 @@
 - Made completed installs crash-recoverable from validated per-artifact metadata and made model deletion coordinate with WorkManager artifact jobs before removing storage.
 - Replaced collision-prone Java `hashCode()` WorkManager identities with SHA-based identities.
 - Improved recommendations and runtime context sizing using RAM pressure, storage headroom, quantization, artifact size, context/KV estimates, backend support, and hardware targets.
+- Corrected automatic recommendations so portable LiteRT-LM bundles with generic `gpu`/`opencl` backend hints remain eligible for Android CPU-backed execution, while vendor/platform-specific bundles remain fail-closed.
 - Added real LiteRT-LM telemetry for TTFT, latency, prefill/decode throughput, token count, app RAM, cold load, and warm-cache load.
 - Added thermal protection, inference-stall containment, bounded cancellation/unload, constrained-context replay, and a CI-validated two-thread CPU policy.
 - Hardened runtime lifecycle ownership so stale load/unload/reset/delete work cannot unload a newer model or remove files still held by native resources.
@@ -15,13 +16,12 @@
 - Made deletion recover ownership from valid per-artifact metadata when canonical install metadata is missing/corrupt, while still failing closed on absent/conflicting ownership.
 
 ## Important work in progress
-- Correct automatic recommendations that wrongly excluded portable LiteRT-LM bundles merely because their filenames contain generic `gpu`/`opencl` backend hints; official CPU-runnable Llama 3.2 1B is the regression case. The first exact-tip run exposed a stale contradictory `AiModelTest`; regression coverage is now aligned and the replacement exact-tip CI run is pending.
 - Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts; no new code change is being made without a reproducible correctness/reliability defect.
-- Continue auditing runtime/recommendation failure modes after validating stopped-generation native cancellation; prioritize reproducible failures over speculative refactors.
+- Continue auditing runtime/recommendation failure modes after validating portable LiteRT artifact selection and stopped-generation native cancellation; prioritize reproducible failures over speculative refactors.
 - Physical-device validation is still needed for thermal/LMK behavior, long-context pressure, interrupted generation, GPU vision, and CPU thread policy.
 
 ## Tests actually performed
-- Added JVM regression coverage that keeps portable `gpu`/`opencl` LiteRT-LM bundles eligible and selectable while retaining fail-closed classification for MediaTek/QNN/Adreno and desktop/web-specific packages. The first run failed only because an older test still asserted that generic `gpu`/`opencl` labels were hardware-specific; that stale expectation has been corrected and exact-tip CI is rerunning.
+- `9d9ae1fe`: full Android CI passed portable LiteRT recommendation selection: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E. Regression coverage keeps generic `gpu`/`opencl` LiteRT-LM bundles eligible while retaining fail-closed classification for MediaTek/QNN/Adreno and desktop/web-specific packages.
 - `29a68e25`: full Android CI passed stopped-generation bounded native cancellation: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
 - Added deterministic JVM coverage for caller cancellation, bounded native-cancel failure, and malformed generation ending without a terminal callback.
 - `0de8146f`: full Android CI passed resolved-length crash recovery: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
