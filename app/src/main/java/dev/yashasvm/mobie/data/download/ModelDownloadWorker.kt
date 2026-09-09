@@ -59,10 +59,13 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
         val resumeMetadataFile = File(partial.path + DownloadSourceIdentity.RESUME_METADATA_SUFFIX)
         val artifactMetadataFile = DownloadFilePolicy.artifactMetadataFile(modelDir, fileName)
         val legacyMetadataFile = File(modelDir, DownloadFilePolicy.METADATA_FILE)
-        val verifiedMetadata = artifactMetadataFile.takeIf(File::isFile)?.let(::readProperties)
-            ?: legacyMetadataFile.takeIf(File::isFile)?.let(::readProperties)?.takeIf {
-                it.getProperty("sourceFileName") == fileName
-            }
+        val verifiedMetadata = DownloadSourceIdentity.selectReusableCompletedMetadata(
+            perArtifact = artifactMetadataFile.takeIf(File::isFile)?.let(::readProperties),
+            canonical = legacyMetadataFile.takeIf(File::isFile)?.let(::readProperties),
+            sourceFileName = fileName,
+            sourceUrl = url,
+            expectedSha256 = expectedSha,
+        )
         val resumeMetadata = resumeMetadataFile.takeIf(File::isFile)?.let(::readProperties)
         val resumeResolvedSize = DownloadSourceIdentity.resolvedLength(resumeMetadata)
             ?.takeIf { DownloadSourceIdentity.matches(resumeMetadata, url) }
@@ -395,18 +398,19 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
     }
 
     private fun invalidInput(message: String) = Result.failure(dataOf(message))
+
     private fun dataOf(message: String) = Data.Builder().putString(KEY_ERROR, message).build()
 
     companion object {
         const val KEY_URL = "url"
-        const val KEY_MODEL_ID = "model_id"
+        const val KEY_MODEL_ID = "modelId"
         const val KEY_TITLE = "title"
         const val KEY_AUTHOR = "author"
         const val KEY_DESCRIPTION = "description"
         const val KEY_TYPE = "type"
         const val KEY_LICENSE = "license"
         const val KEY_GATED = "gated"
-        const val KEY_FILE_NAME = "file_name"
+        const val KEY_FILE_NAME = "fileName"
         const val KEY_QUANTIZATION = "quantization"
         const val KEY_SHA256 = "sha256"
         const val KEY_SIZE = "size"
@@ -414,10 +418,11 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
         const val KEY_SPEED = "speed"
         const val KEY_PATH = "path"
         const val KEY_ERROR = "error"
-        const val MAX_ATTEMPTS = 4
-        private const val CONNECT_TIMEOUT_SECONDS = 30L
-        private const val READ_TIMEOUT_SECONDS = 60L
-        private const val PROGRESS_INTERVAL_MS = 250L
+
         private const val CHANNEL_ID = "model_downloads"
+        private const val CONNECT_TIMEOUT_SECONDS = 20L
+        private const val READ_TIMEOUT_SECONDS = 120L
+        private const val MAX_ATTEMPTS = 4
+        private const val PROGRESS_INTERVAL_MS = 250L
     }
 }
