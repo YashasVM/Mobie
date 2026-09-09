@@ -230,13 +230,14 @@ class InferenceStallGuardRuntimeAdapterTest {
         val delegate = RecordingRuntimeAdapter(generation = flowOf(InferenceEvent.Token("partial")))
         val adapter = InferenceStallGuardRuntimeAdapter(
             delegate = delegate,
-            firstEventTimeoutMs = 100L,
-            activeIdleTimeoutMs = 100L,
+            firstEventTimeoutMs = 1_000L,
+            activeIdleTimeoutMs = 1_000L,
             cancellationTimeoutMs = 100L,
         )
 
         val events = adapter.generate("prompt").toList()
 
+        assertTrue(delegate.cancelCalled)
         assertEquals(InferenceEvent.Token("partial"), events.first())
         val error = events.last() as InferenceEvent.Error
         assertTrue(error.message.contains("without a completion signal", ignoreCase = true))
