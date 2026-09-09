@@ -3,6 +3,7 @@
 ## Major changes completed this week
 - Hardened Hugging Face downloads against stale/corrupt resume and reuse with immutable-source identity, size/checksum validation, retained partials, cancellation, storage checks, commit-pinned Hub URLs, per-artifact metadata, and crash recovery for commit-pinned artifacts whose catalog size/checksum is unknown by persisting the resolved HTTP transfer length only for the same immutable source.
 - Made completed installs crash-recoverable from validated per-artifact metadata and made model deletion coordinate with WorkManager artifact jobs before removing storage.
+- Made completed-file recovery tolerate truncated/corrupt per-artifact Java properties metadata: unreadable sidecars are ignored and matching canonical metadata can recover the validated completed artifact instead of crashing or forcing a needless redownload.
 - Replaced collision-prone Java `hashCode()` WorkManager identities with SHA-based identities.
 - Improved recommendations and runtime context sizing using RAM pressure, storage headroom, quantization, artifact size, context/KV estimates, backend support, and hardware targets.
 - Corrected automatic recommendations so portable LiteRT-LM bundles with generic `gpu`/`opencl` backend hints remain eligible for Android CPU-backed execution, while vendor/platform-specific bundles remain fail-closed.
@@ -16,12 +17,12 @@
 - Made deletion recover ownership from valid per-artifact metadata when canonical install metadata is missing/corrupt, while still failing closed on absent/conflicting ownership.
 
 ## Important work in progress
-- Fixing completed-file recovery when a per-artifact Java properties sidecar is truncated/corrupt: `completedFile()` now ignores unreadable artifact metadata and may fall back to matching canonical metadata instead of throwing. Added emulator regression coverage; exact-tip Android CI is pending.
 - Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts; no new code change is being made without a reproducible correctness/reliability defect.
 - Continue auditing runtime/recommendation failure modes after validating portable LiteRT artifact selection and stopped-generation native cancellation; prioritize reproducible failures over speculative refactors.
 - Physical-device validation is still needed for thermal/LMK behavior, long-context pressure, interrupted generation, GPU vision, and CPU thread policy.
 
 ## Tests actually performed
+- `5b6018e5`: full Android CI passed corrupt completed-file metadata recovery: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E. Emulator coverage corrupts a per-artifact Java properties sidecar and verifies matching canonical metadata safely recovers the valid completed model.
 - `9d9ae1fe`: full Android CI passed portable LiteRT recommendation selection: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E. Regression coverage keeps generic `gpu`/`opencl` LiteRT-LM bundles eligible while retaining fail-closed classification for MediaTek/QNN/Adreno and desktop/web-specific packages.
 - `29a68e25`: full Android CI passed stopped-generation bounded native cancellation: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
 - Added deterministic JVM coverage for caller cancellation, bounded native-cancel failure, and malformed generation ending without a terminal callback.
