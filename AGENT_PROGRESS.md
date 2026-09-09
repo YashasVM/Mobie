@@ -9,16 +9,19 @@
 - Added thermal protection, inference-stall containment, bounded cancellation/unload, constrained-context replay, and a CI-validated two-thread CPU policy.
 - Hardened runtime lifecycle ownership so stale load/unload/reset/delete work cannot unload a newer model or remove files still held by native resources.
 - Added fail-closed recovery after stalled native inference so Mobie blocks reuse/deletion over uncertain native state until cleanup succeeds.
+- Bounded native cancellation when callers stop guarded generation; unsuccessful or timed-out native cancellation now marks runtime ownership uncertain and blocks reuse until cleanup succeeds.
 - Eliminated temp-file collisions in both worker metadata publication and manager-side metadata repair/verification.
 - Made active model transfer, worker checksum loops, and manager-side completed-file verification cooperatively observe coroutine cancellation so cancelled work does not keep consuming network/CPU until an unrelated suspend point.
 - Made deletion recover ownership from valid per-artifact metadata when canonical install metadata is missing/corrupt, while still failing closed on absent/conflicting ownership.
 
 ## Important work in progress
-- Validate bounded native cancellation when the caller stops an active guarded generation. The guard now explicitly requests native cancellation on non-terminal Flow exit and fails closed if that bounded cancellation cannot complete.
 - Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts; no new code change is being made without a reproducible correctness/reliability defect.
+- Continue auditing runtime/recommendation failure modes after validating stopped-generation native cancellation; prioritize reproducible failures over speculative refactors.
 - Physical-device validation is still needed for thermal/LMK behavior, long-context pressure, interrupted generation, GPU vision, and CPU thread policy.
 
 ## Tests actually performed
+- `29a68e25`: full Android CI passed stopped-generation bounded native cancellation: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
+- Added deterministic JVM coverage for caller cancellation, bounded native-cancel failure, and malformed generation ending without a terminal callback.
 - `0de8146f`: full Android CI passed resolved-length crash recovery: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
 - `19ecbc71`: JVM tests/lint/debug APK, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E passed resolved-length crash recovery. Emulator smoke did not reach Mobie tests because GitHub Android SDK provisioning failed with `Intel x86_64 Atom System Image: Error on ZipFile unknown archive`; the subsequent exact-tip run passed emulator smoke.
 - `652173df`: JVM tests/lint/debug APK, emulator instrumentation, and real LiteRT-LM text E2E passed resolved-length crash recovery. Vision E2E reached the 55-minute job timeout and was cancelled without reporting a test failure; the subsequent exact-tip run passed vision.
