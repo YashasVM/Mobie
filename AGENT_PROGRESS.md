@@ -2,7 +2,7 @@
 
 ## Major changes completed this week
 - Hardened Hugging Face downloads and installs with immutable source identity, commit-pinned URLs, size/checksum validation, resumable partials, cancellation, storage checks, per-artifact metadata, crash recovery, and SHA-based WorkManager identities.
-- Made completed installs and deletion recover safely from per-artifact metadata, including corrupt canonical/per-artifact sidecars, while keeping ownership checks fail-closed.
+- Made completed installs and deletion recover safely from corrupt or stale canonical/per-artifact metadata, including fallback to matching canonical metadata when a parseable stale artifact sidecar would otherwise force a redownload, while keeping ownership checks fail-closed.
 - Improved recommendations/runtime sizing using RAM pressure, storage headroom, quantization, artifact size, context/KV estimates, backend support, and hardware targets; portable LiteRT-LM `gpu`/`opencl` bundles remain eligible while vendor/platform-specific bundles remain excluded.
 - Added LiteRT-LM telemetry for TTFT, latency, prefill/decode throughput, token count, app RAM, cold load, and warm-cache load.
 - Added thermal protection, inference-stall containment, bounded cancellation/unload, constrained-context replay, and a CI-validated two-thread CPU policy.
@@ -10,13 +10,13 @@
 - Made active download/checksum verification cancellation-aware and removed metadata temp-file collision risks.
 
 ## Important work in progress
-- Fixing completed-file recovery when a parseable but stale per-artifact sidecar shadows matching canonical metadata. `ModelDownloadManager.completedFile()` now selects the first metadata source that is actually reusable for the requested artifact, and instrumentation covers stale-sidecar fallback. Exact-tip Android CI is pending.
 - Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts; no speculative changes without a reproducible defect.
 - Continue runtime/recommendation failure-mode audit.
 - Physical-device validation is still needed for thermal/LMK behavior, long-context pressure, interrupted generation, GPU vision, and CPU thread policy.
 
 ## Tests actually performed
-- `5b6018e5`: full Android CI passed corrupt completed-file metadata recovery: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
+- `5de23bb5`: full Android CI passed stale completed-file metadata recovery: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
+- `5b6018e5`: full Android CI passed corrupt completed-file metadata recovery across the same four gates.
 - `9d9ae1fe`: full Android CI passed portable LiteRT recommendation selection across the same four gates.
 - `29a68e25`: full Android CI passed stopped-generation bounded native cancellation across the same four gates.
 - `0de8146f`: full Android CI passed resolved-length crash recovery across the same four gates.
@@ -24,7 +24,6 @@
 - `25c8e489`: full Android CI passed cancellation-aware completed-file SHA-256 verification.
 - `4e32fc92`, `18d4561f`, `ef67c99e`, `0fedffd2`, `ad7e5789`, `dee93cce`, and `114d45d2`: full Android CI validated cooperative worker cancellation, metadata publication/repair collision protection, stalled-unload recovery, and runtime ownership/deletion lifecycle safety.
 - Real E2E coverage repeatedly exercised Qwen3-0.6B INT4 LiteRT-LM download/load/generate/recollect/cancel/recover/reset/history/unload/reload plus SmolVLM2-500M vision restore/text/replacement-image/text generation.
-- New stale-sidecar regression is committed at `7f4cc913`; CI is pending and is not yet counted as validated.
 
 ## Real benchmarks / performance improvements
 - Latest 2-vCPU Android CI, Qwen: runtime default 6.07 decode tok/s and 7.32 prefill tok/s; explicit 2 threads 19.06 decode tok/s and 38.70 prefill tok/s (3.14x decode, 5.29x prefill). CI evidence only.
@@ -38,8 +37,7 @@
 - Main-model GPU/NPU execution remains disabled pending representative handset evidence.
 
 ## Items to inspect before merging
-- Verify a stale but parseable per-artifact sidecar cannot block reuse when matching canonical metadata validates the requested immutable source.
-- Corrupt/truncate a per-artifact `.properties` sidecar and verify matching canonical metadata recovers the completed model without crash/redownload.
+- Verify stale or corrupt per-artifact `.properties` sidecars cannot block reuse when matching canonical metadata validates the requested immutable source.
 - Confirm portable LiteRT-LM `gpu`/`opencl` bundles remain CPU-recommendable while MediaTek/QNN/Adreno and desktop/web-specific bundles remain excluded.
 - Repeatedly stop long generation and verify bounded native cancellation plus fail-closed cleanup behavior.
 - Interrupt commit-pinned and mutable downloads at resume/finalization boundaries; immutable sources should recover safely while mutable sources restart.
