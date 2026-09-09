@@ -24,12 +24,14 @@ internal object ModelFileVerification {
 
     /**
      * Rejects silent truncation/replacement for newly installed artifacts even when Hugging Face did
-     * not publish a checksum. Legacy metadata without an installedLength remains readable.
+     * not publish a checksum. Legacy metadata without an installedLength remains readable, but a
+     * present malformed value is corruption and must fail closed rather than silently weakening the
+     * integrity check.
      */
     fun matchesInstalledLength(properties: Properties?, file: File): Boolean {
         if (!file.isFile) return false
-        val installedLength = properties?.getProperty(KEY_INSTALLED_LENGTH)?.toLongOrNull()
-            ?: return true
+        val installedLengthRaw = properties?.getProperty(KEY_INSTALLED_LENGTH) ?: return true
+        val installedLength = installedLengthRaw.toLongOrNull() ?: return false
         if (properties.getProperty("fileName")?.let { it != file.name } == true) return false
         return installedLength >= 0 && file.length() == installedLength
     }
