@@ -67,6 +67,21 @@ class ModelFileVerificationTest {
     }
 
     @Test
+    fun `malformed installed length fails closed`() {
+        val file = File.createTempFile("mobie-malformed-installed-length", ".litertlm")
+        try {
+            file.writeBytes(byteArrayOf(1, 2, 3, 4))
+            val properties = Properties().apply {
+                setProperty(ModelFileVerification.KEY_INSTALLED_LENGTH, "not-a-length")
+            }
+
+            assertFalse(ModelFileVerification.matchesInstalledLength(properties, file))
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
     fun `local digest protects checksum-less model fingerprint`() {
         val file = File.createTempFile("mobie-local-digest", ".litertlm")
         try {
