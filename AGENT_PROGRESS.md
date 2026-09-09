@@ -15,11 +15,13 @@
 - Made deletion recover ownership from valid per-artifact metadata when canonical install metadata is missing/corrupt, while still failing closed on absent/conflicting ownership.
 
 ## Important work in progress
+- Correct automatic recommendations that wrongly excluded portable LiteRT-LM bundles merely because their filenames contain generic `gpu`/`opencl` backend hints; official CPU-runnable Llama 3.2 1B is the regression case. Exact-tip Android CI is pending.
 - Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts; no new code change is being made without a reproducible correctness/reliability defect.
 - Continue auditing runtime/recommendation failure modes after validating stopped-generation native cancellation; prioritize reproducible failures over speculative refactors.
 - Physical-device validation is still needed for thermal/LMK behavior, long-context pressure, interrupted generation, GPU vision, and CPU thread policy.
 
 ## Tests actually performed
+- Added JVM regression coverage that keeps portable `gpu`/`opencl` LiteRT-LM bundles eligible while retaining fail-closed classification for MediaTek/QNN/Adreno and desktop/web-specific packages; exact-tip CI is pending.
 - `29a68e25`: full Android CI passed stopped-generation bounded native cancellation: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
 - Added deterministic JVM coverage for caller cancellation, bounded native-cancel failure, and malformed generation ending without a terminal callback.
 - `0de8146f`: full Android CI passed resolved-length crash recovery: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
@@ -51,6 +53,7 @@
 - Main-model GPU/NPU execution remains disabled pending representative handset evidence.
 
 ## Items to inspect before merging
+- Confirm official portable LiteRT-LM bundles such as `llama3_2_1b_mixed_int4_gpu.litertlm` remain eligible for CPU-backed recommendation, while MediaTek/QNN/Adreno and desktop/web-specific bundles remain excluded from automatic selection.
 - Stop an active long generation repeatedly and verify native cancellation returns promptly; if native cancellation wedges, verify Mobie blocks runtime reuse until unload succeeds instead of returning to unsafe reuse.
 - Interrupt a commit-pinned download with no catalog size/checksum after final-file promotion but before install metadata publication; verify restart recovers the completed file from the matching immutable-source sidecar without re-downloading it.
 - Verify stale/mutable resume metadata never supplies a recovered length to a fresh download.
