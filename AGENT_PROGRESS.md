@@ -15,13 +15,13 @@
 - Made deletion recover ownership from valid per-artifact metadata when canonical install metadata is missing/corrupt, while still failing closed on absent/conflicting ownership.
 
 ## Important work in progress
-- Correct automatic recommendations that wrongly excluded portable LiteRT-LM bundles merely because their filenames contain generic `gpu`/`opencl` backend hints; official CPU-runnable Llama 3.2 1B is the regression case. Exact-tip Android CI is pending.
+- Correct automatic recommendations that wrongly excluded portable LiteRT-LM bundles merely because their filenames contain generic `gpu`/`opencl` backend hints; official CPU-runnable Llama 3.2 1B is the regression case. The first exact-tip run exposed a stale contradictory `AiModelTest`; regression coverage is now aligned and the replacement exact-tip CI run is pending.
 - Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts; no new code change is being made without a reproducible correctness/reliability defect.
 - Continue auditing runtime/recommendation failure modes after validating stopped-generation native cancellation; prioritize reproducible failures over speculative refactors.
 - Physical-device validation is still needed for thermal/LMK behavior, long-context pressure, interrupted generation, GPU vision, and CPU thread policy.
 
 ## Tests actually performed
-- Added JVM regression coverage that keeps portable `gpu`/`opencl` LiteRT-LM bundles eligible while retaining fail-closed classification for MediaTek/QNN/Adreno and desktop/web-specific packages; exact-tip CI is pending.
+- Added JVM regression coverage that keeps portable `gpu`/`opencl` LiteRT-LM bundles eligible and selectable while retaining fail-closed classification for MediaTek/QNN/Adreno and desktop/web-specific packages. The first run failed only because an older test still asserted that generic `gpu`/`opencl` labels were hardware-specific; that stale expectation has been corrected and exact-tip CI is rerunning.
 - `29a68e25`: full Android CI passed stopped-generation bounded native cancellation: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
 - Added deterministic JVM coverage for caller cancellation, bounded native-cancel failure, and malformed generation ending without a terminal callback.
 - `0de8146f`: full Android CI passed resolved-length crash recovery: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
