@@ -50,11 +50,12 @@ class ModelDownloadManager(context: Context) {
         val directory = File(File(appContext.filesDir, "models"), DownloadFilePolicy.storageKey(modelId))
         val metadataFile = DownloadFilePolicy.artifactMetadataFile(directory, artifact.fileName)
         val legacyMetadataFile = File(directory, DownloadFilePolicy.METADATA_FILE)
-        val metadata = metadataFile.takeIf(File::isFile)?.let(::readProperties)
-            ?: legacyMetadataFile.takeIf(File::isFile)?.let(::readProperties)?.takeIf {
+        val resolvedMetadata = readPropertiesOrNull(metadataFile)?.let { MetadataSource(it, metadataFile) }
+            ?: readPropertiesOrNull(legacyMetadataFile)?.takeIf {
                 it.getProperty("sourceFileName") == artifact.fileName
-            }
-        val verificationMetadataFile = metadataFile.takeIf(File::isFile) ?: legacyMetadataFile
+            }?.let { MetadataSource(it, legacyMetadataFile) }
+        val metadata = resolvedMetadata?.properties
+        val verificationMetadataFile = resolvedMetadata?.file ?: metadataFile
         listOf(DownloadFilePolicy.storageFileName(artifact.fileName), DownloadFilePolicy.safeFileName(artifact.fileName))
             .asSequence()
             .map { File(directory, it) }
@@ -244,6 +245,10 @@ class ModelDownloadManager(context: Context) {
         file.inputStream().use(::load)
     }
 
+    private fun readPropertiesOrNull(file: File): Properties? = file.takeIf(File::isFile)?.let { source ->
+        runCatching { readProperties(source) }.getOrNull()
+    }
+
     private fun writePropertiesAtomically(destination: File, properties: Properties) {
         val partial = DownloadFilePolicy.metadataPartialFile(destination, UUID.randomUUID().toString())
         try {
@@ -279,6 +284,11 @@ class ModelDownloadManager(context: Context) {
         DownloadFilePolicy.workKey(modelId, artifact.fileName)
 
     private fun modelWorkTag(modelId: String) = "model-storage-${DownloadFilePolicy.storageKey(modelId)}"
+
+    private data class MetadataSource(
+        val properties: Properties,
+        val file: File,
+    )
 
     private data class ResolvedInstall(
         val properties: Properties,
