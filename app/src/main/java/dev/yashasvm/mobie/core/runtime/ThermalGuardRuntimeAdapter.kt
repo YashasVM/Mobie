@@ -2,6 +2,7 @@ package dev.yashasvm.mobie.core.runtime
 
 import dev.yashasvm.mobie.core.model.ModelFormat
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
@@ -60,9 +61,28 @@ internal class ThermalGuardRuntimeAdapter(
                     requestedMaxNewTokens = decision.maxNewTokens,
                 )
                 if (!currentDecision.allowed && thermalAbort.compareAndSet(false, true)) {
-                    delegate.cancel()
-                    send(InferenceEvent.Error(currentDecision.errorMessage ?: "Thermal limit reached"))
-                    generationJob.cancel()
+                    val cancellationFailure = try {
+                        delegate.cancel()
+                        null
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        error
+                    } finally {
+                        // A failed native cancel must not leave the collector alive. Cancelling the
+                        // collection also drives outer runtime guards through their cleanup path.
+                        generationJob.cancel()
+                    }
+                    val thermalMessage = currentDecision.errorMessage ?: "Thermal limit reached"
+                    send(
+                        InferenceEvent.Error(
+                            if (cancellationFailure == null) {
+                                thermalMessage
+                            } else {
+                                "$thermalMessage Runtime cancellation also failed; reload the model or restart Mobie before retrying."
+                            },
+                        ),
+                    )
                     break
                 }
             }
