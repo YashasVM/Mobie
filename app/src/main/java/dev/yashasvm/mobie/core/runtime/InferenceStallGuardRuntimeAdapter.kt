@@ -62,7 +62,7 @@ class InferenceStallGuardRuntimeAdapter(
         config: GenerationConfig,
     ): Flow<InferenceEvent> = flow {
         if (recoveryRequired) {
-            emit(InferenceEvent.Error(recoveryRequiredError().message.orEmpty()))
+            emit(InferenceEvent.Error(recoveryRequiredError().message.orEmpty(), requiresReload = true))
             return@flow
         }
 
@@ -92,11 +92,12 @@ class InferenceStallGuardRuntimeAdapter(
                     producerScope.cancel()
                     emit(
                         InferenceEvent.Error(
-                            if (sawProgress) {
+                            message = if (sawProgress) {
                                 "Local inference stopped making progress and was cancelled. Reload the model before retrying; restart Mobie if it cannot unload cleanly."
                             } else {
                                 "Local inference did not start within the safety timeout and was cancelled. Reload the model before retrying; restart Mobie if it cannot unload cleanly."
                             },
+                            requiresReload = true,
                         ),
                     )
                     return@flow
