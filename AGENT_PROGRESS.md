@@ -8,16 +8,17 @@
 - Improved recommendations/runtime sizing using RAM pressure, storage headroom, quantization, artifact size, context/KV estimates, backend support, and hardware targets; portable LiteRT-LM `gpu`/`opencl` bundles remain eligible while vendor/platform-specific bundles remain excluded.
 - Added LiteRT-LM telemetry for TTFT, latency, prefill/decode throughput, token count, app RAM, cold load, and warm-cache load.
 - Added thermal protection, inference-stall containment, bounded cancellation/unload, constrained-context replay, and a CI-validated two-thread CPU policy.
+- Hardened critical thermal escalation so generation collection still stops promptly when native runtime cancellation throws, surfacing recovery guidance instead of allowing generation to continue.
 - Hardened runtime ownership so stale lifecycle work cannot unload a newer model or delete files still held by native resources; uncertain native state now fails closed until cleanup succeeds.
 - Made active download/checksum verification cancellation-aware and removed metadata temp-file collision risks.
 
 ## Important work in progress
-- Thermal critical-escalation handling now cancels the generation collector even when native runtime cancellation throws; regression added, full Android CI pending.
 - Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts; no speculative changes without a reproducible defect.
 - Continue runtime/recommendation failure-mode audit.
 - Physical-device validation is still needed for thermal/LMK behavior, long-context pressure, interrupted generation, GPU vision, and CPU thread policy.
 
 ## Tests actually performed
+- `5422a236`: full Android CI passed critical thermal cancellation-failure hardening, including the regression where native cancel throws while generation is stalled.
 - `39f1d501`: full Android CI passed the validated installed-length metadata progress tip.
 - `56542570`: full Android CI passed malformed `installedLength` fail-closed validation: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
 - `a418464c`: full Android CI passed the validated worker-metadata recovery progress tip.
