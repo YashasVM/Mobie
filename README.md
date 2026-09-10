@@ -1,5 +1,7 @@
 # Mobie
 
+> I've stopped this development for a bit, but I'll be back to it soon :)
+
 Mobie is an Android browser and local runner for mobile-friendly AI models hosted on Hugging Face. It aims to offer a wider catalog than curated gallery apps while being honest about device limits, model formats, licenses, and gated access.
 
 ## MVP status
