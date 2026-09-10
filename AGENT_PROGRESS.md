@@ -13,11 +13,14 @@
 - Made active download/checksum verification cancellation-aware and removed metadata temp-file collision risks.
 
 ## Important work in progress
+- Fail closed after explicit/native cancellation failure: the stall guard now blocks further generation until a successful unload clears uncertain runtime ownership; CI validation is pending.
+- Propagate a structured `requiresReload` signal from watchdog/thermal recovery failures so callers can distinguish retryable inference errors from unsafe runtime state.
 - Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts; no speculative changes without a reproducible defect.
 - Continue runtime/recommendation failure-mode audit.
 - Physical-device validation is still needed for thermal/LMK behavior, long-context pressure, interrupted generation, GPU vision, and CPU thread policy.
 
 ## Tests actually performed
+- Added JVM regression coverage proving a failed explicit cancel blocks subsequent generation and a successful unload restores execution; Android CI for the current tip is pending.
 - `5422a236`: full Android CI passed critical thermal cancellation-failure hardening, including the regression where native cancel throws while generation is stalled.
 - `39f1d501`: full Android CI passed the validated installed-length metadata progress tip.
 - `56542570`: full Android CI passed malformed `installedLength` fail-closed validation: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
@@ -45,6 +48,7 @@
 - Main-model GPU/NPU execution remains disabled pending representative handset evidence.
 
 ## Items to inspect before merging
+- Force explicit/native cancellation failure and verify another generation is refused until unload succeeds; recovery errors should carry `requiresReload=true`.
 - Force critical thermal escalation while runtime cancellation fails; generation collection should still stop promptly and surface a recovery-oriented error.
 - Corrupt `installedLength` metadata should fail closed instead of weakening checksum-less installed-file verification; legacy metadata with no `installedLength` should remain readable.
 - Verify stale or corrupt per-artifact `.properties` sidecars cannot block reuse in either lookup or worker execution when matching canonical metadata validates the requested immutable source.
