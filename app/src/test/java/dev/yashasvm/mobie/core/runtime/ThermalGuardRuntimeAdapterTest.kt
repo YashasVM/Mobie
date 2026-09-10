@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -105,6 +106,30 @@ class ThermalGuardRuntimeAdapterTest {
     }
 
     @Test
+    fun criticalEscalationStillStopsCollectorWhenRuntimeCancelThrows() = runBlocking {
+        var thermalStatus = 2
+        val delegate = RecordingRuntimeAdapter(
+            onAfterFirstToken = { thermalStatus = 4 },
+            stallAfterFirstTokenMs = 10_000L,
+            cancelFailure = IllegalStateException("native cancel failed"),
+        )
+        val adapter = ThermalGuardRuntimeAdapter(
+            delegate = delegate,
+            thermalStatusProvider = { thermalStatus },
+            activePollIntervalMs = 1L,
+        )
+
+        val events = withTimeout(1_000L) { adapter.generate("hello").toList() }
+
+        assertTrue(delegate.cancelCalled)
+        assertEquals(2, events.size)
+        assertEquals(InferenceEvent.Token("first"), events.first())
+        val error = events.last() as InferenceEvent.Error
+        assertTrue(error.message.contains("too hot", ignoreCase = true))
+        assertTrue(error.message.contains("cancellation also failed", ignoreCase = true))
+    }
+
+    @Test
     fun policyNeverExpandsSmallUserGenerationLimit() {
         val decision = ThermalInferencePolicy.decide(thermalStatus = 3, requestedMaxNewTokens = 64)
 
@@ -115,6 +140,7 @@ class ThermalGuardRuntimeAdapterTest {
     private class RecordingRuntimeAdapter(
         private val onAfterFirstToken: (() -> Unit)? = null,
         private val stallAfterFirstTokenMs: Long = 0L,
+        private val cancelFailure: Exception? = null,
     ) : RuntimeAdapter {
         override val format: ModelFormat = ModelFormat.LITERT_LM
         var generateCalled = false
@@ -150,6 +176,7 @@ class ThermalGuardRuntimeAdapterTest {
 
         override suspend fun cancel() {
             cancelCalled = true
+            cancelFailure?.let { throw it }
         }
 
         override suspend fun unload() = Unit
