@@ -9,31 +9,22 @@
 - Added LiteRT-LM telemetry for TTFT, latency, prefill/decode throughput, token count, app RAM, cold load, and warm-cache load.
 - Added thermal protection, inference-stall containment, bounded cancellation/unload, constrained-context replay, and a CI-validated two-thread CPU policy.
 - Hardened critical thermal escalation so generation collection still stops promptly when native runtime cancellation throws, surfacing recovery guidance instead of allowing generation to continue.
+- Fail closed after explicit/native cancellation failure: the stall guard blocks further generation until a successful unload clears uncertain runtime ownership, and recovery errors carry `requiresReload=true`.
 - Hardened runtime ownership so stale lifecycle work cannot unload a newer model or delete files still held by native resources; uncertain native state now fails closed until cleanup succeeds.
 - Made active download/checksum verification cancellation-aware and removed metadata temp-file collision risks.
 
 ## Important work in progress
-- Fail closed after explicit/native cancellation failure: the stall guard now blocks further generation until a successful unload clears uncertain runtime ownership; CI validation is pending.
-- Propagate a structured `requiresReload` signal from watchdog/thermal recovery failures so callers can distinguish retryable inference errors from unsafe runtime state.
+- Make the UI honor recovery-required inference errors: `MobieViewModel` now enters `ERROR` instead of `READY` when `requiresReload=true`, preventing another prompt from being accepted before reload. Exact-tip CI is pending.
 - Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts; no speculative changes without a reproducible defect.
 - Continue runtime/recommendation failure-mode audit.
 - Physical-device validation is still needed for thermal/LMK behavior, long-context pressure, interrupted generation, GPU vision, and CPU thread policy.
 
 ## Tests actually performed
-- Added JVM regression coverage proving a failed explicit cancel blocks subsequent generation and a successful unload restores execution; Android CI for the current tip is pending.
+- `0e03ffe7`: full Android CI passed fail-closed cancellation recovery, including JVM coverage proving a failed explicit cancel blocks subsequent generation and successful unload restores execution.
 - `5422a236`: full Android CI passed critical thermal cancellation-failure hardening, including the regression where native cancel throws while generation is stalled.
-- `39f1d501`: full Android CI passed the validated installed-length metadata progress tip.
-- `56542570`: full Android CI passed malformed `installedLength` fail-closed validation: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
-- `a418464c`: full Android CI passed the validated worker-metadata recovery progress tip.
-- `b0191ba8`: full Android CI passed worker stale-metadata fallback across the same four gates.
-- `5de23bb5`: full Android CI passed stale completed-file metadata recovery across the same four gates.
-- `5b6018e5`: full Android CI passed corrupt completed-file metadata recovery across the same four gates.
-- `9d9ae1fe`: full Android CI passed portable LiteRT recommendation selection across the same four gates.
-- `29a68e25`: full Android CI passed stopped-generation bounded native cancellation across the same four gates.
-- `0de8146f`: full Android CI passed resolved-length crash recovery across the same four gates.
-- `8ca93542`: full Android CI passed artifact-metadata deletion recovery.
-- `25c8e489`: full Android CI passed cancellation-aware completed-file SHA-256 verification.
-- `4e32fc92`, `18d4561f`, `ef67c99e`, `0fedffd2`, `ad7e5789`, `dee93cce`, and `114d45d2`: full Android CI validated cooperative worker cancellation, metadata publication/repair collision protection, stalled-unload recovery, and runtime ownership/deletion lifecycle safety.
+- `56542570`: full Android CI passed malformed `installedLength` validation: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
+- `b0191ba8` and `5de23bb5`: full Android CI passed worker/completed-file stale-metadata fallback across the same four gates.
+- `5b6018e5`, `9d9ae1fe`, `29a68e25`, `0de8146f`, `8ca93542`, and `25c8e489`: full Android CI validated corrupt metadata recovery, portable LiteRT recommendation selection, bounded native cancellation, resolved-length crash recovery, deletion recovery, and cancellation-aware SHA-256 verification.
 - Real E2E coverage repeatedly exercised Qwen3-0.6B INT4 LiteRT-LM download/load/generate/recollect/cancel/recover/reset/history/unload/reload plus SmolVLM2-500M vision restore/text/replacement-image/text generation.
 
 ## Real benchmarks / performance improvements
@@ -48,13 +39,11 @@
 - Main-model GPU/NPU execution remains disabled pending representative handset evidence.
 
 ## Items to inspect before merging
-- Force explicit/native cancellation failure and verify another generation is refused until unload succeeds; recovery errors should carry `requiresReload=true`.
-- Force critical thermal escalation while runtime cancellation fails; generation collection should still stop promptly and surface a recovery-oriented error.
-- Corrupt `installedLength` metadata should fail closed instead of weakening checksum-less installed-file verification; legacy metadata with no `installedLength` should remain readable.
-- Verify stale or corrupt per-artifact `.properties` sidecars cannot block reuse in either lookup or worker execution when matching canonical metadata validates the requested immutable source.
-- Confirm portable LiteRT-LM `gpu`/`opencl` bundles remain CPU-recommendable while MediaTek/QNN/Adreno and desktop/web-specific bundles remain excluded.
+- Force explicit/native cancellation failure and verify the runtime rejects another generation until unload succeeds; the UI should also remain non-READY when the resulting error carries `requiresReload=true`.
+- Force critical thermal escalation while runtime cancellation fails; generation collection should stop promptly and surface a recovery-oriented error.
+- Corrupt `installedLength` metadata should fail closed while legacy metadata with no `installedLength` remains readable.
+- Verify stale/corrupt per-artifact metadata cannot block reuse when matching canonical metadata validates the requested immutable source.
 - Repeatedly stop long generation and verify bounded native cancellation plus fail-closed cleanup behavior.
 - Interrupt commit-pinned and mutable downloads at resume/finalization boundaries; immutable sources should recover safely while mutable sources restart.
-- Delete models during active/multi-artifact downloads and verify cancellation prevents storage from being republished afterward.
 - Rapidly switch/load/delete models and verify stale lifecycle work cannot unload newer runtime state.
 - On representative arm64 hardware, test 32K/64K contexts, GPU vision fallback, severe/critical thermal handling, repeated Stop, and 2-thread vs runtime-default/4+ thread throughput, RAM, battery, and throttling.
