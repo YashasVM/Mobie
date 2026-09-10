@@ -136,10 +136,19 @@ class InferenceStallGuardRuntimeAdapter(
 
     override suspend fun cancel() {
         val result = requestBoundedCancellation()
-            ?: throw IllegalStateException(
+        if (result == null) {
+            recoveryRequired = true
+            throw IllegalStateException(
                 "Local inference cancellation did not return within the safety timeout. The model may require an app restart.",
             )
-        result.getOrThrow()
+        }
+        result.fold(
+            onSuccess = {},
+            onFailure = { error ->
+                recoveryRequired = true
+                throw error
+            },
+        )
     }
 
     override suspend fun unload() {
