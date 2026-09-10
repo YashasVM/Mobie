@@ -27,7 +27,11 @@ data class InferenceStats(
 sealed interface InferenceEvent {
     data class Token(val text: String, val thinking: Boolean = false) : InferenceEvent
     data class Stats(val value: InferenceStats) : InferenceEvent
-    data class Error(val message: String) : InferenceEvent
+    data class Error(
+        val message: String,
+        /** Native/runtime ownership is uncertain; do not accept another prompt until reload. */
+        val requiresReload: Boolean = false,
+    ) : InferenceEvent
     data object Complete : InferenceEvent
 }
 
