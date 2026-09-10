@@ -13,6 +13,7 @@ import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.runtime.InferenceEvent
 import dev.yashasvm.mobie.core.runtime.InferenceStats
 import dev.yashasvm.mobie.core.runtime.RuntimeMessage
+import dev.yashasvm.mobie.core.runtime.RuntimeModelOwnership
 import dev.yashasvm.mobie.data.download.DownloadProgress
 import dev.yashasvm.mobie.data.download.InstalledModelEntry
 import dev.yashasvm.mobie.data.history.ChatHistorySession
@@ -29,6 +30,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.concurrent.atomic.AtomicLong
 
 enum class RuntimeState { IDLE, LOADING, READY, GENERATING, STOPPING, ERROR }
 
@@ -79,6 +81,8 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     private var downloadObserverJob: Job? = null
     private var inferenceJob: Job? = null
     private val runtimeLifecycle = Mutex()
+    private val runtimeOperation = AtomicLong(0L)
+    private val runtimeOwnership = RuntimeModelOwnership()
 
     init {
         refreshInstalled()
@@ -152,7 +156,8 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     fun select(model: AiModel?) {
         downloadObserverJob?.cancel()
         inferenceJob?.cancel()
-        if (model == null) viewModelScope.launch { unloadRuntime() }
+        val operation = nextRuntimeOperation()
+        viewModelScope.launch { unloadRuntime(operation) }
         val device = container.deviceProfile.current()
         val artifact = model?.let { artifactForDevice(it, device) }
         val presentedModel = model?.preferArtifact(artifact)
@@ -242,6 +247,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val artifact = current.selectedArtifact ?: return
         val history = readHistory(model)
         val sessions = container.chatHistory.sessions(model.id)
+        val operation = nextRuntimeOperation()
         mutableState.update {
             it.copy(
                 chatting = true,
@@ -255,7 +261,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         }
         inferenceJob?.cancel()
         inferenceJob = viewModelScope.launch {
-            loadRuntimeConversation(model, artifact, path, history, preferReset = false)
+            loadRuntimeConversation(model, artifact, path, history, preferReset = false, operation = operation)
         }
     }
 
@@ -265,10 +271,13 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         path: String,
         history: List<ChatMessage>,
         preferReset: Boolean,
+        operation: Long,
     ) {
         val adapter = container.runtimes.adapterFor(artifact.format)
         if (adapter == null) {
-            mutableState.update { it.copy(runtimeState = RuntimeState.ERROR, error = "No runtime for this model") }
+            if (isCurrentRuntimeOperation(operation)) {
+                mutableState.update { it.copy(runtimeState = RuntimeState.ERROR, error = "No runtime for this model") }
+            }
             return
         }
         val restored = history.map {
@@ -280,13 +289,25 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             )
         }
         val result = runtimeLifecycle.withLock {
-            if (preferReset) {
+            if (!isCurrentRuntimeOperation(operation)) return
+            if (preferReset && runtimeOwnership.owns(model.id)) {
                 val reset = adapter.resetConversation(restored)
-                if (reset.isSuccess) reset else adapter.load(path, model.supportsVision, restored)
+                if (reset.isSuccess) {
+                    reset
+                } else {
+                    runtimeOwnership.clear()
+                    adapter.load(path, model.supportsVision, restored).also { loaded ->
+                        if (loaded.isSuccess) runtimeOwnership.markLoaded(model.id)
+                    }
+                }
             } else {
-                adapter.load(path, model.supportsVision, restored)
+                runtimeOwnership.clear()
+                adapter.load(path, model.supportsVision, restored).also { loaded ->
+                    if (loaded.isSuccess) runtimeOwnership.markLoaded(model.id)
+                }
             }
         }
+        if (!isCurrentRuntimeOperation(operation)) return
         result.fold(
             onSuccess = { mutableState.update { it.copy(runtimeState = RuntimeState.READY) } },
             onFailure = { error ->
@@ -325,7 +346,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                         persistHistory(model.id, messages)
                         mutableState.update {
                             it.copy(
-                                runtimeState = RuntimeState.READY,
+                                runtimeState = if (event.requiresReload) RuntimeState.ERROR else RuntimeState.READY,
                                 messages = messages,
                                 history = container.chatHistory.sessions(model.id),
                                 error = event.message,
@@ -380,6 +401,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val path = current.downloadedPath ?: return
         val canReuseLoadedModel = current.runtimeState == RuntimeState.READY
         inferenceJob?.cancel()
+        val operation = nextRuntimeOperation()
         val sessionId = container.chatHistory.startNewSession(model.id)
         mutableState.update {
             it.copy(
@@ -392,7 +414,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             )
         }
         inferenceJob = viewModelScope.launch {
-            loadRuntimeConversation(model, artifact, path, emptyList(), preferReset = canReuseLoadedModel)
+            loadRuntimeConversation(model, artifact, path, emptyList(), preferReset = canReuseLoadedModel, operation = operation)
         }
     }
 
@@ -403,13 +425,33 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun deleteInstalled(entry: InstalledModelEntry) {
+        val deletingSelectedModel = state.value.selected?.id == entry.model.id
+        if (deletingSelectedModel) inferenceJob?.cancel()
+        val operation = if (deletingSelectedModel) nextRuntimeOperation() else null
         viewModelScope.launch {
-            val deleted = container.downloads.deleteInstalled(entry.model)
-            if (deleted) {
-                mutableState.update {
-                    it.copy(installedModels = it.installedModels.filterNot { installed -> installed.model.id == entry.model.id })
+            val deleted = runtimeLifecycle.withLock {
+                if (operation != null && !isCurrentRuntimeOperation(operation)) return@withLock false
+                if (deletingSelectedModel || runtimeOwnership.owns(entry.model.id)) {
+                    container.runtimes.all().forEach { it.unload() }
+                    runtimeOwnership.clear()
                 }
-            } else {
+                if (operation != null && !isCurrentRuntimeOperation(operation)) return@withLock false
+                container.downloads.deleteInstalled(entry.model)
+            }
+            if (deleted) {
+                mutableState.update { current ->
+                    val deletedSelectedModel = current.selected?.id == entry.model.id
+                    current.copy(
+                        installedModels = current.installedModels.filterNot { installed -> installed.model.id == entry.model.id },
+                        download = if (deletedSelectedModel) null else current.download,
+                        downloadedPath = if (deletedSelectedModel) null else current.downloadedPath,
+                        chatting = if (deletedSelectedModel) false else current.chatting,
+                        runtimeState = if (deletedSelectedModel) RuntimeState.IDLE else current.runtimeState,
+                        stats = if (deletedSelectedModel) null else current.stats,
+                        error = null,
+                    )
+                }
+            } else if (operation == null || isCurrentRuntimeOperation(operation)) {
                 mutableState.update { it.copy(error = "${entry.model.title} could not be deleted.") }
             }
         }
@@ -417,14 +459,19 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
 
     fun leaveChat() {
         inferenceJob?.cancel()
-        viewModelScope.launch { unloadRuntime() }
+        val operation = nextRuntimeOperation()
+        viewModelScope.launch { unloadRuntime(operation) }
         mutableState.update {
             it.copy(chatting = false, runtimeState = RuntimeState.IDLE, stats = null, error = null)
         }
     }
 
-    private suspend fun unloadRuntime() {
-        runtimeLifecycle.withLock { container.runtimes.all().forEach { it.unload() } }
+    private suspend fun unloadRuntime(operation: Long) {
+        runtimeLifecycle.withLock {
+            if (!isCurrentRuntimeOperation(operation)) return
+            container.runtimes.all().forEach { it.unload() }
+            runtimeOwnership.clear()
+        }
     }
 
     fun selectHistory(sessionId: String) {
@@ -436,6 +483,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         container.chatHistory.activate(model.id, sessionId)
         val history = readHistory(model)
         inferenceJob?.cancel()
+        val operation = nextRuntimeOperation()
         mutableState.update {
             it.copy(
                 messages = history,
@@ -447,7 +495,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             )
         }
         inferenceJob = viewModelScope.launch {
-            loadRuntimeConversation(model, artifact, path, history, preferReset = canReuseLoadedModel)
+            loadRuntimeConversation(model, artifact, path, history, preferReset = canReuseLoadedModel, operation = operation)
         }
     }
 
@@ -509,6 +557,10 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             },
         )
     }
+
+    private fun nextRuntimeOperation(): Long = runtimeOperation.incrementAndGet()
+
+    private fun isCurrentRuntimeOperation(operation: Long): Boolean = runtimeOperation.get() == operation
 
     companion object {
         fun factory(container: AppContainer): ViewModelProvider.Factory =

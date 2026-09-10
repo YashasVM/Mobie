@@ -227,5 +227,8 @@ private const val MIN_KV_CACHE_BYTES = 64L * MIB
 private const val MAX_EXPLICIT_CONTEXT_TOKENS = 1_048_576
 
 private val HARDWARE_SPECIFIC_ARTIFACT_PATTERN = Regex(
-    "(?:^|[._-])(?:mediatek|qualcomm|npu|gpu|opencl|adreno|qnn|htp|hexagon|google_tensor|google\\-tensor|intel|web|webgpu|windows|linux|macos|darwin|ios|metal)(?:[._-]|$)",
+    // Generic backend hints such as `gpu` or `opencl` do not make a LiteRT-LM bundle tied to one
+    // Android device. Official LiteRT Community artifacts use those names while remaining
+    // CPU-runnable. Keep concrete vendor/accelerator/platform markers fail-closed instead.
+    "(?:^|[._-])(?:mediatek|qualcomm|npu|adreno|qnn|htp|hexagon|google_tensor|google\\-tensor|intel|web|webgpu|windows|linux|macos|darwin|ios|metal)(?:[._-]|$)",
 )

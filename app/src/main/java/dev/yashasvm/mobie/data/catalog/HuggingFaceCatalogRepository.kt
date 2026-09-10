@@ -35,6 +35,17 @@ internal fun huggingFaceSearchUrl(query: String): String {
 internal fun catalogOwnerAllowed(repoId: String, expectedOwner: String?): Boolean =
     expectedOwner == null || repoId.substringBefore('/') == expectedOwner
 
+internal fun huggingFaceArtifactUrl(repoId: String, fileName: String, revision: String?): String =
+    "https://huggingface.co".toHttpUrl().newBuilder().apply {
+        repoId.split('/').filter(String::isNotBlank).forEach(::addPathSegment)
+        addPathSegment("resolve")
+        addPathSegment(revision?.takeIf(String::isNotBlank) ?: "main")
+        fileName.split('/').filter(String::isNotBlank).forEach(::addPathSegment)
+    }.build().toString()
+
+internal fun modelDetailCacheKey(repoId: String, revision: String?): String =
+    "$repoId@${revision?.takeIf(String::isNotBlank) ?: "unversioned"}"
+
 /**
  * LiteRT-LM currently receives the context limit through EngineConfig rather than discovering the
  * package's maximum from the loaded container. When the Hub filename does not encode context but a
@@ -88,11 +99,17 @@ class HuggingFaceCatalogRepository(
             val models = coroutineScope {
                 summaries.map { summary ->
                     async {
-                        if (summary.hasCompleteLiteRtArtifactMetadata() && !summary.needsModelCardContextLookup()) {
+                        if (!summary.sha.isNullOrBlank() &&
+                            summary.hasCompleteLiteRtArtifactMetadata() &&
+                            !summary.needsModelCardContextLookup()
+                        ) {
                             summary
                         } else {
-                            detailCache.get(summary.repoId())
-                                ?: limiter.withPermit { fetchDetails(summary.repoId()) ?: summary }
+                            val cacheKey = modelDetailCacheKey(summary.repoId(), summary.sha)
+                            detailCache.get(cacheKey)
+                                ?: limiter.withPermit {
+                                    fetchDetails(summary.repoId(), summary.sha) ?: summary
+                                }
                         }
                     }
                 }.awaitAll()
@@ -107,7 +124,7 @@ class HuggingFaceCatalogRepository(
         }
     }
 
-    private suspend fun fetchDetails(repoId: String): HfModel? = runCatching {
+    private suspend fun fetchDetails(repoId: String, expectedRevision: String?): HfModel? = runCatching {
         val url = "https://huggingface.co".toHttpUrl().newBuilder().apply {
             addPathSegment("api")
             addPathSegment("models")
@@ -118,23 +135,19 @@ class HuggingFaceCatalogRepository(
             ?.let { json.decodeFromString<HfModel>(it) }
             ?: return@runCatching null
         val enriched = if (model.needsModelCardContextLookup()) {
-            val contexts = fetchBody(modelCardUrl(repoId))
+            val contexts = fetchBody(modelCardUrl(repoId, model.sha))
                 ?.let(::parseArtifactContextWindows)
                 .orEmpty()
             if (contexts.isEmpty()) model else model.copy(artifactContextWindows = contexts)
         } else {
             model
         }
-        enriched.also { detailCache.put(repoId, it) }
+        val cacheRevision = model.sha?.takeIf(String::isNotBlank) ?: expectedRevision
+        enriched.also { detailCache.put(modelDetailCacheKey(repoId, cacheRevision), it) }
     }.getOrNull()
 
-    private fun modelCardUrl(repoId: String): String =
-        "https://huggingface.co".toHttpUrl().newBuilder().apply {
-            repoId.split('/').filter(String::isNotBlank).forEach(::addPathSegment)
-            addPathSegment("resolve")
-            addPathSegment("main")
-            addPathSegment("README.md")
-        }.build().toString()
+    private fun modelCardUrl(repoId: String, revision: String?): String =
+        huggingFaceArtifactUrl(repoId, "README.md", revision)
 
     private suspend fun fetchBody(url: String): String? {
         val token = tokenStore.read()
@@ -165,6 +178,7 @@ private data class HfModel(
     val pipeline_tag: String? = null,
     val tags: List<String> = emptyList(),
     val siblings: List<HfSibling> = emptyList(),
+    val sha: String? = null,
     val artifactContextWindows: Map<String, Int> = emptyMap(),
 ) {
     fun repoId(): String = modelId ?: id.orEmpty()
@@ -197,7 +211,7 @@ private data class HfModel(
                 ?: inferArtifactContextWindow(file.rfilename)
             ModelArtifact(
                 fileName = runtimeAwareArtifactFileName(file.rfilename, contextWindowTokens),
-                downloadUrl = artifactUrl(repoId, file.rfilename),
+                downloadUrl = huggingFaceArtifactUrl(repoId, file.rfilename, sha),
                 sizeBytes = size,
                 sha256 = file.lfs?.sha256 ?: file.lfs?.oid?.removePrefix("sha256:"),
                 format = format,
@@ -234,14 +248,6 @@ private data class HfModel(
             artifacts = artifacts,
         )
     }
-
-    private fun artifactUrl(repoId: String, fileName: String): String =
-        "https://huggingface.co".toHttpUrl().newBuilder().apply {
-            repoId.split('/').filter(String::isNotBlank).forEach(::addPathSegment)
-            addPathSegment("resolve")
-            addPathSegment("main")
-            fileName.split('/').filter(String::isNotBlank).forEach(::addPathSegment)
-        }.build().toString()
 }
 
 @Serializable

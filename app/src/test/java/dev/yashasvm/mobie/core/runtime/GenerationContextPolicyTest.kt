@@ -18,7 +18,6 @@ class GenerationContextPolicyTest {
         assertEquals(1_024, result)
     }
 
-
     @Test
     fun `larger response ceiling is still clamped by a small model context`() {
         val result = GenerationContextPolicy.maxOutputTokens(
@@ -70,6 +69,50 @@ class GenerationContextPolicyTest {
 
         assertEquals(512, textBudget)
         assertTrue(visionBudget < textBudget)
+    }
+
+    @Test
+    fun `restored history image reserves the same context as a new image`() {
+        val prompt = "p".repeat(2800)
+        val newImageBudget = GenerationContextPolicy.maxOutputTokens(
+            contextWindowTokens = 4096,
+            history = emptyList(),
+            prompt = prompt,
+            requestedMaxOutputTokens = 512,
+            hasImage = true,
+        )
+        val restoredImageBudget = GenerationContextPolicy.maxOutputTokens(
+            contextWindowTokens = 4096,
+            history = emptyList(),
+            prompt = prompt,
+            requestedMaxOutputTokens = 512,
+            hasImage = false,
+            historyHasImage = true,
+        )
+
+        assertEquals(newImageBudget, restoredImageBudget)
+    }
+
+    @Test
+    fun `new and restored images do not double reserve the single vision slot`() {
+        val prompt = "p".repeat(2800)
+        val oneImageBudget = GenerationContextPolicy.maxOutputTokens(
+            contextWindowTokens = 4096,
+            history = emptyList(),
+            prompt = prompt,
+            requestedMaxOutputTokens = 512,
+            hasImage = true,
+        )
+        val bothFlagsBudget = GenerationContextPolicy.maxOutputTokens(
+            contextWindowTokens = 4096,
+            history = emptyList(),
+            prompt = prompt,
+            requestedMaxOutputTokens = 512,
+            hasImage = true,
+            historyHasImage = true,
+        )
+
+        assertEquals(oneImageBudget, bothFlagsBudget)
     }
 
     @Test(expected = IllegalStateException::class)

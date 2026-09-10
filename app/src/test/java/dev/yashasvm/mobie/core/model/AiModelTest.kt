@@ -99,20 +99,29 @@ class AiModelTest {
     }
 
     @Test
-    fun `backend constrained LiteRT artifacts are not treated as generic CPU packages`() {
+    fun `vendor and platform constrained LiteRT artifacts are not treated as generic CPU packages`() {
         val constrainedNames = listOf(
-            "model-gpu.litertlm",
-            "model.opencl.litertlm",
             "model-adreno.litertlm",
             "model-qnn.litertlm",
             "model-htp.litertlm",
             "model-hexagon.litertlm",
             "model-google_tensor.litertlm",
+            "model-windows.litertlm",
+            "model-webgpu.litertlm",
         )
         constrainedNames.forEach { name ->
             assertEquals(name, ArtifactExecutionTarget.HARDWARE_SPECIFIC, liteRtArtifact(name, 250, "INT4").executionTarget)
         }
         assertEquals(ArtifactExecutionTarget.GENERIC, liteRtArtifact("model-int4-c2048.litertlm", 300, "INT4").executionTarget)
+    }
+
+    @Test
+    fun `portable backend labeled LiteRT artifacts remain selectable by generic runtime`() {
+        val gpu = liteRtArtifact("llama3_2_1b_mixed_int4_gpu.litertlm", 250, "INT4")
+        val openCl = liteRtArtifact("model-opencl.litertlm", 300, "INT4")
+        assertEquals(ArtifactExecutionTarget.GENERIC, gpu.executionTarget)
+        assertEquals(ArtifactExecutionTarget.GENERIC, openCl.executionTarget)
+        assertEquals(gpu, modelWith(gpu, openCl).bestArtifact)
     }
 
     @Test

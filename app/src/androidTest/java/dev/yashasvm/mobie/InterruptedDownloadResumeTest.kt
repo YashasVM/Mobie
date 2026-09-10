@@ -31,11 +31,11 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class InterruptedDownloadResumeTest {
     @Test
-    fun interruptedTransferResumesFromPersistedPartialFile() = runBlocking {
+    fun mutableInterruptedTransferRestartsInsteadOfMixingPartialBytes() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val payload = ByteArray(512 * 1024) { index -> (index * 31).toByte() }
         val splitAt = 137_219
-        val observedRange = AtomicReference<String?>(null)
+        val observedSecondRange = AtomicReference<String?>("not-observed")
 
         ServerSocket(0).use { server ->
             val serving = Thread {
@@ -53,18 +53,14 @@ class InterruptedDownloadResumeTest {
                             }
                             // Closing before Content-Length bytes are sent simulates a dropped connection.
                         } else {
-                            observedRange.set(range)
-                            val expected = "bytes=$splitAt-"
-                            assertEquals(expected, range)
-                            val remaining = payload.size - splitAt
-                            writeResponseHeaders(
-                                socket,
-                                206,
-                                remaining,
-                                "bytes $splitAt-${payload.lastIndex}/${payload.size}",
+                            observedSecondRange.set(range)
+                            assertNull(
+                                "Mutable checksum-less sources must restart instead of appending bytes from a later response",
+                                range,
                             )
+                            writeResponseHeaders(socket, 200, payload.size, null)
                             socket.getOutputStream().apply {
-                                write(payload, splitAt, remaining)
+                                write(payload)
                                 flush()
                             }
                         }
@@ -76,7 +72,6 @@ class InterruptedDownloadResumeTest {
                 fileName = "resume-test.litertlm",
                 downloadUrl = "http://127.0.0.1:${server.localPort}/resume-test.litertlm",
                 sizeBytes = payload.size.toLong(),
-                sha256 = sha256(payload),
                 format = ModelFormat.LITERT_LM,
             )
             val downloads = ModelDownloadManager(context)
@@ -87,7 +82,7 @@ class InterruptedDownloadResumeTest {
 
             serving.join(5_000)
             assertTrue("Download failed: ${result.error}", result.state == WorkInfo.State.SUCCEEDED)
-            assertEquals("bytes=$splitAt-", observedRange.get())
+            assertNull(observedSecondRange.get())
             val downloaded = File(checkNotNull(result.localPath))
             assertArrayEquals(payload, downloaded.readBytes())
 

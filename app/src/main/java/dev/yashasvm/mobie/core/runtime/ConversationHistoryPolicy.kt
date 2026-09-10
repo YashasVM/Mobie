@@ -9,8 +9,9 @@ package dev.yashasvm.mobie.core.runtime
  * The default byte cap is deliberately conservative for a 4K runtime context: byte-fallback
  * tokenizers cannot require more tokens than the number of input bytes, leaving roughly 1K tokens
  * for the next prompt, output budget, and prompt-template overhead even for token-dense Unicode.
- * Larger explicitly configured contexts receive a proportionally larger replay budget, capped to
- * avoid turning conversation restoration into an unbounded prefill/TTFT penalty.
+ * Runtime contexts smaller than 4K receive proportionally smaller replay budgets, while larger
+ * explicitly configured contexts receive proportionally larger budgets capped to avoid turning
+ * conversation restoration into an unbounded prefill/TTFT penalty.
  *
  * Selection is turn-aware: a restored history never starts with an orphan assistant message,
  * never keeps only half of an older completed turn, and never replays an interrupted turn. User-only
@@ -25,6 +26,7 @@ internal object ConversationHistoryPolicy {
     const val MAX_RESTORED_UTF8_BYTES = 3 * 1024
 
     private const val DEFAULT_CONTEXT_WINDOW_TOKENS = 4_096
+    private const val MIN_CONTEXT_WINDOW_TOKENS = 1_024
     private const val MAX_CONTEXT_SCALE = 8
     private const val MAX_SCALED_MESSAGES = 64
 
@@ -158,12 +160,22 @@ internal object ConversationHistoryPolicy {
     }
 
     private fun replayBudget(contextWindowTokens: Int): ReplayBudget {
-        val safeContextTokens = contextWindowTokens.coerceAtLeast(DEFAULT_CONTEXT_WINDOW_TOKENS)
-        val scale = (safeContextTokens / DEFAULT_CONTEXT_WINDOW_TOKENS).coerceIn(1, MAX_CONTEXT_SCALE)
+        val safeContextTokens = contextWindowTokens.coerceAtLeast(MIN_CONTEXT_WINDOW_TOKENS)
+        val maxScaledContextTokens = DEFAULT_CONTEXT_WINDOW_TOKENS * MAX_CONTEXT_SCALE
+        val budgetContextTokens = safeContextTokens.coerceAtMost(maxScaledContextTokens)
+
+        fun scaled(base: Int): Int =
+            ((base.toLong() * budgetContextTokens) / DEFAULT_CONTEXT_WINDOW_TOKENS)
+                .coerceAtLeast(1L)
+                .coerceAtMost(Int.MAX_VALUE.toLong())
+                .toInt()
+
         return ReplayBudget(
-            maxMessages = (MAX_RESTORED_MESSAGES * scale).coerceAtMost(MAX_SCALED_MESSAGES),
-            maxChars = MAX_RESTORED_CHARS * scale,
-            maxUtf8Bytes = MAX_RESTORED_UTF8_BYTES * scale,
+            // A completed turn requires at least a user+assistant pair. Keeping this floor even at
+            // 1K avoids a degenerate budget that could never restore any valid conversation turn.
+            maxMessages = scaled(MAX_RESTORED_MESSAGES).coerceIn(2, MAX_SCALED_MESSAGES),
+            maxChars = scaled(MAX_RESTORED_CHARS),
+            maxUtf8Bytes = scaled(MAX_RESTORED_UTF8_BYTES),
         )
     }
 

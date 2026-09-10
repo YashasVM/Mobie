@@ -1,6 +1,8 @@
 package dev.yashasvm.mobie.data.download
 
 import java.io.File
+import java.io.FileInputStream
+import java.security.MessageDigest
 import java.util.Properties
 
 /**
@@ -22,12 +24,14 @@ internal object ModelFileVerification {
 
     /**
      * Rejects silent truncation/replacement for newly installed artifacts even when Hugging Face did
-     * not publish a checksum. Legacy metadata without an installedLength remains readable.
+     * not publish a checksum. Legacy metadata without an installedLength remains readable, but a
+     * present malformed value is corruption and must fail closed rather than silently weakening the
+     * integrity check.
      */
     fun matchesInstalledLength(properties: Properties?, file: File): Boolean {
         if (!file.isFile) return false
-        val installedLength = properties?.getProperty(KEY_INSTALLED_LENGTH)?.toLongOrNull()
-            ?: return true
+        val installedLengthRaw = properties?.getProperty(KEY_INSTALLED_LENGTH) ?: return true
+        val installedLength = installedLengthRaw.toLongOrNull() ?: return false
         if (properties.getProperty("fileName")?.let { it != file.name } == true) return false
         return installedLength >= 0 && file.length() == installedLength
     }
@@ -51,6 +55,21 @@ internal object ModelFileVerification {
 
     fun localSha256(properties: Properties?): String? =
         properties?.getProperty(KEY_LOCAL_SHA256)?.trim()?.lowercase()?.takeIf(String::isNotBlank)
+
+    fun sha256(file: File, cancellationCheck: () -> Unit = {}): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        FileInputStream(file).use { input ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            while (true) {
+                cancellationCheck()
+                val count = input.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        cancellationCheck()
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
 
     private fun matchesVerifiedFingerprint(properties: Properties, file: File): Boolean {
         if (!file.isFile || properties.getProperty("fileName") != file.name) return false

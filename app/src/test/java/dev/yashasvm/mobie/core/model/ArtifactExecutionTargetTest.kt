@@ -5,7 +5,7 @@ import org.junit.Test
 
 class ArtifactExecutionTargetTest {
     @Test
-    fun `desktop and web LiteRT artifacts are not treated as generic Android candidates`() {
+    fun `desktop and vendor specific LiteRT artifacts are not treated as generic Android candidates`() {
         val targeted = listOf(
             "horizon-edge-e4b_intel_LNL.litertlm",
             "horizon-edge-e4b-web.litertlm",
@@ -15,6 +15,9 @@ class ArtifactExecutionTargetTest {
             "model-macos.litertlm",
             "model-ios.litertlm",
             "model-metal.litertlm",
+            "Qwen3-0.6B.mediatek.mt6993.litertlm",
+            "model-adreno.litertlm",
+            "model-qnn.litertlm",
         )
 
         targeted.forEach { fileName ->
@@ -27,10 +30,19 @@ class ArtifactExecutionTargetTest {
     }
 
     @Test
-    fun `generic Android CPU LiteRT artifact remains eligible`() {
-        assertEquals(
-            ArtifactExecutionTarget.GENERIC,
-            inferArtifactExecutionTarget("Qwen3-0.6B_dynamic_wi4b32_afp32.litertlm"),
+    fun `generic backend hints remain eligible Android candidates`() {
+        val generic = listOf(
+            "Qwen3-0.6B_dynamic_wi4b32_afp32.litertlm",
+            "llama3_2_1b_mixed_int4_gpu.litertlm",
+            "model-opencl.litertlm",
         )
+
+        generic.forEach { fileName ->
+            assertEquals(
+                fileName,
+                ArtifactExecutionTarget.GENERIC,
+                inferArtifactExecutionTarget(fileName),
+            )
+        }
     }
 }

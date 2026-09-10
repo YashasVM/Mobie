@@ -90,6 +90,33 @@ class ConversationHistoryPolicyTest {
     }
 
     @Test
+    fun `constrained contexts shrink replay budget below 4k default`() {
+        val chunk = "x".repeat(300)
+        val history = (1..8).flatMap { turn ->
+            listOf(
+                RuntimeMessage(true, "user-$turn-$chunk"),
+                RuntimeMessage(false, "assistant-$turn-$chunk"),
+            )
+        }
+
+        val oneK = ConversationHistoryPolicy.select(history, contextWindowTokens = 1_024)
+        val twoK = ConversationHistoryPolicy.select(history, contextWindowTokens = 2_048)
+        val fourK = ConversationHistoryPolicy.select(history, contextWindowTokens = 4_096)
+
+        val oneKBytes = oneK.sumOf { it.text.toByteArray(Charsets.UTF_8).size }
+        val twoKBytes = twoK.sumOf { it.text.toByteArray(Charsets.UTF_8).size }
+        val fourKBytes = fourK.sumOf { it.text.toByteArray(Charsets.UTF_8).size }
+
+        assertTrue(oneKBytes <= ConversationHistoryPolicy.MAX_RESTORED_UTF8_BYTES / 4)
+        assertTrue(twoKBytes <= ConversationHistoryPolicy.MAX_RESTORED_UTF8_BYTES / 2)
+        assertTrue(fourKBytes <= ConversationHistoryPolicy.MAX_RESTORED_UTF8_BYTES)
+        assertTrue(oneKBytes < twoKBytes)
+        assertTrue(twoKBytes < fourKBytes)
+        assertTrue(oneK.isEmpty() || oneK.first().fromUser)
+        assertTrue(twoK.isEmpty() || twoK.first().fromUser)
+    }
+
+    @Test
     fun `utf8 byte budget limits token dense unicode history`() {
         val unicodeChunk = "你".repeat(700)
         val history = (1..4).flatMap {

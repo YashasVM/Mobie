@@ -66,6 +66,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     private var contextWindowTokens = DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS
     private var committedHistory: List<RuntimeMessage> = emptyList()
     private var conversationDirty = false
+    private var nativeConversationHasImage = false
     @Volatile private var cancelRequested = false
 
     override suspend fun load(
@@ -83,10 +84,14 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                             rethrowAfterRuntimeCleanup(cancellationFailure) { closeRuntime() }
                         }
                         closeRuntime()
-                        ensureLoadHeadroom(modelPath)
+                        val configuredContextWindowTokens = selectRuntimeContextWindowTokens(modelPath)
+                        ensureLoadHeadroom(modelPath, configuredContextWindowTokens)
                         ExperimentalFlags.enableBenchmark = true
-                        val configuredContextWindowTokens = runtimeContextWindowTokens(modelPath)
-                        val loadedEngine = initializeEngineWithVisionFallback(modelPath, vision)
+                        val loadedEngine = initializeEngineWithVisionFallback(
+                            modelPath = modelPath,
+                            vision = vision,
+                            contextWindowTokens = configuredContextWindowTokens,
+                        )
                         try {
                             contextWindowTokens = configuredContextWindowTokens
                             val restored = ConversationHistoryPolicy.select(history, contextWindowTokens)
@@ -94,10 +99,15 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                             visionReady = loadedEngine.visionReady
                             conversation = loadedEngine.engine.createConversation(conversationConfig(restored))
                             committedHistory = restored
+                            nativeConversationHasImage = hasRestorableHistoryImage(restored)
                             conversationDirty = false
                             cancelRequested = false
                             val modelFile = File(modelPath)
-                            LiteRtCacheState.markReady(liteRtCacheDirectory(modelFile), modelFile)
+                            LiteRtCacheState.markReady(
+                                liteRtCacheDirectory(modelFile),
+                                modelFile,
+                                configuredContextWindowTokens,
+                            )
                             Unit
                         } catch (error: Throwable) {
                             runRuntimeCleanupUnlessFatal(error) { loadedEngine.engine.close() }
@@ -106,6 +116,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                             contextWindowTokens = DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS
                             committedHistory = emptyList()
                             conversationDirty = false
+                            nativeConversationHasImage = false
                             cancelRequested = false
                             throw error
                         }
@@ -137,6 +148,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                                     installReplacement = { replacement ->
                                         conversation = replacement
                                         committedHistory = restored
+                                        nativeConversationHasImage = hasRestorableHistoryImage(restored)
                                         conversationDirty = false
                                         cancelRequested = false
                                     },
@@ -161,8 +173,8 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         imagePath: String?,
         config: GenerationConfig,
     ): Flow<InferenceEvent> {
-        val partialAnswer = StringBuilder()
         return flow {
+            val partialAnswer = StringBuilder()
             val generationPermit = cancellationState.captureGenerationPermit()
             generation.withLock {
                 if (!cancellationState.isGenerationPermitValid(generationPermit) || cancelRequested) {
@@ -173,20 +185,23 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                 try {
                     cancelRequested = false
                     ensureGenerationMemoryHeadroom()
-                    if (conversationDirty) rebuildConversationFromCommittedHistory()
-                    val activeConversation = conversation
-                        ?: throw IllegalStateException("Load a model before starting a conversation")
                     if (imagePath != null && !visionReady) {
                         throw IllegalStateException(
                             "Vision initialization failed on this device. The model is still available for text-only chat.",
                         )
                     }
+                    if (conversationDirty || (imagePath != null && nativeConversationHasImage)) {
+                        rebuildConversationFromCommittedHistory(restoreHistoryImage = imagePath == null)
+                    }
+                    val activeConversation = conversation
+                        ?: throw IllegalStateException("Load a model before starting a conversation")
                     val safeMaxOutputTokens = GenerationContextPolicy.maxOutputTokens(
                         contextWindowTokens = contextWindowTokens,
                         history = committedHistory,
                         prompt = prompt,
                         requestedMaxOutputTokens = config.maxNewTokens,
                         hasImage = imagePath != null,
+                        historyHasImage = nativeConversationHasImage,
                     )
                     val contents = if (imagePath == null) {
                         Contents.of(prompt)
@@ -254,6 +269,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                             return@withLock
                         }
                         if (cancelRequested) throw CancellationException("Generation cancelled")
+                        if (imagePath != null) nativeConversationHasImage = true
                         rememberCompletedTurn(prompt, partialAnswer.toString(), imagePath)
                         emit(InferenceEvent.Complete)
                     } catch (error: Throwable) {
@@ -314,30 +330,61 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         },
     ) { conversation?.cancelProcess() }
 
-    private fun initializeEngineWithVisionFallback(modelPath: String, vision: Boolean): LoadedEngine {
-        if (!vision) return LoadedEngine(initializeEngine(modelPath, visionBackend = null), visionReady = false)
+    private fun initializeEngineWithVisionFallback(
+        modelPath: String,
+        vision: Boolean,
+        contextWindowTokens: Int,
+    ): LoadedEngine {
+        if (!vision) {
+            return LoadedEngine(
+                initializeEngine(modelPath, visionBackend = null, contextWindowTokens = contextWindowTokens),
+                visionReady = false,
+            )
+        }
+
+        var gpuVisionError: Exception? = null
+        if (
+            LiteRtVisionBackendPolicy.shouldAttemptGpu(
+                supportedAbis = Build.SUPPORTED_ABIS,
+                fingerprint = Build.FINGERPRINT,
+                model = Build.MODEL,
+                hardware = Build.HARDWARE,
+                product = Build.PRODUCT,
+            )
+        ) {
+            try {
+                return LoadedEngine(
+                    initializeEngine(modelPath, visionBackend = Backend.GPU(), contextWindowTokens = contextWindowTokens),
+                    visionReady = true,
+                )
+            } catch (error: Exception) {
+                rethrowCancellation(error)
+                gpuVisionError = error
+            }
+        }
 
         return try {
-            LoadedEngine(initializeEngine(modelPath, visionBackend = Backend.GPU()), visionReady = true)
-        } catch (gpuVisionError: Exception) {
-            rethrowCancellation(gpuVisionError)
+            LoadedEngine(
+                initializeEngine(modelPath, visionBackend = Backend.CPU(), contextWindowTokens = contextWindowTokens),
+                visionReady = true,
+            )
+        } catch (cpuVisionError: Exception) {
+            rethrowCancellation(cpuVisionError)
             try {
-                LoadedEngine(initializeEngine(modelPath, visionBackend = Backend.CPU()), visionReady = true)
-            } catch (cpuVisionError: Exception) {
-                rethrowCancellation(cpuVisionError)
-                try {
-                    LoadedEngine(initializeEngine(modelPath, visionBackend = null), visionReady = false)
-                } catch (textOnlyError: Exception) {
-                    rethrowCancellation(textOnlyError)
-                    textOnlyError.addSuppressed(gpuVisionError)
-                    textOnlyError.addSuppressed(cpuVisionError)
-                    throw textOnlyError
-                }
+                LoadedEngine(
+                    initializeEngine(modelPath, visionBackend = null, contextWindowTokens = contextWindowTokens),
+                    visionReady = false,
+                )
+            } catch (textOnlyError: Exception) {
+                rethrowCancellation(textOnlyError)
+                gpuVisionError?.let(textOnlyError::addSuppressed)
+                textOnlyError.addSuppressed(cpuVisionError)
+                throw textOnlyError
             }
         }
     }
 
-    private fun initializeEngine(modelPath: String, visionBackend: Backend?): Engine {
+    private fun initializeEngine(modelPath: String, visionBackend: Backend?, contextWindowTokens: Int): Engine {
         val modelFile = File(modelPath)
         val cacheDirectory = liteRtCacheDirectory(modelFile).apply {
             if (!isDirectory && !mkdirs()) {
@@ -347,9 +394,9 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         val createdEngine = Engine(
             EngineConfig(
                 modelPath = modelPath,
-                backend = Backend.CPU(),
+                backend = Backend.CPU(threadCount = LiteRtCpuThreadPolicy.threadCount()),
                 visionBackend = visionBackend,
-                maxNumTokens = runtimeContextWindowTokens(modelPath),
+                maxNumTokens = contextWindowTokens,
                 maxNumImages = if (visionBackend != null) 1 else null,
                 cacheDir = cacheDirectory.absolutePath,
             ),
@@ -368,15 +415,20 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     private fun liteRtCacheDirectory(modelFile: File): File =
         File(modelFile.absoluteFile.parentFile, LITERT_CACHE_DIRECTORY)
 
-    private fun rebuildConversationFromCommittedHistory() {
+    private fun rebuildConversationFromCommittedHistory(restoreHistoryImage: Boolean = true) {
         val activeEngine = engine
             ?: throw IllegalStateException("Load a model before rebuilding the conversation")
         val previous = conversation
         replaceRuntimeResourceBeforeClosingPrevious(
             previous = previous,
-            createReplacement = { activeEngine.createConversation(conversationConfig(committedHistory)) },
+            createReplacement = {
+                activeEngine.createConversation(
+                    conversationConfig(committedHistory, restoreHistoryImage = restoreHistoryImage),
+                )
+            },
             installReplacement = { replacement ->
                 conversation = replacement
+                nativeConversationHasImage = restoreHistoryImage && hasRestorableHistoryImage(committedHistory)
                 conversationDirty = false
             },
             closePrevious = { stale -> stale.close() },
@@ -406,12 +458,25 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         conversationDirty = true
     }
 
-    private fun conversationConfig(history: List<RuntimeMessage>): ConversationConfig {
-        val selected = ConversationHistoryPolicy.select(history, contextWindowTokens)
-        val restoredImageIndex = VisionHistoryPolicy.latestUsableImageIndex(
-            history = selected,
+    private fun hasRestorableHistoryImage(history: List<RuntimeMessage>): Boolean =
+        VisionHistoryPolicy.latestUsableImageIndex(
+            history = ConversationHistoryPolicy.select(history, contextWindowTokens),
             visionReady = visionReady,
-        ) { path -> File(path).let { it.isFile && it.canRead() } }
+        ) { path -> File(path).let { it.isFile && it.canRead() } } >= 0
+
+    private fun conversationConfig(
+        history: List<RuntimeMessage>,
+        restoreHistoryImage: Boolean = true,
+    ): ConversationConfig {
+        val selected = ConversationHistoryPolicy.select(history, contextWindowTokens)
+        val restoredImageIndex = if (restoreHistoryImage) {
+            VisionHistoryPolicy.latestUsableImageIndex(
+                history = selected,
+                visionReady = visionReady,
+            ) { path -> File(path).let { it.isFile && it.canRead() } }
+        } else {
+            -1
+        }
         val restored = selected.mapIndexed { index, message ->
             if (!message.fromUser) {
                 Message.model(message.text)
@@ -438,11 +503,24 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         )
     }
 
-    private fun ensureLoadHeadroom(modelPath: String) {
+    private fun selectRuntimeContextWindowTokens(modelPath: String): Int {
         val manager = appContext.getSystemService(ActivityManager::class.java)
         val memory = ActivityManager.MemoryInfo().also(manager::getMemoryInfo)
         val modelFile = File(modelPath)
-        val contextWindowTokens = runtimeContextWindowTokens(modelPath)
+        return LiteRtContextWindowPolicy.select(
+            advertisedContextWindowTokens = runtimeContextWindowTokens(modelPath),
+            modelWeightsBytes = modelFile.length(),
+            totalRamBytes = memory.totalMem,
+            availableRamBytes = memory.availMem,
+            lowMemoryThresholdBytes = memory.threshold,
+            isLowRamDevice = manager.isLowRamDevice,
+        )
+    }
+
+    private fun ensureLoadHeadroom(modelPath: String, contextWindowTokens: Int) {
+        val manager = appContext.getSystemService(ActivityManager::class.java)
+        val memory = ActivityManager.MemoryInfo().also(manager::getMemoryInfo)
+        val modelFile = File(modelPath)
         val memoryReason = RuntimeLoadMemoryPolicy.blockReason(
             modelWeightsBytes = modelFile.length(),
             totalRamBytes = memory.totalMem,
@@ -455,7 +533,11 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         )
         if (memoryReason != null) throw IllegalStateException(memoryReason)
 
-        val reusableCache = LiteRtCacheState.canReuse(liteRtCacheDirectory(modelFile), modelFile)
+        val reusableCache = LiteRtCacheState.canReuse(
+            liteRtCacheDirectory(modelFile),
+            modelFile,
+            contextWindowTokens,
+        )
         val storageReason = RuntimeLoadStoragePolicy.blockReason(
             modelWeightsBytes = modelFile.length(),
             availableStorageBytes = modelFile.absoluteFile.parentFile?.usableSpace ?: -1,
@@ -492,6 +574,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         contextWindowTokens = DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS
         committedHistory = emptyList()
         conversationDirty = false
+        nativeConversationHasImage = false
         cancelRequested = false
         cancellationState.reset()
         runAllRuntimeCleanup(

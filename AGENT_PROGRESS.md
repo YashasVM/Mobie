@@ -1,50 +1,49 @@
 # Agent progress
 
 ## Major changes completed this week
-- Raised normal chat response capacity from 256 to 1024 tokens while preserving per-model context clamping, and prefer 4K-or-better artifacts when they safely fit so small 1280/2048-token packages do not win solely on RAM.
-- Hardened resumable Hugging Face downloads: strict range/size validation, retained partials, cancellation, checksum/fingerprint verification, storage admission, and rejection of ambiguous resumed ranges without an authoritative total size.
-- Verified real Qwen3-0.6B INT4 LiteRT-LM execution through Mobie: download → load → repeated generation → reset/history restore → unload/reload → generation.
-- Added real TTFT, total latency, prefill/decode throughput, token-count, app-RAM, and cold/reload LiteRT cache-growth telemetry.
-- Improved device/model recommendations using RAM pressure, storage headroom, quantization, artifact size, context/KV estimates, supported backend, and hardware-target filtering.
-- Hardened LiteRT lifecycle ordering, cancellation serialization, lifecycle-epoch generation admission, and Stop-vs-generation-finish handling.
-- Broadened Hugging Face discovery beyond `litert-community`; Featured remains curated while Search accepts directly runnable third-party LiteRT-LM text/vision artifacts, with server-side `litert-lm` filtering.
-- Rejected an 8K unknown-context fallback after verifying LiteRT-LM does not expose package max context publicly and current Qwen3-0.6B LiteRT artifacts are published at 2K/4K context; unknown artifacts remain on the conservative 4K fallback.
-- Replaced the old 30% first-load LiteRT cache estimate with a measured model-sized allowance plus 10% safety; recommendation storage estimates and runtime cold-load admission use the same policy.
-- Added fail-closed warm-cache identity tracking keyed to exact model path/size/mtime, LiteRT-LM version, and cache manifest; validated warm reloads now use reduced storage headroom while stale/missing/mutated caches fall back to cold-load admission.
-- Added artifact-specific context metadata from Hugging Face model-card tables for `.litertlm` filenames that omit context, including compact `4K`/`8K` values, so KV/RAM recommendations use publisher capacity when available.
-- Hardened model-card parsing across Markdown table/prose boundaries so unrelated storage/benchmark values cannot leak into context capacity.
+- Hardened Hugging Face downloads and installs with immutable source identity, commit-pinned URLs, size/checksum validation, resumable partials, cancellation, storage checks, per-artifact metadata, crash recovery, and SHA-based WorkManager identities.
+- Made completed installs and deletion recover safely from corrupt or stale canonical/per-artifact metadata, including fallback to matching canonical metadata when a parseable stale artifact sidecar would otherwise force a redownload, while keeping ownership checks fail-closed.
+- Applied the same reusable-metadata selection rule inside `ModelDownloadWorker`, preventing a stale per-artifact sidecar from deleting and redownloading a valid installed file when matching canonical metadata proves the requested immutable source.
+- Made present-but-malformed `installedLength` metadata fail closed instead of being treated like legacy metadata where the property is absent; genuine legacy metadata remains readable.
+- Improved recommendations/runtime sizing using RAM pressure, storage headroom, quantization, artifact size, context/KV estimates, backend support, and hardware targets; portable LiteRT-LM `gpu`/`opencl` bundles remain eligible while vendor/platform-specific bundles remain excluded.
+- Added LiteRT-LM telemetry for TTFT, latency, prefill/decode throughput, token count, app RAM, cold load, and warm-cache load.
+- Added thermal protection, inference-stall containment, bounded cancellation/unload, constrained-context replay, and a CI-validated two-thread CPU policy.
+- Hardened critical thermal escalation so generation collection still stops promptly when native runtime cancellation throws, surfacing recovery guidance instead of allowing generation to continue.
+- Fail closed after explicit/native cancellation failure: the stall guard blocks further generation until a successful unload clears uncertain runtime ownership, recovery errors carry `requiresReload=true`, and the UI remains in `ERROR` instead of re-enabling prompts until reload.
+- Hardened runtime ownership so stale lifecycle work cannot unload a newer model or delete files still held by native resources; uncertain native state now fails closed until cleanup succeeds.
+- Made active download/checksum verification cancellation-aware and removed metadata temp-file collision risks.
 
 ## Important work in progress
-- Propagate trusted model-card context through download/install/restart into the actual LiteRT EngineConfig. The current fix encodes publisher context into the local runtime filename only when the original artifact name omits a context marker; exact-tip CI is running.
-- Continue auditing runtime/backend choices for reliable TTFT/tokens-per-second improvements without enabling unvalidated main-model GPU/NPU execution.
+- Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts; no speculative changes without a reproducible defect.
+- Continue runtime/recommendation failure-mode audit, especially Stop/reload ownership and low-memory transitions.
+- Physical-device validation is still needed for thermal/LMK behavior, long-context pressure, interrupted generation, GPU vision, and CPU thread policy.
 
 ## Tests actually performed
-- `404fb573` passed JVM tests, lint/debug APK build, emulator smoke, and the full real Qwen LiteRT-LM E2E with model-card table-boundary hardening.
-- `2d938534` passed JVM tests, lint/debug APK build, emulator smoke, and the full real Qwen LiteRT-LM E2E after fixing compact `4K`/`8K` context parsing.
-- `e3ec8758` passed JVM tests, lint/debug APK build, emulator smoke, and the full real Qwen LiteRT-LM E2E lifecycle with validated warm-cache runtime integration.
-- `c8013686` passed the same full pipeline with the measured cold-load storage policy.
-- The successful Qwen E2E measured a 347,251,840-byte artifact, 339,216,776-byte cold cache, and 0-byte cache growth after full unload/reload.
-- `1fa77181` passed Android CI with `LiteRtCacheState` JVM coverage for unchanged warm-cache reuse, cache mutation invalidation, model replacement invalidation, and refusal to mark an empty cache.
+- `cad32a57`: full Android CI passed the recovery-required UI fail-closed change; prompts stay blocked when an inference error requires reload.
+- `0e03ffe7`: full Android CI passed fail-closed cancellation recovery, including JVM coverage proving a failed explicit cancel blocks subsequent generation and successful unload restores execution.
+- `5422a236`: full Android CI passed critical thermal cancellation-failure hardening, including the regression where native cancel throws while generation is stalled.
+- `56542570`: full Android CI passed malformed `installedLength` validation: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
+- `b0191ba8` and `5de23bb5`: full Android CI passed worker/completed-file stale-metadata fallback across the same four gates.
+- `5b6018e5`, `9d9ae1fe`, `29a68e25`, `0de8146f`, `8ca93542`, and `25c8e489`: full Android CI validated corrupt metadata recovery, portable LiteRT recommendation selection, bounded native cancellation, resolved-length crash recovery, deletion recovery, and cancellation-aware SHA-256 verification.
+- Real E2E coverage repeatedly exercised Qwen3-0.6B INT4 LiteRT-LM download/load/generate/recollect/cancel/recover/reset/history/unload/reload plus SmolVLM2-500M vision restore/text/replacement-image/text generation.
 
 ## Real benchmarks / performance improvements
-- CPU-emulator Qwen3-0.6B INT4 latest measured run: first prompt 22.09 prefill tok/s, 7.10 decode tok/s, 1.439 s TTFT, 4.060 s total, ~1.02 GiB app RAM.
-- Same lifecycle second prompt: 25.25 prefill tok/s, 7.82 decode tok/s, 1.211 s TTFT, 2.783 s total, ~1.02 GiB app RAM.
-- Cold load: 2745.6 ms and 339,216,776 bytes of LiteRT cache/filesystem growth; full unload/reload: 1476.3 ms and 0 bytes of additional cache growth.
-- No physical-device speed claim yet; emulator numbers are regression baselines only.
+- Latest 2-vCPU Android CI, Qwen: runtime default 6.07 decode tok/s and 7.32 prefill tok/s; explicit 2 threads 19.06 decode tok/s and 38.70 prefill tok/s (3.14x decode, 5.29x prefill). CI evidence only.
+- Representative Qwen prompt: 15.85 decode tok/s, 33.01 prefill tok/s, 1.058 s TTFT, 2.033 s total, ~1.02 GiB app RAM.
+- Representative cold load: 3263.1 ms with 339,217,207 bytes cache growth; unload/reload: 1695.9 ms with no additional cache growth.
 
 ## Known problems / regressions
-- Runtime propagation of model-card-only context is not yet exact-tip CI validated. Until this change is green, a filename with no context marker can still fall back to 4K at runtime even when recommendations used a publisher-supplied 2K capacity.
-- Vision history, thermal/LMK behavior, long-context pressure, and interrupted-generation recovery still need representative physical-device testing.
-- GGUF remains intentionally unavailable; v1 relies on published LiteRT-LM artifacts.
-- Main-model GPU/NPU execution remains disabled until representative phones show a reliable net benefit.
+- Physical-device thermal/LMK behavior, 32K/64K context pressure, interrupted-generation recovery, GPU vision, and >2 CPU-thread performance remain unvalidated on representative phones.
+- Upstream LiteRT-LM streaming can lose terminal callbacks; a truly wedged JNI call may retain detached native resources until process restart. Mobie fails closed after watchdog timeout.
+- GGUF remains intentionally unavailable for v1; supported published LiteRT-LM artifacts are the priority.
+- Main-model GPU/NPU execution remains disabled pending representative handset evidence.
 
 ## Items to inspect before merging
-- Verify a `.litertlm` artifact whose publisher filename omits context but whose model card says 2048 installs with a local `ctx2048` runtime marker, while the Hugging Face URL still targets the original filename and LiteRT uses 2048 rather than the 4K fallback.
-- Verify Qwen3-0.6B artifacts whose filenames omit context show their published 2048/4096-token capacities and corresponding KV-memory recommendation impact, while unrelated model-card tables cannot override them.
-- Verify an initialized model can reload with only filesystem safety reserve free while a cold or mutated-cache model is still blocked.
-- Delete/truncate/replace an installed model after cache creation and verify the warm marker is rejected before native initialization.
-- Interrupt/resume a large real model download and verify Mobie rejects ambiguous `Content-Range .../*` resumes instead of finalizing an unproven partial artifact.
-- Trigger Stop exactly as a real generation completes, then immediately send another prompt; verify the next prompt runs normally.
-- Switch directly between installed LiteRT models under constrained RAM and verify the old engine is released before next-load admission.
-- Exercise a near-4K conversation including vision/history eviction and verify bounded replay/output admission stays stable.
-- Heat representative phones through MODERATE → SEVERE and verify inference blocks/stops cleanly without ANR or conversation corruption.
+- Force explicit/native cancellation failure and verify the runtime rejects another generation until unload succeeds; the UI should remain non-READY when the resulting error carries `requiresReload=true`.
+- Force critical thermal escalation while runtime cancellation fails; generation collection should stop promptly and surface a recovery-oriented error.
+- Corrupt `installedLength` metadata should fail closed while legacy metadata with no `installedLength` remains readable.
+- Verify stale/corrupt per-artifact metadata cannot block reuse when matching canonical metadata validates the requested immutable source.
+- Repeatedly stop long generation and verify bounded native cancellation plus fail-closed cleanup behavior.
+- Interrupt commit-pinned and mutable downloads at resume/finalization boundaries; immutable sources should recover safely while mutable sources restart.
+- Rapidly switch/load/delete models and verify stale lifecycle work cannot unload newer runtime state.
+- On representative arm64 hardware, test 32K/64K contexts, GPU vision fallback, severe/critical thermal handling, repeated Stop, and 2-thread vs runtime-default/4+ thread throughput, RAM, battery, and throttling.

@@ -5,6 +5,7 @@ import dev.yashasvm.mobie.core.model.Compatibility
 import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
+import dev.yashasvm.mobie.core.runtime.LiteRtContextWindowPolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -42,15 +43,63 @@ class CompatibilityResolverTest {
     }
 
     @Test
-    fun `compact 64k context marker prevents unsafe 4k fallback`() {
-        val result = resolver.resolve(artifact(size = gib, name = "MiniCPM5-1B-c64k.litertlm"), device)
-        assertEquals(65_536, result.contextWindowTokens)
-        assertEquals(4 * gib, result.kvCacheBytes)
-        assertEquals(Compatibility.WARNING, result.status)
+    fun `undersized explicit context is rejected instead of silently expanded`() {
+        val result = resolver.resolve(artifact(size = gib, name = "model-c512.litertlm"), device)
+
+        assertEquals(Compatibility.INCOMPATIBLE, result.status)
+        assertEquals(512, result.contextWindowTokens)
+        assertTrue(result.reason.contains("1,024-token minimum"))
     }
 
     @Test
-    fun `device selector prefers artifact that safely fits current device`() {
+    fun `device selector skips undersized context artifact`() {
+        val model = AiModel(
+            id = "example/model",
+            title = "Example",
+            author = "example",
+            description = "",
+            artifacts = listOf(
+                artifact(size = gib / 2, name = "model-c512.litertlm"),
+                artifact(size = gib, name = "model-ekv2048.litertlm"),
+            ),
+        )
+
+        assertEquals("model-ekv2048.litertlm", resolver.selectBestArtifact(model, device)?.fileName)
+    }
+
+    @Test
+    fun `extended context recommendation uses same bounded context as runtime`() {
+        val model = artifact(size = gib, name = "MiniCPM5-1B-c64k.litertlm")
+        val result = resolver.resolve(model, device)
+        val runtimeSelectedContext = LiteRtContextWindowPolicy.select(
+            advertisedContextWindowTokens = 65_536,
+            modelWeightsBytes = model.sizeBytes,
+            totalRamBytes = device.totalRamBytes,
+            availableRamBytes = device.availableRamBytes,
+            lowMemoryThresholdBytes = device.lowMemoryThresholdBytes,
+            isLowRamDevice = device.isLowRamDevice,
+        )
+
+        assertEquals(Compatibility.COMPATIBLE, result.status)
+        assertEquals(runtimeSelectedContext, result.contextWindowTokens)
+        assertTrue(result.contextWindowTokens >= 4_096)
+        assertTrue(result.contextWindowTokens < 65_536)
+        assertEquals(0, result.contextWindowTokens % 256)
+        assertEquals(result.contextWindowTokens.toLong() * 64L * 1024L, result.kvCacheBytes)
+    }
+
+    @Test
+    fun `constrained device reports minimum bounded context instead of advertised context`() {
+        val constrained = device.copy(availableRamBytes = 2 * gib)
+        val result = resolver.resolve(artifact(size = gib, name = "model-c64k.litertlm"), constrained)
+
+        assertEquals(Compatibility.WARNING, result.status)
+        assertEquals(1_024, result.contextWindowTokens)
+        assertEquals(64 * mib, result.kvCacheBytes)
+    }
+
+    @Test
+    fun `device selector can choose extended context artifact when runtime can bound it safely`() {
         val model = AiModel(
             id = "example/model",
             title = "Example",
@@ -62,9 +111,8 @@ class CompatibilityResolverTest {
             ),
         )
         val selected = resolver.selectBestArtifact(model, device.copy(availableRamBytes = 4 * gib))
-        assertEquals("model-ekv2048.litertlm", selected?.fileName)
+        assertEquals("model-c64k.litertlm", selected?.fileName)
     }
-
 
     @Test
     fun `device selector prefers useful context before small memory savings`() {
@@ -164,11 +212,21 @@ class CompatibilityResolverTest {
     }
 
     @Test
-    fun `severe thermal pressure warns before recommending a local model load`() {
+    fun `severe thermal pressure warns that inference will be throttled`() {
         val hot = device.copy(thermalStatus = 3)
         val result = resolver.resolve(artifact(size = gib), hot)
         assertEquals(Compatibility.WARNING, result.status)
         assertTrue(result.reason.contains("severe thermal pressure"))
+        assertTrue(result.reason.contains("256 tokens"))
+    }
+
+    @Test
+    fun `critical thermal pressure warns that model loading is blocked`() {
+        val hot = device.copy(thermalStatus = 4)
+        val result = resolver.resolve(artifact(size = gib), hot)
+        assertEquals(Compatibility.WARNING, result.status)
+        assertTrue(result.reason.contains("critical thermal pressure"))
+        assertTrue(result.reason.contains("block local model loading"))
     }
 
     @Test

@@ -1,11 +1,12 @@
 package dev.yashasvm.mobie.data.download
 
+import androidx.work.WorkInfo
+import java.io.File
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import androidx.work.WorkInfo
 
 class DownloadFilePolicyTest {
     @Test
@@ -13,6 +14,21 @@ class DownloadFilePolicyTest {
         assertNotEquals(
             DownloadFilePolicy.storageKey("owner-a/model"),
             DownloadFilePolicy.storageKey("owner-b/model"),
+        )
+    }
+
+    @Test
+    fun `download work identities resist java hash collisions`() {
+        assertEquals("Aa".hashCode(), "BB".hashCode())
+        assertNotEquals(
+            DownloadFilePolicy.workKey("Aa", "model.litertlm"),
+            DownloadFilePolicy.workKey("BB", "model.litertlm"),
+        )
+
+        assertEquals("Aa".hashCode(), "BB".hashCode())
+        assertNotEquals(
+            DownloadFilePolicy.workKey("owner/model", "Aa"),
+            DownloadFilePolicy.workKey("owner/model", "BB"),
         )
     }
 
@@ -28,6 +44,19 @@ class DownloadFilePolicyTest {
             DownloadFilePolicy.storageFileName("en/model.litertlm"),
             DownloadFilePolicy.storageFileName("de/model.litertlm"),
         )
+    }
+
+    @Test
+    fun `concurrent metadata publications get distinct temporary files`() {
+        val destination = File("model-dir", DownloadFilePolicy.METADATA_FILE)
+        val first = DownloadFilePolicy.metadataPartialFile(destination, "worker-a")
+        val second = DownloadFilePolicy.metadataPartialFile(destination, "worker-b")
+
+        assertNotEquals(first, second)
+        assertEquals(destination.parentFile, first.parentFile)
+        assertEquals(destination.parentFile, second.parentFile)
+        assertTrue(first.name.endsWith(".worker-a.part"))
+        assertTrue(second.name.endsWith(".worker-b.part"))
     }
 
     @Test

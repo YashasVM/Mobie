@@ -44,6 +44,7 @@ class LiteRtEndToEndTest {
         const val TAG = "MobieRuntimeE2E"
         const val PROMPT = "Hey, who are you? Reply briefly."
         const val FOLLOW_UP_PROMPT = "Reply with one short sentence confirming you can answer a second prompt."
+        const val RECOLLECT_PROMPT = "Reply with one short sentence confirming this same request can run twice."
         const val CANCEL_PROMPT = "Write a long numbered list of 100 different practical uses for a local AI model on a phone."
         const val RECOVERY_PROMPT = "Reply with one short sentence confirming generation recovered after cancellation."
         const val RESET_PROMPT = "Reply with one short sentence confirming a fresh conversation works."
@@ -97,6 +98,20 @@ class LiteRtEndToEndTest {
         assertSuccessfulGeneration("second prompt", followUpEvents)
         Log.i(TAG, "Follow-up response: ${followUpEvents.visibleOutput()}")
         logStats("second prompt", followUpEvents)
+
+        val recollectedFlow = runtime.generate(
+            RECOLLECT_PROMPT,
+            config = GenerationConfig(maxNewTokens = 64),
+        )
+        val firstRecollection = withTimeout(15 * 60 * 1000L) { recollectedFlow.toList() }
+        assertSuccessfulGeneration("first flow collection", firstRecollection)
+        val secondRecollection = withTimeout(15 * 60 * 1000L) { recollectedFlow.toList() }
+        assertSuccessfulGeneration("second flow collection", secondRecollection)
+        val secondRecollectionOutput = secondRecollection.visibleOutput()
+        assertTrue(
+            "Recollecting one generation Flow contaminated the second committed assistant turn",
+            committedHistory(runtime).lastOrNull()?.text == secondRecollectionOutput,
+        )
 
         val cancelledEvents = mutableListOf<InferenceEvent>()
         val firstCancelledToken = CompletableDeferred<Unit>()
@@ -300,6 +315,13 @@ class LiteRtEndToEndTest {
         ParcelFileDescriptor.AutoCloseInputStream(
             instrumentation.uiAutomation.executeShellCommand("cp ${source.absolutePath} /sdcard/$destinationName"),
         ).use { it.readBytes() }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun committedHistory(runtime: LiteRtLmRuntimeAdapter): List<RuntimeMessage> {
+        val field = LiteRtLmRuntimeAdapter::class.java.getDeclaredField("committedHistory")
+        field.isAccessible = true
+        return field.get(runtime) as List<RuntimeMessage>
     }
 
     private fun List<InferenceEvent>.stats(): InferenceStats =

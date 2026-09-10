@@ -13,15 +13,15 @@ import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
 import dev.yashasvm.mobie.core.model.ModelType
 import java.io.File
-import java.io.FileInputStream
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
-import java.security.MessageDigest
 import java.util.Properties
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
@@ -46,16 +46,37 @@ class ModelDownloadManager(context: Context) {
     private val workManager = WorkManager.getInstance(context)
 
     suspend fun completedFile(modelId: String, artifact: ModelArtifact): File? = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val cancellationContext = currentCoroutineContext()
         val directory = File(File(appContext.filesDir, "models"), DownloadFilePolicy.storageKey(modelId))
-        val metadataFile = File(directory, DownloadFilePolicy.METADATA_FILE)
-        val metadata = metadataFile.takeIf(File::isFile)?.let(::readProperties)
+        val metadataFile = DownloadFilePolicy.artifactMetadataFile(directory, artifact.fileName)
+        val legacyMetadataFile = File(directory, DownloadFilePolicy.METADATA_FILE)
+        val resolvedMetadata = sequenceOf(
+            readPropertiesOrNull(metadataFile)?.let { MetadataSource(it, metadataFile) },
+            readPropertiesOrNull(legacyMetadataFile)?.takeIf {
+                it.getProperty("sourceFileName") == artifact.fileName
+            }?.let { MetadataSource(it, legacyMetadataFile) },
+        ).filterNotNull().firstOrNull { source ->
+            DownloadSourceIdentity.canReuseCompleted(
+                source.properties,
+                artifact.downloadUrl,
+                artifact.sha256,
+            )
+        }
+        val metadata = resolvedMetadata?.properties
+        val verificationMetadataFile = resolvedMetadata?.file ?: metadataFile
         listOf(DownloadFilePolicy.storageFileName(artifact.fileName), DownloadFilePolicy.safeFileName(artifact.fileName))
             .asSequence()
             .map { File(directory, it) }
             .firstOrNull { file ->
                 file.isFile &&
                     (artifact.sizeBytes <= 0 || file.length() == artifact.sizeBytes) &&
-                    verifiedOrValid(file, artifact.sha256, metadata, metadataFile)
+                    DownloadSourceIdentity.canReuseCompleted(metadata, artifact.downloadUrl, artifact.sha256) &&
+                    verifiedOrValid(
+                        file,
+                        artifact.sha256,
+                        metadata,
+                        verificationMetadataFile,
+                    ) { cancellationContext.ensureActive() }
             }
     }
 
@@ -92,6 +113,7 @@ class ModelDownloadManager(context: Context) {
             .setInputData(input)
             .setBackoffCriteria(androidx.work.BackoffPolicy.EXPONENTIAL, 15, TimeUnit.SECONDS)
             .addTag("model-download")
+            .addTag(modelWorkTag(model.id))
             .build()
         workManager.enqueueUniqueWork(workName(model.id, artifact), ExistingWorkPolicy.KEEP, request)
         return request.id
@@ -116,17 +138,16 @@ class ModelDownloadManager(context: Context) {
         .listFiles(File::isDirectory)
         .orEmpty()
         .mapNotNull { directory ->
-            val metadataFile = File(directory, DownloadFilePolicy.METADATA_FILE).takeIf(File::isFile)
-                ?: return@mapNotNull null
-            val properties = readProperties(metadataFile)
-            val storedFileName = properties.getProperty("fileName") ?: return@mapNotNull null
-            val file = File(directory, storedFileName).takeIf(File::isFile) ?: return@mapNotNull null
-            val expectedSha = properties.getProperty("sha256")?.ifBlank { null }
-            if (!verifiedOrValid(file, expectedSha, properties, metadataFile)) return@mapNotNull null
+            val resolved = resolveInstalledMetadata(directory) ?: return@mapNotNull null
+            val properties = resolved.properties
+            val file = resolved.file
+            val expectedSha = resolved.expectedSha
+            val storedFileName = file.name
             val sourceFileName = properties.getProperty("sourceFileName")?.ifBlank { null } ?: storedFileName
+            val sourceUrl = properties.getProperty(DownloadSourceIdentity.SOURCE_URL_PROPERTY).orEmpty()
             val artifact = ModelArtifact(
                 fileName = sourceFileName,
-                downloadUrl = "",
+                downloadUrl = sourceUrl,
                 sizeBytes = file.length(),
                 sha256 = expectedSha,
                 format = ModelFormat.LITERT_LM,
@@ -150,15 +171,53 @@ class ModelDownloadManager(context: Context) {
         .sortedBy { it.model.title.lowercase() }
 
     suspend fun deleteInstalled(model: AiModel): Boolean = kotlinx.coroutines.withContext(Dispatchers.IO) {
-        val artifact = model.bestArtifact ?: return@withContext false
-        cancel(model, artifact)
         val directory = File(File(appContext.filesDir, "models"), DownloadFilePolicy.storageKey(model.id))
-        if (!directory.exists()) return@withContext true
-        val metadata = File(directory, DownloadFilePolicy.METADATA_FILE)
-        val storedId = metadata.takeIf(File::isFile)?.inputStream()?.use { input ->
-            Properties().apply { load(input) }.getProperty("modelId")
+        val canonicalMetadata = File(directory, DownloadFilePolicy.METADATA_FILE)
+        val ownershipMetadata = buildList {
+            if (canonicalMetadata.isFile) add(canonicalMetadata)
+            directory.listFiles { file ->
+                file.isFile && file.name.startsWith(".artifact-") && file.name.endsWith(".properties")
+            }.orEmpty().forEach(::add)
+        }.distinctBy(File::getAbsolutePath)
+        val storedIds = ownershipMetadata.mapNotNull { metadataFile ->
+            runCatching { readProperties(metadataFile).getProperty("modelId") }
+                .getOrNull()
+                ?.takeIf(String::isNotBlank)
+        }.toSet()
+        if (directory.exists() && storedIds != setOf(model.id)) return@withContext false
+
+        val cancelled = runCatching {
+            workManager.cancelAllWorkByTag(modelWorkTag(model.id)).result.get(CANCEL_WAIT_SECONDS, TimeUnit.SECONDS)
+            true
+        }.getOrDefault(false)
+        if (!cancelled) return@withContext false
+
+        !directory.exists() || directory.deleteRecursively()
+    }
+
+    private fun resolveInstalledMetadata(directory: File): ResolvedInstall? {
+        val canonicalMetadataFile = File(directory, DownloadFilePolicy.METADATA_FILE)
+        val candidateMetadataFiles = buildList {
+            if (canonicalMetadataFile.isFile) add(canonicalMetadataFile)
+            directory.listFiles { file ->
+                file.isFile && file.name.startsWith(".artifact-") && file.name.endsWith(".properties")
+            }.orEmpty().forEach(::add)
+        }.distinctBy(File::getAbsolutePath)
+
+        for (metadataFile in candidateMetadataFiles) {
+            val properties = runCatching { readProperties(metadataFile) }.getOrNull() ?: continue
+            val modelId = properties.getProperty("modelId")?.takeIf(String::isNotBlank) ?: continue
+            if (directory.name != DownloadFilePolicy.storageKey(modelId)) continue
+            val storedFileName = properties.getProperty("fileName")?.takeIf(String::isNotBlank) ?: continue
+            val file = File(directory, storedFileName).takeIf(File::isFile) ?: continue
+            val expectedSha = properties.getProperty("sha256")?.ifBlank { null }
+            if (!verifiedOrValid(file, expectedSha, properties, metadataFile)) continue
+            if (metadataFile != canonicalMetadataFile) {
+                writePropertiesAtomically(canonicalMetadataFile, properties)
+            }
+            return ResolvedInstall(properties, file, expectedSha)
         }
-        storedId == model.id && directory.deleteRecursively()
+        return null
     }
 
     private fun verifiedOrValid(
@@ -166,7 +225,9 @@ class ModelDownloadManager(context: Context) {
         expectedSha: String?,
         properties: Properties?,
         metadataFile: File,
+        cancellationCheck: () -> Unit = {},
     ): Boolean {
+        cancellationCheck()
         if (!ModelFileVerification.matchesInstalledLength(properties, file)) return false
         val remoteSha = expectedSha?.trim()?.lowercase()?.takeIf(String::isNotBlank)
         val localSha = ModelFileVerification.localSha256(properties)
@@ -179,7 +240,8 @@ class ModelDownloadManager(context: Context) {
             }
             if (fingerprintMatches) return true
         }
-        if (sha256(file) != trustedSha) return false
+        if (ModelFileVerification.sha256(file, cancellationCheck) != trustedSha) return false
+        cancellationCheck()
         if (properties != null && metadataFile.isFile) {
             ModelFileVerification.stamp(properties, file, trustedSha)
             writePropertiesAtomically(metadataFile, properties)
@@ -191,32 +253,27 @@ class ModelDownloadManager(context: Context) {
         file.inputStream().use(::load)
     }
 
-    private fun writePropertiesAtomically(destination: File, properties: Properties) {
-        val partial = File(destination.path + ".part")
-        partial.outputStream().use { properties.store(it, null) }
-        try {
-            Files.move(
-                partial.toPath(),
-                destination.toPath(),
-                StandardCopyOption.ATOMIC_MOVE,
-                StandardCopyOption.REPLACE_EXISTING,
-            )
-        } catch (_: AtomicMoveNotSupportedException) {
-            Files.move(partial.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
-        }
+    private fun readPropertiesOrNull(file: File): Properties? = file.takeIf(File::isFile)?.let { source ->
+        runCatching { readProperties(source) }.getOrNull()
     }
 
-    private fun sha256(file: File): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        FileInputStream(file).use { input ->
-            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-            while (true) {
-                val count = input.read(buffer)
-                if (count < 0) break
-                digest.update(buffer, 0, count)
+    private fun writePropertiesAtomically(destination: File, properties: Properties) {
+        val partial = DownloadFilePolicy.metadataPartialFile(destination, UUID.randomUUID().toString())
+        try {
+            partial.outputStream().use { properties.store(it, null) }
+            try {
+                Files.move(
+                    partial.toPath(),
+                    destination.toPath(),
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING,
+                )
+            } catch (_: AtomicMoveNotSupportedException) {
+                Files.move(partial.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
             }
+        } finally {
+            partial.delete()
         }
-        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     private fun WorkInfo.toProgress(): DownloadProgress {
@@ -232,5 +289,22 @@ class ModelDownloadManager(context: Context) {
     }
 
     private fun workName(modelId: String, artifact: ModelArtifact) =
-        "model-${modelId.hashCode()}-${artifact.fileName.hashCode()}"
+        DownloadFilePolicy.workKey(modelId, artifact.fileName)
+
+    private fun modelWorkTag(modelId: String) = "model-storage-${DownloadFilePolicy.storageKey(modelId)}"
+
+    private data class MetadataSource(
+        val properties: Properties,
+        val file: File,
+    )
+
+    private data class ResolvedInstall(
+        val properties: Properties,
+        val file: File,
+        val expectedSha: String?,
+    )
+
+    companion object {
+        private const val CANCEL_WAIT_SECONDS = 10L
+    }
 }
