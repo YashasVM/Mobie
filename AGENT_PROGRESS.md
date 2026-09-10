@@ -12,11 +12,13 @@
 - Made active download/checksum verification cancellation-aware and removed metadata temp-file collision risks.
 
 ## Important work in progress
+- Thermal critical-escalation handling now cancels the generation collector even when native runtime cancellation throws; regression added, full Android CI pending.
 - Continue the download/install/deletion crash-recovery audit for stale, partially replaced, or concurrently accessed artifacts; no speculative changes without a reproducible defect.
 - Continue runtime/recommendation failure-mode audit.
 - Physical-device validation is still needed for thermal/LMK behavior, long-context pressure, interrupted generation, GPU vision, and CPU thread policy.
 
 ## Tests actually performed
+- `39f1d501`: full Android CI passed the validated installed-length metadata progress tip.
 - `56542570`: full Android CI passed malformed `installedLength` fail-closed validation: JVM tests/lint/debug APK, emulator instrumentation, real LiteRT-LM text E2E, and real LiteRT-LM vision E2E.
 - `a418464c`: full Android CI passed the validated worker-metadata recovery progress tip.
 - `b0191ba8`: full Android CI passed worker stale-metadata fallback across the same four gates.
@@ -42,6 +44,7 @@
 - Main-model GPU/NPU execution remains disabled pending representative handset evidence.
 
 ## Items to inspect before merging
+- Force critical thermal escalation while runtime cancellation fails; generation collection should still stop promptly and surface a recovery-oriented error.
 - Corrupt `installedLength` metadata should fail closed instead of weakening checksum-less installed-file verification; legacy metadata with no `installedLength` should remain readable.
 - Verify stale or corrupt per-artifact `.properties` sidecars cannot block reuse in either lookup or worker execution when matching canonical metadata validates the requested immutable source.
 - Confirm portable LiteRT-LM `gpu`/`opencl` bundles remain CPU-recommendable while MediaTek/QNN/Adreno and desktop/web-specific bundles remain excluded.
