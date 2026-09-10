@@ -346,7 +346,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                         persistHistory(model.id, messages)
                         mutableState.update {
                             it.copy(
-                                runtimeState = RuntimeState.READY,
+                                runtimeState = if (event.requiresReload) RuntimeState.ERROR else RuntimeState.READY,
                                 messages = messages,
                                 history = container.chatHistory.sessions(model.id),
                                 error = event.message,
