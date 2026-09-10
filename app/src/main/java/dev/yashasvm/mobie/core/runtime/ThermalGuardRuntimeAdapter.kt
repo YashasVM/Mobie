@@ -76,11 +76,12 @@ internal class ThermalGuardRuntimeAdapter(
                     val thermalMessage = currentDecision.errorMessage ?: "Thermal limit reached"
                     send(
                         InferenceEvent.Error(
-                            if (cancellationFailure == null) {
+                            message = if (cancellationFailure == null) {
                                 thermalMessage
                             } else {
                                 "$thermalMessage Runtime cancellation also failed; reload the model or restart Mobie before retrying."
                             },
+                            requiresReload = cancellationFailure != null,
                         ),
                     )
                     break
