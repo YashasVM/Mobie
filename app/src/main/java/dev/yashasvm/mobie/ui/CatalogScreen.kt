@@ -256,7 +256,7 @@ private fun DeviceRig(device: DeviceProfile?) {
                     val chip = chipName(device)
                     Text(
                         if (device == null) "Reading hardware…" else listOfNotNull(chip, deviceLabel(device)).joinToString(" · "),
-                        style = Mobie.mono.tiny,
+                        style = Mobie.numeric.tiny,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -279,7 +279,7 @@ private fun DeviceRig(device: DeviceProfile?) {
                         )
                         Text(
                             "${formatBytes(used)} in use / ${formatBytes(device.totalRamBytes)}",
-                            style = Mobie.mono.tiny,
+                            style = Mobie.numeric.tiny,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -377,7 +377,7 @@ private fun ModelRow(
                     Text(model.title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(
                         model.author,
-                        style = Mobie.mono.tiny,
+                        style = Mobie.numeric.tiny,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -412,7 +412,7 @@ private fun ModelRow(
                     Text(
                         "needs ~${formatBytes(estimatedRam)} of ${formatBytes(device.totalRamBytes)} RAM · " +
                             "${formatBytes(device.availableRamBytes)} free now",
-                        style = Mobie.mono.tiny,
+                        style = Mobie.numeric.tiny,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -449,7 +449,7 @@ private fun SpecStrip(
     ) {
         BytesMetric(sizeLabel, sizeBytes, Modifier.weight(1f), small = true)
         VerticalHairline(24.dp)
-        Metric("Quant", quantization ?: "—", Modifier.weight(1f), valueStyle = Mobie.mono.small)
+        Metric("Quant", quantization ?: "—", Modifier.weight(1f), valueStyle = Mobie.numeric.small)
         VerticalHairline(24.dp)
         val (ram, ramUnit) = splitBytes(estimatedRamBytes)
         Metric(
@@ -457,7 +457,7 @@ private fun SpecStrip(
             if (estimatedRamBytes > 0) "~$ram" else "—",
             Modifier.weight(1f),
             unit = ramUnit.takeIf { estimatedRamBytes > 0 },
-            valueStyle = Mobie.mono.small,
+            valueStyle = Mobie.numeric.small,
         )
         VerticalHairline(24.dp)
         Metric(
@@ -465,7 +465,7 @@ private fun SpecStrip(
             formatTokens(contextTokens),
             Modifier.weight(1f),
             unit = "tok".takeIf { contextTokens > 0 },
-            valueStyle = Mobie.mono.small,
+            valueStyle = Mobie.numeric.small,
         )
     }
 }
@@ -585,7 +585,7 @@ private fun InstalledRow(
                     Text(model.title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(
                         model.author,
-                        style = Mobie.mono.tiny,
+                        style = Mobie.numeric.tiny,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -718,7 +718,7 @@ private fun LazyListScope.settingsTab(
             "made by @yashas.vm",
             modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 8.dp),
             textAlign = TextAlign.Center,
-            style = Mobie.mono.tiny,
+            style = Mobie.numeric.tiny,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
@@ -753,7 +753,7 @@ private fun TokenSettings(tokenConfigured: Boolean, onSaveToken: (String) -> Uni
                     onValueChange = { draft = it },
                     modifier = Modifier.fillMaxWidth().testTag("hf_token_input"),
                     singleLine = true,
-                    textStyle = Mobie.mono.small,
+                    textStyle = Mobie.numeric.small,
                     visualTransformation = PasswordVisualTransformation(),
                     label = { Text("Access token") },
                     supportingText = { Text("Leave blank and save to remove it.") },
@@ -808,7 +808,7 @@ private fun InfoRow(
             Text(title, style = MaterialTheme.typography.titleMedium)
             Text(
                 body,
-                style = if (mono) Mobie.mono.tiny else MaterialTheme.typography.bodySmall,
+                style = if (mono) Mobie.numeric.tiny else MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -827,8 +827,8 @@ private fun ScreenHeader(section: String, title: String, subtitle: String) {
     Column(Modifier.padding(top = 4.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Box(Modifier.size(8.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp)))
-            Text("mobie", style = Mobie.mono.small.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.onSurface)
-            Text("/ $section", style = Mobie.mono.small, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("mobie", style = Mobie.numeric.small.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.onSurface)
+            Text("/ $section", style = Mobie.numeric.small, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Text(title, style = MaterialTheme.typography.headlineLarge, modifier = Modifier.semantics { heading() })
         Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -852,7 +852,7 @@ private fun ListHeader(
         if (count != null) Tag(count.toString(), mono = true)
         Spacer(Modifier.weight(1f))
         if (trailingNote != null) {
-            Text(trailingNote, style = Mobie.mono.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(trailingNote, style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         action?.let { (label, onClick) -> TextButton(onClick = onClick) { Text(label) } }
     }
@@ -872,7 +872,7 @@ private fun BytesMetric(
         value = if (bytes > 0) value else "—",
         modifier = modifier,
         unit = unit,
-        valueStyle = if (small) Mobie.mono.small else Mobie.mono.medium,
+        valueStyle = if (small) Mobie.numeric.small else Mobie.numeric.medium,
         valueColor = valueColor,
     )
 }

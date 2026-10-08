@@ -180,7 +180,7 @@ private fun WelcomeScreen(onContinue: () -> Unit) {
                 StatusDot(Mobie.signals.ready, pulsing = true)
                 Text(
                     "on-device inference",
-                    style = Mobie.mono.small,
+                    style = Mobie.numeric.small,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -258,7 +258,7 @@ private fun HistorySheet(sessions: List<ChatHistorySession>, onDismiss: () -> Un
                                 )
                                 Text(
                                     "${session.messages.size} msg · ${historyTime(session.updatedAt)}",
-                                    style = Mobie.mono.tiny,
+                                    style = Mobie.numeric.tiny,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }

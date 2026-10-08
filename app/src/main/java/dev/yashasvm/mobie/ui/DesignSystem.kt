@@ -111,7 +111,7 @@ internal fun Metric(
     value: String,
     modifier: Modifier = Modifier,
     unit: String? = null,
-    valueStyle: TextStyle = Mobie.mono.medium,
+    valueStyle: TextStyle = Mobie.numeric.medium,
     valueColor: Color = MaterialTheme.colorScheme.onSurface,
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -127,7 +127,7 @@ internal fun Metric(
             if (unit != null) {
                 Text(
                     unit,
-                    style = Mobie.mono.tiny,
+                    style = Mobie.numeric.tiny,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 1.dp),
                 )
@@ -195,7 +195,7 @@ internal fun Tag(
         if (icon != null) LucideIcon(icon, null, Modifier.size(12.dp), tint = tint)
         Text(
             text,
-            style = if (mono) Mobie.mono.tiny else MaterialTheme.typography.labelSmall,
+            style = if (mono) Mobie.numeric.tiny else MaterialTheme.typography.labelSmall,
             color = tint,
             maxLines = 1,
         )

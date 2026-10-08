@@ -316,7 +316,7 @@ private fun ChatHeader(
                     StatusDot(color, pulsing = status.pulsing, size = 6.dp)
                     Text(
                         status.text,
-                        style = Mobie.mono.tiny,
+                        style = Mobie.numeric.tiny,
                         color = if (runtimeState == RuntimeState.IDLE) MaterialTheme.colorScheme.onSurfaceVariant else color,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -378,10 +378,10 @@ private fun TelemetryStrip(stats: InferenceStats?) {
 @Composable
 private fun TelemetryValue(label: String, value: String) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-        Text(label.uppercase(Locale.US), style = Mobie.mono.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+        Text(label.uppercase(Locale.US), style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
         Text(
             value,
-            style = Mobie.mono.small,
+            style = Mobie.numeric.small,
             color = if (value == "—") MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             modifier = Modifier.animateContentSize(tween(160)),
@@ -404,7 +404,7 @@ private fun LoadingPanel(modelTitle: String) {
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     LucideIcon(LucideR.drawable.lucide_ic_cpu, null, Modifier.size(16.dp), tint = Mobie.signals.caution)
-                    Text("LOADING WEIGHTS", style = Mobie.mono.tiny, color = Mobie.signals.caution)
+                    Text("LOADING WEIGHTS", style = Mobie.numeric.tiny, color = Mobie.signals.caution)
                 }
                 Text("Loading $modelTitle into memory", style = MaterialTheme.typography.titleLarge)
                 IndeterminateTrack(Mobie.signals.caution)
@@ -457,7 +457,7 @@ private fun ErrorPanel(message: String) {
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     LucideIcon(LucideR.drawable.lucide_ic_circle_alert, null, Modifier.size(16.dp), tint = Mobie.signals.blocked)
-                    Text("ENGINE ERROR", style = Mobie.mono.tiny, color = Mobie.signals.blocked)
+                    Text("ENGINE ERROR", style = Mobie.numeric.tiny, color = Mobie.signals.blocked)
                 }
                 Text("Chat couldn't start", style = MaterialTheme.typography.titleLarge)
                 Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -486,7 +486,7 @@ private fun EmptyChat(model: AiModel, onStarter: (String) -> Unit) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 StatusDot(Mobie.signals.ready, size = 6.dp)
-                Text("MODEL IN MEMORY", style = Mobie.mono.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("MODEL IN MEMORY", style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Text(model.title, style = MaterialTheme.typography.headlineMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(
@@ -603,7 +603,7 @@ private fun AssistantMessage(message: ChatMessage, modelTitle: String, streaming
             }
             Text(
                 modelTitle,
-                style = Mobie.mono.tiny,
+                style = Mobie.numeric.tiny,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -627,7 +627,7 @@ private fun AssistantMessage(message: ChatMessage, modelTitle: String, streaming
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     StatusDot(Mobie.signals.ready, pulsing = true, size = 6.dp)
-                    Text("waiting for first token", style = Mobie.mono.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("waiting for first token", style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else if (message.text.isNotBlank()) {
                 StreamingCaret()
@@ -637,7 +637,7 @@ private fun AssistantMessage(message: ChatMessage, modelTitle: String, streaming
                 val footer = message.stats?.let(::replyStatsLine)
                 Text(
                     footer.orEmpty(),
-                    style = Mobie.mono.tiny,
+                    style = Mobie.numeric.tiny,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -907,7 +907,7 @@ private fun ComposerDock(
             }
             Text(
                 "on-device · $runtimeLabel",
-                style = Mobie.mono.tiny,
+                style = Mobie.numeric.tiny,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .7f),
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),

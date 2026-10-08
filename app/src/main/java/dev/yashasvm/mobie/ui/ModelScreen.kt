@@ -155,7 +155,7 @@ private fun ModelIdentity(model: AiModel) {
         )
         Text(
             model.id,
-            style = Mobie.mono.small,
+            style = Mobie.numeric.small,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -249,10 +249,10 @@ private fun MemoryPanel(result: CompatibilityResult?, device: DeviceProfile?) {
             }
             MetricRow {
                 val (peakValue, peakUnit) = splitBytes(peak)
-                Metric("Est. peak", peakValue, Modifier.weight(1f), unit = peakUnit, valueStyle = Mobie.mono.large)
+                Metric("Est. peak", peakValue, Modifier.weight(1f), unit = peakUnit, valueStyle = Mobie.numeric.large)
                 VerticalHairline(36.dp)
                 val (totalValue, totalUnit) = splitBytes(total)
-                Metric("Total RAM", totalValue, Modifier.weight(1f), unit = totalUnit, valueStyle = Mobie.mono.large)
+                Metric("Total RAM", totalValue, Modifier.weight(1f), unit = totalUnit, valueStyle = Mobie.numeric.large)
             }
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 MemoryBar(
@@ -262,9 +262,9 @@ private fun MemoryPanel(result: CompatibilityResult?, device: DeviceProfile?) {
                     height = 12.dp,
                 )
                 Row(Modifier.fillMaxWidth()) {
-                    Text("0", style = Mobie.mono.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("0", style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.weight(1f))
-                    Text(formatBytes(total), style = Mobie.mono.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(formatBytes(total), style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -275,13 +275,13 @@ private fun MemoryPanel(result: CompatibilityResult?, device: DeviceProfile?) {
             Hairline()
             Text(
                 "Estimated peak ≈ ${formatBytes(peak)} of ${formatBytes(total)} total · ${formatBytes(available)} available now",
-                style = Mobie.mono.tiny,
+                style = Mobie.numeric.tiny,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             val name = listOfNotNull(deviceName(device), chipName(device)).joinToString(" · ")
             Text(
                 if (name.isBlank()) deviceLabel(device) else "$name · ${deviceLabel(device)}",
-                style = Mobie.mono.tiny,
+                style = Mobie.numeric.tiny,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
@@ -305,7 +305,7 @@ private fun LegendRow(label: String, value: String, color: Color, marker: Boolea
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f),
         )
-        Text(value, style = Mobie.mono.small, color = MaterialTheme.colorScheme.onSurface)
+        Text(value, style = Mobie.numeric.small, color = MaterialTheme.colorScheme.onSurface)
     }
 }
 
@@ -397,7 +397,7 @@ private fun SpecRow(label: String, value: String, valueColor: Color? = null) {
         )
         Text(
             value,
-            style = Mobie.mono.small,
+            style = Mobie.numeric.small,
             color = valueColor ?: MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.weight(0.6f),
             textAlign = TextAlign.End,
@@ -545,7 +545,7 @@ private fun DownloadStatus(download: DownloadProgress) {
                 if (active) StatusDot(MaterialTheme.colorScheme.primary, pulsing = true, size = 6.dp)
                 Text(
                     downloadProgressLabel(download),
-                    style = Mobie.mono.tiny,
+                    style = Mobie.numeric.tiny,
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1f),
                     maxLines = 1,
@@ -553,7 +553,7 @@ private fun DownloadStatus(download: DownloadProgress) {
                 )
                 if (active) {
                     downloadEta(download)?.let {
-                        Text(it, style = Mobie.mono.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(it, style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }

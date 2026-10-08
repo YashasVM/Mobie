@@ -37,9 +37,9 @@ data class MobieSignals(
     val hairline: Color,
 )
 
-/** Monospace styles for numbers that are measured or estimated (tok/s, RAM, sizes, latency). */
+/** Tabular-figure styles for numbers that are measured or estimated (tok/s, RAM, sizes, latency). */
 @Immutable
-data class MobieMonoType(
+data class MobieNumericType(
     val large: TextStyle,
     val medium: TextStyle,
     val small: TextStyle,
@@ -52,7 +52,7 @@ private val DarkSignals = MobieSignals(
     blocked = Color(0xFFFF6B5E),
     thinking = Color(0xFF6CC7FF),
     track = Color(0xFF1C2024),
-    hairline = Color(0xFF24292E),
+    hairline = Color(0xFF2A3036),
 )
 
 private val LightSignals = MobieSignals(
@@ -78,11 +78,11 @@ private val MobieDarkColors = darkColorScheme(
     tertiaryContainer = Color(0xFF0E2C40),
     onTertiaryContainer = Color(0xFFC8E8FF),
     background = Color(0xFF08090A),
-    onBackground = Color(0xFFECEEF0),
+    onBackground = Color(0xFFF3F5F6),
     surface = Color(0xFF101214),
-    onSurface = Color(0xFFECEEF0),
+    onSurface = Color(0xFFF3F5F6),
     surfaceVariant = Color(0xFF171A1D),
-    onSurfaceVariant = Color(0xFF8B949D),
+    onSurfaceVariant = Color(0xFFA9B1BA),
     surfaceContainerLowest = Color(0xFF08090A),
     surfaceContainerLow = Color(0xFF0D0F11),
     surfaceContainer = Color(0xFF101214),
@@ -112,7 +112,7 @@ private val MobieLightColors = lightColorScheme(
     surface = Color(0xFFFBFBF8),
     onSurface = Color(0xFF111315),
     surfaceVariant = Color(0xFFEDEEE9),
-    onSurfaceVariant = Color(0xFF5E666E),
+    onSurfaceVariant = Color(0xFF4A5158),
     surfaceContainerLowest = Color.White,
     surfaceContainerLow = Color(0xFFF7F7F3),
     surfaceContainer = Color(0xFFFBFBF8),
@@ -125,40 +125,43 @@ private val MobieLightColors = lightColorScheme(
 
 private val DisplayFace = FontFamily(Font(R.font.manrope))
 private val MessageFace = FontFamily.SansSerif
-private val MonoFace = FontFamily.Monospace
 
+// Never go below 12sp: these are read on a phone at arm's length, often while text streams in.
 private val MobieTypography = Typography(
-    displaySmall = TextStyle(fontFamily = DisplayFace, fontSize = 34.sp, lineHeight = 38.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1.2).sp),
-    headlineLarge = TextStyle(fontFamily = DisplayFace, fontSize = 28.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.8).sp),
-    headlineMedium = TextStyle(fontFamily = DisplayFace, fontSize = 23.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp),
-    headlineSmall = TextStyle(fontFamily = DisplayFace, fontSize = 19.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp),
-    titleLarge = TextStyle(fontFamily = DisplayFace, fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.2).sp),
-    titleMedium = TextStyle(fontFamily = MessageFace, fontSize = 15.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium),
-    titleSmall = TextStyle(fontFamily = MessageFace, fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
-    bodyLarge = TextStyle(fontFamily = MessageFace, fontSize = 15.sp, lineHeight = 22.sp),
-    bodyMedium = TextStyle(fontFamily = MessageFace, fontSize = 13.sp, lineHeight = 19.sp),
-    bodySmall = TextStyle(fontFamily = MessageFace, fontSize = 12.sp, lineHeight = 16.sp),
-    labelLarge = TextStyle(fontFamily = MessageFace, fontSize = 14.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold),
-    labelMedium = TextStyle(fontFamily = MessageFace, fontSize = 11.sp, lineHeight = 15.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.1.sp),
-    labelSmall = TextStyle(fontFamily = MessageFace, fontSize = 10.sp, lineHeight = 14.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.4.sp),
+    displaySmall = TextStyle(fontFamily = DisplayFace, fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.6).sp),
+    headlineLarge = TextStyle(fontFamily = DisplayFace, fontSize = 28.sp, lineHeight = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp),
+    headlineMedium = TextStyle(fontFamily = DisplayFace, fontSize = 24.sp, lineHeight = 30.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp),
+    headlineSmall = TextStyle(fontFamily = DisplayFace, fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.2).sp),
+    titleLarge = TextStyle(fontFamily = DisplayFace, fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold),
+    titleMedium = TextStyle(fontFamily = MessageFace, fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.Medium),
+    titleSmall = TextStyle(fontFamily = MessageFace, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium),
+    bodyLarge = TextStyle(fontFamily = MessageFace, fontSize = 16.sp, lineHeight = 25.sp, letterSpacing = 0.1.sp),
+    bodyMedium = TextStyle(fontFamily = MessageFace, fontSize = 14.sp, lineHeight = 21.sp, letterSpacing = 0.1.sp),
+    bodySmall = TextStyle(fontFamily = MessageFace, fontSize = 13.sp, lineHeight = 19.sp, letterSpacing = 0.1.sp),
+    labelLarge = TextStyle(fontFamily = MessageFace, fontSize = 15.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold),
+    labelMedium = TextStyle(fontFamily = MessageFace, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.8.sp),
+    labelSmall = TextStyle(fontFamily = MessageFace, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.2.sp),
 )
 
-private val MobieMono = MobieMonoType(
-    large = TextStyle(fontFamily = MonoFace, fontSize = 22.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.5).sp),
-    medium = TextStyle(fontFamily = MonoFace, fontSize = 14.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
-    small = TextStyle(fontFamily = MonoFace, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium),
-    tiny = TextStyle(fontFamily = MonoFace, fontSize = 10.sp, lineHeight = 13.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.2.sp),
+// Numbers use the regular sans face with tabular figures: digits keep a fixed width so live
+// values (tok/s, progress) don't jitter, without the readability cost of a monospace font.
+private const val TABULAR = "tnum"
+private val MobieNumeric = MobieNumericType(
+    large = TextStyle(fontFamily = MessageFace, fontSize = 24.sp, lineHeight = 30.sp, fontWeight = FontWeight.SemiBold, fontFeatureSettings = TABULAR),
+    medium = TextStyle(fontFamily = MessageFace, fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold, fontFeatureSettings = TABULAR),
+    small = TextStyle(fontFamily = MessageFace, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium, fontFeatureSettings = TABULAR),
+    tiny = TextStyle(fontFamily = MessageFace, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium, fontFeatureSettings = TABULAR),
 )
 
 private val LocalMobieSignals = staticCompositionLocalOf { DarkSignals }
-private val LocalMobieMono = staticCompositionLocalOf { MobieMono }
+private val LocalMobieNumeric = staticCompositionLocalOf { MobieNumeric }
 
 /** Access to Mobie-specific tokens alongside [MaterialTheme]. */
 object Mobie {
     val signals: MobieSignals
         @Composable get() = LocalMobieSignals.current
-    val mono: MobieMonoType
-        @Composable get() = LocalMobieMono.current
+    val numeric: MobieNumericType
+        @Composable get() = LocalMobieNumeric.current
 }
 
 @Composable
@@ -178,7 +181,7 @@ fun MobieTheme(darkTheme: Boolean = true, content: @Composable () -> Unit) {
     }
     CompositionLocalProvider(
         LocalMobieSignals provides if (darkTheme) DarkSignals else LightSignals,
-        LocalMobieMono provides MobieMono,
+        LocalMobieNumeric provides MobieNumeric,
     ) {
         MaterialTheme(
             colorScheme = colors,
