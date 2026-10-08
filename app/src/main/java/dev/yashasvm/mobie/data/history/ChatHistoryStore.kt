@@ -26,6 +26,9 @@ data class ChatHistorySession(
 class ChatHistoryStore(context: Context) {
     private val preferences = context.getSharedPreferences("chat_history", Context.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true }
+    // In-memory cache keyed by modelId. Eliminates redundant JSON deserialization when the ViewModel
+    // calls sessions() immediately after write() within the same event handler.
+    private val sessionsCache = HashMap<String, List<ChatHistorySession>>()
 
     fun read(modelId: String): List<HistoryMessage> {
         val activeId = currentId(modelId)
@@ -39,7 +42,7 @@ class ChatHistoryStore(context: Context) {
     fun write(modelId: String, messages: List<HistoryMessage>) {
         val now = System.currentTimeMillis()
         val id = currentId(modelId) ?: UUID.randomUUID().toString()
-        val existing = sessions(modelId).filterNot { it.id == id }
+        val existing = loadSessions(modelId).filterNot { it.id == id }
         val title = messages.firstOrNull { it.fromUser && it.text.isNotBlank() }
             ?.text
             ?.replace("\n", " ")
@@ -47,6 +50,7 @@ class ChatHistoryStore(context: Context) {
             ?: "New local chat"
         val updated = (listOf(ChatHistorySession(id, title, now, messages.takeLast(MAX_MESSAGES))) + existing)
             .take(MAX_SESSIONS)
+        sessionsCache[modelId] = updated
         preferences.edit()
             .putString(sessionsKey(modelId), json.encodeToString(updated))
             .putString(currentKey(modelId), id)
@@ -55,8 +59,9 @@ class ChatHistoryStore(context: Context) {
 
     fun startNewSession(modelId: String): String {
         val id = UUID.randomUUID().toString()
-        val sessions = (listOf(ChatHistorySession(id, "New local chat", System.currentTimeMillis())) + sessions(modelId))
+        val sessions = (listOf(ChatHistorySession(id, "New local chat", System.currentTimeMillis())) + loadSessions(modelId))
             .take(MAX_SESSIONS)
+        sessionsCache[modelId] = sessions
         preferences.edit()
             .putString(sessionsKey(modelId), json.encodeToString(sessions))
             .putString(currentKey(modelId), id)
@@ -71,6 +76,20 @@ class ChatHistoryStore(context: Context) {
     }
 
     fun sessions(modelId: String): List<ChatHistorySession> {
+        sessionsCache[modelId]?.let { return it }
+        return loadSessions(modelId).also { sessionsCache[modelId] = it }
+    }
+
+    fun clear(modelId: String) {
+        sessionsCache.remove(modelId)
+        preferences.edit()
+            .remove(modelId)
+            .remove(sessionsKey(modelId))
+            .remove(currentKey(modelId))
+            .apply()
+    }
+
+    private fun loadSessions(modelId: String): List<ChatHistorySession> {
         val saved = preferences.getString(sessionsKey(modelId), null)
             ?.let { runCatching { json.decodeFromString<List<ChatHistorySession>>(it) }.getOrNull() }
         if (saved != null) return saved.sortedByDescending { it.updatedAt }
@@ -81,14 +100,6 @@ class ChatHistoryStore(context: Context) {
         return if (legacy.isEmpty()) emptyList() else listOf(
             ChatHistorySession("legacy", "Previous local chat", 0L, legacy),
         )
-    }
-
-    fun clear(modelId: String) {
-        preferences.edit()
-            .remove(modelId)
-            .remove(sessionsKey(modelId))
-            .remove(currentKey(modelId))
-            .apply()
     }
 
     private fun currentId(modelId: String): String? = preferences.getString(currentKey(modelId), null)
