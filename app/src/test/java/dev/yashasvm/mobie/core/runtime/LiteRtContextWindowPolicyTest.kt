@@ -6,7 +6,7 @@ import org.junit.Test
 
 class LiteRtContextWindowPolicyTest {
     @Test
-    fun keepsAdvertisedContextWhenItFitsConservativeRamBudget() {
+    fun capsExtendedContextForOrdinaryChatEvenWhenFullCacheFitsRam() {
         val selected = LiteRtContextWindowPolicy.select(
             advertisedContextWindowTokens = 65_536,
             modelWeightsBytes = 1L * GIB,
@@ -16,7 +16,7 @@ class LiteRtContextWindowPolicyTest {
             isLowRamDevice = false,
         )
 
-        assertEquals(65_536, selected)
+        assertEquals(4_096, selected)
     }
 
     @Test
@@ -39,12 +39,12 @@ class LiteRtContextWindowPolicyTest {
             advertisedContextWindowTokens = 65_536,
             modelWeightsBytes = 1L * GIB,
             totalRamBytes = 4L * GIB,
-            availableRamBytes = 2_500L * MIB,
+            availableRamBytes = 2_200L * MIB,
             lowMemoryThresholdBytes = 192L * MIB,
             isLowRamDevice = false,
         )
 
-        assertTrue(selected in 4_096 until 65_536)
+        assertTrue(selected in 1_024 until 4_096)
         assertEquals(0, selected % 256)
     }
 
@@ -54,7 +54,7 @@ class LiteRtContextWindowPolicyTest {
             advertisedContextWindowTokens = 32_768,
             modelWeightsBytes = 768L * MIB,
             totalRamBytes = 4L * GIB,
-            availableRamBytes = 2_800L * MIB,
+            availableRamBytes = 2_000L * MIB,
             lowMemoryThresholdBytes = 192L * MIB,
             isLowRamDevice = false,
         )
@@ -62,7 +62,7 @@ class LiteRtContextWindowPolicyTest {
             advertisedContextWindowTokens = 32_768,
             modelWeightsBytes = 768L * MIB,
             totalRamBytes = 4L * GIB,
-            availableRamBytes = 2_800L * MIB,
+            availableRamBytes = 2_000L * MIB,
             lowMemoryThresholdBytes = 192L * MIB,
             isLowRamDevice = true,
         )
@@ -71,9 +71,9 @@ class LiteRtContextWindowPolicyTest {
     }
 
     @Test
-    fun preservesAdvertisedContextWhenMemoryTelemetryIsUnavailable() {
+    fun capsContextWhenMemoryTelemetryIsUnavailable() {
         assertEquals(
-            16_384,
+            4_096,
             LiteRtContextWindowPolicy.select(
                 advertisedContextWindowTokens = 16_384,
                 modelWeightsBytes = 512L * MIB,

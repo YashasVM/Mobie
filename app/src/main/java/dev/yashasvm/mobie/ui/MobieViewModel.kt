@@ -580,6 +580,12 @@ internal fun List<ChatMessage>.updateLastAssistant(chunk: String, thinkingChunk:
             this[index] = message.copy(thinking = message.thinking + chunk)
             return@apply
         }
+        // Fast path: no tag is being tracked (rawText == null) and chunk cannot start one.
+        // Covers both plain-text responses and post-close answer tokens after rawText is cleared.
+        if (message.rawText == null && !chunk.contains('<')) {
+            this[index] = message.copy(text = message.text + chunk)
+            return@apply
+        }
         val raw = (message.rawText ?: message.text) + chunk
         val tag = REASONING_TAGS
             .map { it to raw.indexOf("<$it>", ignoreCase = true) }
@@ -596,7 +602,16 @@ internal fun List<ChatMessage>.updateLastAssistant(chunk: String, thinkingChunk:
             close < 0 -> raw.substring(0, open)
             else -> (raw.substring(0, open) + raw.substring(close + tag!!.first.length + 3)).trim()
         }
-        this[index] = message.copy(text = answer, thinking = thinking, rawText = raw)
+        // Clear rawText once the close tag is found (or when no tag was involved).
+        // Next token then hits the fast path above, skipping O(n) re-scans of accumulated raw text.
+        val partialTag = open < 0 && REASONING_TAGS.any { "<$it>".startsWith(raw.trimStart(), ignoreCase = true) }
+        val newRawText = when {
+            close >= 0 -> null   // close found: subsequent tokens are pure answer, no re-scan needed
+            tag != null -> raw   // inside thinking block before close
+            partialTag -> raw    // partial open tag: carry forward for next chunk
+            else -> null         // no tag involvement: don't grow rawText
+        }
+        this[index] = message.copy(text = answer, thinking = thinking, rawText = newRawText)
     }
 }
 

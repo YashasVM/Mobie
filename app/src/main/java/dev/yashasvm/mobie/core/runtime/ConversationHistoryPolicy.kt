@@ -82,7 +82,7 @@ internal object ConversationHistoryPolicy {
             if (turn.none { !it.fromUser } || turn.any { it.interrupted }) continue
 
             val turnChars = turn.sumOf { it.text.length }
-            val turnUtf8Bytes = turn.sumOf { it.text.toByteArray(Charsets.UTF_8).size }
+            val turnUtf8Bytes = turn.sumOf { it.text.utf8ByteCount() }
             val turnMessages = turn.size
             val turnFitsAlone =
                 turnChars <= budget.maxChars &&
