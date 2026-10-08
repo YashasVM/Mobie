@@ -41,6 +41,8 @@ data class ChatMessage(
     val thinking: String = "",
     val rawText: String? = null,
     val interrupted: Boolean = false,
+    /** Measured performance for this assistant reply; null until the runtime reports it. */
+    val stats: InferenceStats? = null,
 )
 
 data class MobieUiState(
@@ -340,7 +342,9 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                     is InferenceEvent.Token -> mutableState.update { currentState ->
                         currentState.copy(messages = currentState.messages.updateLastAssistant(event.text, event.thinking))
                     }
-                    is InferenceEvent.Stats -> mutableState.update { it.copy(stats = event.value) }
+                    is InferenceEvent.Stats -> mutableState.update {
+                        it.copy(stats = event.value, messages = it.messages.attachStatsToLastAssistant(event.value))
+                    }
                     is InferenceEvent.Error -> {
                         val messages = state.value.messages.removeBlankAssistant().markLastAssistantInterrupted()
                         persistHistory(model.id, messages)
@@ -627,3 +631,9 @@ private val REASONING_TAGS = listOf("think", "thinking", "analysis", "reasoning"
 
 private fun List<ChatMessage>.removeBlankAssistant(): List<ChatMessage> =
     if (lastOrNull()?.let { !it.fromUser && it.text.isBlank() } == true) dropLast(1) else this
+
+internal fun List<ChatMessage>.attachStatsToLastAssistant(stats: InferenceStats): List<ChatMessage> {
+    val index = indexOfLast { !it.fromUser }
+    if (index < 0) return this
+    return toMutableList().apply { this[index] = this[index].copy(stats = stats) }
+}
