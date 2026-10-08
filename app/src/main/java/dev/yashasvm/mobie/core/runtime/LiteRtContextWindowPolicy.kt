@@ -4,15 +4,16 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Chooses the largest LiteRT KV/context allocation that fits the same conservative RAM envelope
- * used by runtime admission. Extended-context artifacts should not reserve their entire advertised
- * KV cache when the current device cannot safely sustain it.
+ * Caps ordinary chat at 4K tokens and reduces that allocation further to fit the conservative RAM
+ * envelope used by runtime admission. Free RAM should not cause an extended-context artifact to
+ * reserve its entire advertised KV cache.
  *
  * This policy is intentionally pure so its memory assumptions can be regression-tested before it
  * is wired into native EngineConfig.
  */
 internal object LiteRtContextWindowPolicy {
     const val MIN_USEFUL_CONTEXT_TOKENS = 1_024
+    private const val MAX_CHAT_CONTEXT_TOKENS = 4_096
 
     fun select(
         advertisedContextWindowTokens: Int,
@@ -25,7 +26,7 @@ internal object LiteRtContextWindowPolicy {
         // Never ask LiteRT for more KV capacity than the artifact explicitly advertises. Some
         // community packages encode small fixed caches (for example c512); rounding those up to our
         // normal 1K minimum can exceed the package's real capacity and fail during engine init.
-        val advertised = advertisedContextWindowTokens.coerceAtLeast(1)
+        val advertised = advertisedContextWindowTokens.coerceIn(1, MAX_CHAT_CONTEXT_TOKENS)
         if (modelWeightsBytes <= 0 || totalRamBytes <= 0 || availableRamBytes <= 0) return advertised
 
         val runtimeOverheadBytes = max((modelWeightsBytes * 0.4).toLong(), MIN_RUNTIME_OVERHEAD_BYTES)

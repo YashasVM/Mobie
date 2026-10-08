@@ -82,10 +82,9 @@ class CompatibilityResolverTest {
 
         assertEquals(Compatibility.COMPATIBLE, result.status)
         assertEquals(runtimeSelectedContext, result.contextWindowTokens)
-        assertTrue(result.contextWindowTokens >= 4_096)
-        assertTrue(result.contextWindowTokens < 65_536)
+        assertEquals(4_096, result.contextWindowTokens)
         assertEquals(0, result.contextWindowTokens % 256)
-        assertEquals(result.contextWindowTokens.toLong() * 64L * 1024L, result.kvCacheBytes)
+        assertEquals(256 * mib, result.kvCacheBytes)
     }
 
     @Test

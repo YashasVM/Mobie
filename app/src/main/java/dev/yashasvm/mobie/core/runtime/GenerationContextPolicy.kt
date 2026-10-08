@@ -29,8 +29,8 @@ internal object GenerationContextPolicy {
         require(requestedMaxOutputTokens > 0) { "Output token limit must be positive" }
 
         val selectedHistory = ConversationHistoryPolicy.select(history, contextWindowTokens)
-        val textInputUpperBound = selectedHistory.sumOf { it.text.toByteArray(Charsets.UTF_8).size.toLong() } +
-            prompt.toByteArray(Charsets.UTF_8).size.toLong()
+        val textInputUpperBound = selectedHistory.sumOf { it.text.utf8ByteCount().toLong() } +
+            prompt.utf8ByteCount().toLong()
         val fixedReserve = TEMPLATE_RESERVE_TOKENS +
             if (hasImage || historyHasImage) VISION_RESERVE_TOKENS else 0
         val availableForOutput = contextWindowTokens.toLong() - fixedReserve - textInputUpperBound

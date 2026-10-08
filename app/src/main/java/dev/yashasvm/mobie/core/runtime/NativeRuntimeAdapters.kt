@@ -460,7 +460,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
 
     private fun hasRestorableHistoryImage(history: List<RuntimeMessage>): Boolean =
         VisionHistoryPolicy.latestUsableImageIndex(
-            history = ConversationHistoryPolicy.select(history, contextWindowTokens),
+            history = history,
             visionReady = visionReady,
         ) { path -> File(path).let { it.isFile && it.canRead() } } >= 0
 
@@ -468,16 +468,15 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         history: List<RuntimeMessage>,
         restoreHistoryImage: Boolean = true,
     ): ConversationConfig {
-        val selected = ConversationHistoryPolicy.select(history, contextWindowTokens)
         val restoredImageIndex = if (restoreHistoryImage) {
             VisionHistoryPolicy.latestUsableImageIndex(
-                history = selected,
+                history = history,
                 visionReady = visionReady,
             ) { path -> File(path).let { it.isFile && it.canRead() } }
         } else {
             -1
         }
-        val restored = selected.mapIndexed { index, message ->
+        val restored = history.mapIndexed { index, message ->
             if (!message.fromUser) {
                 Message.model(message.text)
             } else if (index == restoredImageIndex && message.imagePath != null) {
