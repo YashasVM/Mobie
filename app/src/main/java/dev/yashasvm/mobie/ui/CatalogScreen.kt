@@ -5,22 +5,27 @@ import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -32,13 +37,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -63,7 +69,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -74,12 +81,14 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.composables.icons.lucide.R as LucideR
 import dev.yashasvm.mobie.core.device.CompatibilityResolver
@@ -92,6 +101,10 @@ import dev.yashasvm.mobie.ui.theme.Mobie
 private const val TAB_DISCOVER = 0
 private const val TAB_INSTALLED = 1
 private const val TAB_SETTINGS = 2
+private const val TAB_COUNT = 3
+
+/** List items before this index stagger in; later ones (reached by scrolling) appear without delay. */
+private const val STAGGER_LIMIT = 8
 
 private val CardShape = RoundedCornerShape(12.dp)
 private val FieldShape = RoundedCornerShape(10.dp)
@@ -118,6 +131,10 @@ internal fun CatalogScreen(
     var selectedTab by rememberSaveable { mutableIntStateOf(TAB_DISCOVER) }
     var pendingDelete by remember { mutableStateOf<InstalledModelEntry?>(null) }
     val resolver = remember { CompatibilityResolver() }
+    // One tracker per list, hoisted above the tab switcher so revisiting a tab doesn't replay entrances.
+    val discoverEntrance = rememberEntranceTracker()
+    val installedEntrance = rememberEntranceTracker()
+    val settingsEntrance = rememberEntranceTracker()
 
     BackHandler(enabled = selectedTab != TAB_DISCOVER) { selectedTab = TAB_DISCOVER }
 
@@ -125,18 +142,29 @@ internal fun CatalogScreen(
         AnimatedContent(
             targetState = selectedTab,
             modifier = Modifier.weight(1f).fillMaxWidth(),
-            transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(90)) },
+            transitionSpec = {
+                // Shared-axis: content moves in the direction of the tab that was picked.
+                val direction = if (targetState > initialState) 1 else -1
+                (
+                    slideInHorizontally(tween(MotionMedium, easing = EmphasizedEase)) { it / 8 * direction } +
+                        fadeIn(tween(MotionMedium, delayMillis = 40))
+                    ) togetherWith (
+                    slideOutHorizontally(tween(MotionMedium, easing = EmphasizedEase)) { -it / 8 * direction } +
+                        fadeOut(tween(MotionShort))
+                    )
+            },
             label = "catalog tab",
         ) { tab ->
             LazyColumn(
                 modifier = Modifier.fillMaxSize().statusBarsPadding().imePadding(),
-                contentPadding = PaddingValues(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 28.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 when (tab) {
                     TAB_INSTALLED -> installedTab(
                         state = state,
                         resolver = resolver,
+                        tracker = installedEntrance,
                         onOpen = onOpenInstalled,
                         onDelete = { pendingDelete = it },
                         onBrowse = { selectedTab = TAB_DISCOVER },
@@ -144,12 +172,14 @@ internal fun CatalogScreen(
                     TAB_SETTINGS -> settingsTab(
                         tokenConfigured = state.tokenConfigured,
                         darkTheme = darkTheme,
+                        tracker = settingsEntrance,
                         onDarkThemeChange = onDarkThemeChange,
                         onSaveToken = onSaveToken,
                     )
                     else -> discoverTab(
                         state = state,
                         resolver = resolver,
+                        tracker = discoverEntrance,
                         onQuery = onQuery,
                         onSearch = onSearch,
                         onSelect = onSelect,
@@ -169,7 +199,10 @@ internal fun CatalogScreen(
             text = {
                 val size = entry.model.bestArtifact?.sizeBytes ?: 0
                 val freed = if (size > 0) " and frees about ${formatBytes(size)}" else ""
-                Text("This removes the model from this phone$freed. You can download it again later.")
+                Text(
+                    "This removes the model from this phone$freed. You can download it again later.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
             },
             confirmButton = {
                 TextButton(onClick = { pendingDelete = null; onDeleteInstalled(entry) }) {
@@ -186,6 +219,7 @@ internal fun CatalogScreen(
 private fun LazyListScope.discoverTab(
     state: MobieUiState,
     resolver: CompatibilityResolver,
+    tracker: EntranceTracker,
     onQuery: (String) -> Unit,
     onSearch: () -> Unit,
     onSelect: (AiModel) -> Unit,
@@ -193,19 +227,24 @@ private fun LazyListScope.discoverTab(
 ) {
     item(key = "header") {
         ScreenHeader(
-            section = "local inference",
             title = "Models for this phone",
             subtitle = "Sized against this phone's memory. Once downloaded, they run fully offline.",
+            modifier = Modifier.entrance(tracker, "header", 0),
         )
     }
-    item(key = "rig") { DeviceRig(state.device) }
-    item(key = "search") { SearchField(state.query, onQuery, onSearch, onClear = onFeatured) }
+    item(key = "rig") { DeviceRig(state.device, Modifier.entrance(tracker, "rig", 1)) }
+    item(key = "search") {
+        Box(Modifier.entrance(tracker, "search", 2)) {
+            SearchField(state.query, onQuery, onSearch, onClear = onFeatured)
+        }
+    }
     item(key = "section") {
         val searching = state.query.isNotBlank()
         ListHeader(
             title = if (searching) "Compatible results" else "Recommended",
             count = state.models.size.takeIf { !state.loading && state.error == null && it > 0 },
             action = if (searching) ("Clear" to onFeatured) else null,
+            modifier = Modifier.entrance(tracker, "section", 3),
         )
     }
     when {
@@ -219,6 +258,7 @@ private fun LazyListScope.discoverTab(
                 actionLabel = "Retry",
                 onAction = onFeatured,
                 announce = true,
+                modifier = Modifier.appear(),
             )
         }
         state.models.isEmpty() -> item(key = "empty") {
@@ -228,22 +268,32 @@ private fun LazyListScope.discoverTab(
                 body = "Only LiteRT-LM models from litert-community are listed. Try another name.",
                 actionLabel = if (state.query.isNotBlank()) "Show recommended" else null,
                 onAction = onFeatured,
+                modifier = Modifier.appear(),
             )
         }
-        else -> items(state.models, key = { it.id }) { model ->
+        else -> itemsIndexed(state.models, key = { _, model -> model.id }) { index, model ->
             val compatibility = remember(model, state.device) {
                 state.device?.let { resolver.resolve(model.bestArtifact, it) }
             }
             val installed = state.installedModels.any { it.model.id == model.id }
-            ModelRow(model, compatibility, state.device, installed, onClick = { onSelect(model) })
+            Box(Modifier.animateItem(fadeInSpec = null, fadeOutSpec = tween(MotionShort))) {
+                ModelRow(
+                    model = model,
+                    compatibility = compatibility,
+                    device = state.device,
+                    installed = installed,
+                    onClick = { onSelect(model) },
+                    modifier = Modifier.entrance(tracker, "model:${model.id}", if (index < STAGGER_LIMIT) index + 1 else 0),
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun DeviceRig(device: DeviceProfile?) {
-    Panel(Modifier.fillMaxWidth().animateContentSize(tween(180)), shape = CardShape) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+private fun DeviceRig(device: DeviceProfile?, modifier: Modifier = Modifier) {
+    Panel(modifier.fillMaxWidth().animateContentSize(tween(MotionMedium, easing = EmphasizedEase)), shape = CardShape) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 IconTile(LucideR.drawable.lucide_ic_cpu)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -256,9 +306,9 @@ private fun DeviceRig(device: DeviceProfile?) {
                     val chip = chipName(device)
                     Text(
                         if (device == null) "Reading hardware…" else listOfNotNull(chip, deviceLabel(device)).joinToString(" · "),
-                        style = Mobie.numeric.tiny,
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
@@ -269,23 +319,23 @@ private fun DeviceRig(device: DeviceProfile?) {
             }
             if (device != null && device.totalRamBytes > 0) {
                 val used = (device.totalRamBytes - device.availableRamBytes).coerceAtLeast(0)
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "MEMORY",
-                            style = MaterialTheme.typography.labelSmall,
+                            "Memory in use",
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.weight(1f),
                         )
                         Text(
-                            "${formatBytes(used)} in use / ${formatBytes(device.totalRamBytes)}",
-                            style = Mobie.numeric.tiny,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            "${formatBytes(used)} of ${formatBytes(device.totalRamBytes)}",
+                            style = Mobie.numeric.small,
+                            color = MaterialTheme.colorScheme.onSurface,
                         )
                     }
                     MemoryBar(
                         segments = listOf(
-                            MemorySegment("In use", used, MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .55f)),
+                            MemorySegment("In use", used, MaterialTheme.colorScheme.onSurfaceVariant),
                         ),
                         capacityBytes = device.totalRamBytes,
                         height = 6.dp,
@@ -293,23 +343,28 @@ private fun DeviceRig(device: DeviceProfile?) {
                 }
             }
             Hairline()
-            MetricRow {
-                BytesMetric("Total RAM", device?.totalRamBytes ?: 0, Modifier.weight(1f))
-                VerticalHairline()
-                BytesMetric(
-                    "Available",
-                    device?.availableRamBytes ?: 0,
-                    Modifier.weight(1f),
-                    valueColor = if (device?.isLowMemory == true) Mobie.signals.caution else MaterialTheme.colorScheme.onSurface,
-                )
-                VerticalHairline()
-                BytesMetric("Free storage", device?.availableStorageBytes ?: 0, Modifier.weight(1f))
-                VerticalHairline()
-                Metric(
-                    "ABI",
-                    device?.supportedAbis?.firstOrNull()?.substringBefore('-') ?: "—",
-                    Modifier.weight(1f),
-                )
+            // Two rows of two keep labels unclipped on narrow phones.
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    BytesSpec("Total RAM", device?.totalRamBytes ?: 0, Modifier.weight(1f))
+                    VerticalHairline(36.dp)
+                    BytesSpec(
+                        "Available RAM",
+                        device?.availableRamBytes ?: 0,
+                        Modifier.weight(1f),
+                        valueColor = if (device?.isLowMemory == true) Mobie.signals.caution else MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    BytesSpec("Free storage", device?.availableStorageBytes ?: 0, Modifier.weight(1f))
+                    VerticalHairline(36.dp)
+                    Spec(
+                        "Processor",
+                        device?.supportedAbis?.firstOrNull()?.substringBefore('-') ?: "—",
+                        Modifier.weight(1f),
+                        valueStyle = Mobie.numeric.medium,
+                    )
+                }
             }
         }
     }
@@ -317,33 +372,50 @@ private fun DeviceRig(device: DeviceProfile?) {
 
 @Composable
 private fun SearchField(query: String, onQuery: (String) -> Unit, onSearch: () -> Unit, onClear: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val iconTint by animateColorAsState(
+        if (focused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        tween(MotionShort),
+        label = "search icon tint",
+    )
     OutlinedTextField(
         value = query,
         onValueChange = onQuery,
         modifier = Modifier.fillMaxWidth().testTag("model_search"),
         singleLine = true,
+        interactionSource = interaction,
         textStyle = MaterialTheme.typography.bodyLarge,
-        placeholder = { Text("Search models, e.g. gemma", color = MaterialTheme.colorScheme.onSurfaceVariant) },
-        leadingIcon = {
-            LucideIcon(LucideR.drawable.lucide_ic_search, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        placeholder = {
+            Text("Search models, e.g. gemma", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         },
-        trailingIcon = if (query.isNotEmpty()) {
-            {
-                Row {
+        leadingIcon = { LucideIcon(LucideR.drawable.lucide_ic_search, null, Modifier.size(20.dp), tint = iconTint) },
+        trailingIcon = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                AnimatedVisibility(
+                    visible = query.isNotEmpty(),
+                    enter = scaleIn(tween(MotionShort, easing = EmphasizedEase), initialScale = .6f) + fadeIn(tween(MotionShort)),
+                    exit = scaleOut(tween(MotionShort), targetScale = .6f) + fadeOut(tween(MotionShort)),
+                ) {
                     IconButton(onClick = onClear) {
-                        LucideIcon(LucideR.drawable.lucide_ic_x, "Clear search", Modifier.size(18.dp))
+                        LucideIcon(LucideR.drawable.lucide_ic_x, "Clear search", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    if (query.isNotBlank()) {
-                        IconButton(onClick = onSearch) {
-                            LucideIcon(LucideR.drawable.lucide_ic_arrow_right, "Search", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-                        }
+                }
+                AnimatedVisibility(
+                    visible = query.isNotBlank(),
+                    enter = scaleIn(tween(MotionShort, easing = EmphasizedEase), initialScale = .6f) + fadeIn(tween(MotionShort)),
+                    exit = scaleOut(tween(MotionShort), targetScale = .6f) + fadeOut(tween(MotionShort)),
+                ) {
+                    IconButton(onClick = onSearch) {
+                        LucideIcon(LucideR.drawable.lucide_ic_arrow_right, "Search", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
                     }
                 }
             }
-        } else null,
+        },
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
         keyboardActions = KeyboardActions(onSearch = { onSearch() }),
         shape = FieldShape,
+        // Material animates the border between these two colors when focus changes.
         colors = OutlinedTextFieldDefaults.colors(
             focusedContainerColor = MaterialTheme.colorScheme.surface,
             unfocusedContainerColor = MaterialTheme.colorScheme.surface,
@@ -360,6 +432,7 @@ private fun ModelRow(
     device: DeviceProfile?,
     installed: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val artifact = model.bestArtifact
     val status = compatibility?.status
@@ -367,17 +440,17 @@ private fun ModelRow(
     val estimatedRam = compatibility?.estimatedRamBytes ?: 0
     val context = compatibility?.contextWindowTokens?.takeIf { it > 0 } ?: artifact?.contextWindowTokens ?: 0
     Panel(
-        modifier = Modifier.fillMaxWidth().semantics { role = Role.Button },
+        modifier = modifier.fillMaxWidth().semantics { role = Role.Button },
         shape = CardShape,
         onClick = onClick,
     ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(model.title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(
-                        model.author,
-                        style = Mobie.numeric.tiny,
+                        "by ${model.author}",
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -388,7 +461,7 @@ private fun ModelRow(
             if (model.description.isNotBlank()) {
                 Text(
                     model.description,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -402,25 +475,25 @@ private fun ModelRow(
                 sizeLabel = "Download",
             )
             if (device != null && device.totalRamBytes > 0 && estimatedRam > 0) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     MemoryBar(
                         segments = listOf(MemorySegment("Estimated RAM", estimatedRam, statusColor)),
                         capacityBytes = device.totalRamBytes,
                         markerBytes = device.availableRamBytes.takeIf { it > 0 },
-                        height = 4.dp,
+                        height = 6.dp,
                     )
                     Text(
-                        "needs ~${formatBytes(estimatedRam)} of ${formatBytes(device.totalRamBytes)} RAM · " +
+                        "Needs about ${formatBytes(estimatedRam)} of ${formatBytes(device.totalRamBytes)} RAM · " +
                             "${formatBytes(device.availableRamBytes)} free now",
-                        style = Mobie.numeric.tiny,
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
             if (installed || model.supportsVision || model.gated) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (installed) Tag("Installed", color = Mobie.signals.ready, icon = LucideR.drawable.lucide_ic_hard_drive)
                     if (model.supportsVision) Tag("Vision", icon = LucideR.drawable.lucide_ic_eye)
                     if (model.gated) Tag("Needs access", icon = LucideR.drawable.lucide_ic_lock)
@@ -430,7 +503,7 @@ private fun ModelRow(
     }
 }
 
-/** Four mono specs separated by hairlines: size, quantization, estimated RAM, context. */
+/** Four specs separated by hairlines: size, quantization, estimated RAM, context. */
 @Composable
 private fun SpecStrip(
     sizeBytes: Long,
@@ -443,59 +516,50 @@ private fun SpecStrip(
         Modifier
             .fillMaxWidth()
             .border(1.dp, Mobie.signals.hairline, IconTileShape)
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        BytesMetric(sizeLabel, sizeBytes, Modifier.weight(1f), small = true)
-        VerticalHairline(24.dp)
-        Metric("Quant", quantization ?: "—", Modifier.weight(1f), valueStyle = Mobie.numeric.small)
-        VerticalHairline(24.dp)
+        BytesSpec(sizeLabel, sizeBytes, Modifier.weight(1f), valueStyle = Mobie.numeric.small)
+        VerticalHairline(34.dp)
+        Spec("Quant", quantization ?: "—", Modifier.weight(1f))
+        VerticalHairline(34.dp)
         val (ram, ramUnit) = splitBytes(estimatedRamBytes)
-        Metric(
+        Spec(
             "Est. RAM",
             if (estimatedRamBytes > 0) "~$ram" else "—",
             Modifier.weight(1f),
             unit = ramUnit.takeIf { estimatedRamBytes > 0 },
-            valueStyle = Mobie.numeric.small,
         )
-        VerticalHairline(24.dp)
-        Metric(
+        VerticalHairline(34.dp)
+        Spec(
             "Context",
             formatTokens(contextTokens),
             Modifier.weight(1f),
             unit = "tok".takeIf { contextTokens > 0 },
-            valueStyle = Mobie.numeric.small,
         )
     }
 }
 
 @Composable
 private fun SkeletonList() {
-    val transition = rememberInfiniteTransition(label = "skeleton")
-    val alpha by transition.animateFloat(
-        initialValue = .35f,
-        targetValue = .9f,
-        animationSpec = infiniteRepeatable(tween(800, easing = LinearEasing), RepeatMode.Reverse),
-        label = "skeleton alpha",
-    )
     Column(
         Modifier.semantics {
             contentDescription = "Loading models"
             liveRegion = LiveRegionMode.Polite
         },
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        repeat(3) {
-            Panel(Modifier.fillMaxWidth(), shape = CardShape) {
-                Column(Modifier.padding(14.dp).alpha(alpha), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        repeat(3) { index ->
+            Panel(Modifier.fillMaxWidth().appear(delayMillis = index * 60), shape = CardShape) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        SkeletonBar(Modifier.weight(1f), widthFraction = .55f, height = 16.dp)
-                        SkeletonBar(Modifier.width(72.dp), height = 20.dp)
+                        SkeletonBar(Modifier.weight(1f), widthFraction = .55f, height = 20.dp)
+                        SkeletonBar(Modifier.width(80.dp), height = 22.dp)
                     }
-                    SkeletonBar(widthFraction = .3f, height = 10.dp)
-                    SkeletonBar(widthFraction = .9f, height = 10.dp)
-                    SkeletonBar(height = 40.dp)
+                    SkeletonBar(widthFraction = .3f, height = 12.dp)
+                    SkeletonBar(widthFraction = .9f, height = 12.dp)
+                    SkeletonBar(height = 48.dp)
                 }
             }
         }
@@ -509,7 +573,8 @@ private fun SkeletonBar(modifier: Modifier = Modifier, widthFraction: Float = 1f
             Modifier
                 .fillMaxWidth(widthFraction)
                 .height(height)
-                .background(Mobie.signals.track, RoundedCornerShape(4.dp)),
+                .clip(RoundedCornerShape(4.dp))
+                .shimmer(),
         )
     }
 }
@@ -521,19 +586,20 @@ private fun SkeletonBar(modifier: Modifier = Modifier, widthFraction: Float = 1f
 private fun LazyListScope.installedTab(
     state: MobieUiState,
     resolver: CompatibilityResolver,
+    tracker: EntranceTracker,
     onOpen: (InstalledModelEntry) -> Unit,
     onDelete: (InstalledModelEntry) -> Unit,
     onBrowse: () -> Unit,
 ) {
     item(key = "header") {
         ScreenHeader(
-            section = "library",
             title = "Your local models",
             subtitle = "Stored on this phone and ready offline. Tap one to start a new chat.",
+            modifier = Modifier.entrance(tracker, "header", 0),
         )
     }
     state.error?.let { message ->
-        item(key = "error") { InlineError(message) }
+        item(key = "error") { InlineError(message, Modifier.appear()) }
     }
     if (state.installedModels.isEmpty()) {
         item(key = "empty") {
@@ -544,6 +610,7 @@ private fun LazyListScope.installedTab(
                 actionLabel = "Browse models",
                 onAction = onBrowse,
                 primaryAction = true,
+                modifier = Modifier.animateItem().entrance(tracker, "empty", 1),
             )
         }
     } else {
@@ -553,13 +620,23 @@ private fun LazyListScope.installedTab(
                 title = "Installed",
                 count = state.installedModels.size,
                 trailingNote = if (totalBytes > 0) "${formatBytes(totalBytes)} on disk" else null,
+                modifier = Modifier.entrance(tracker, "section", 1),
             )
         }
-        items(state.installedModels, key = { it.model.id }) { entry ->
+        itemsIndexed(state.installedModels, key = { _, entry -> entry.model.id }) { index, entry ->
             val compatibility = remember(entry.model, state.device) {
                 state.device?.let { resolver.resolve(entry.model.bestArtifact, it) }
             }
-            InstalledRow(entry, compatibility, onOpen = { onOpen(entry) }, onDelete = { onDelete(entry) })
+            // Placement animates when a neighbour is deleted; the entrance plays once on the content.
+            Box(Modifier.animateItem(fadeInSpec = null, fadeOutSpec = tween(MotionShort))) {
+                InstalledRow(
+                    entry = entry,
+                    compatibility = compatibility,
+                    onOpen = { onOpen(entry) },
+                    onDelete = { onDelete(entry) },
+                    modifier = Modifier.entrance(tracker, "installed:${entry.model.id}", if (index < STAGGER_LIMIT) index + 2 else 0),
+                )
+            }
         }
     }
 }
@@ -570,22 +647,23 @@ private fun InstalledRow(
     compatibility: CompatibilityResult?,
     onOpen: () -> Unit,
     onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val model = entry.model
     val artifact = model.bestArtifact
     val context = compatibility?.contextWindowTokens?.takeIf { it > 0 } ?: artifact?.contextWindowTokens ?: 0
     Panel(
-        modifier = Modifier.fillMaxWidth().semantics { role = Role.Button },
+        modifier = modifier.fillMaxWidth().semantics { role = Role.Button },
         shape = CardShape,
         onClick = onOpen,
     ) {
-        Column(Modifier.padding(start = 14.dp, top = 6.dp, end = 4.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.padding(start = 16.dp, top = 8.dp, end = 4.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f).padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Column(Modifier.weight(1f).padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(model.title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(
-                        model.author,
-                        style = Mobie.numeric.tiny,
+                        "by ${model.author}",
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -595,12 +673,12 @@ private fun InstalledRow(
                     LucideIcon(
                         LucideR.drawable.lucide_ic_trash_2,
                         "Delete ${model.title}",
-                        Modifier.size(18.dp),
+                        Modifier.size(20.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
-            Column(Modifier.padding(end = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.padding(end = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 SpecStrip(
                     sizeBytes = artifact?.sizeBytes ?: 0,
                     quantization = artifact?.quantization,
@@ -609,7 +687,7 @@ private fun InstalledRow(
                     sizeLabel = "On disk",
                 )
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatusDot(Mobie.signals.ready, size = 6.dp)
+                    StatusDot(Mobie.signals.ready, size = 7.dp)
                     Text(
                         listOfNotNull("On this phone", artifact?.runtimeLabel, "Vision".takeIf { model.supportsVision }).joinToString(" · "),
                         style = MaterialTheme.typography.bodySmall,
@@ -619,7 +697,7 @@ private fun InstalledRow(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text("Start chat", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                    LucideIcon(LucideR.drawable.lucide_ic_chevron_right, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                    LucideIcon(LucideR.drawable.lucide_ic_chevron_right, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
                 }
             }
         }
@@ -633,29 +711,30 @@ private fun InstalledRow(
 private fun LazyListScope.settingsTab(
     tokenConfigured: Boolean,
     darkTheme: Boolean,
+    tracker: EntranceTracker,
     onDarkThemeChange: (Boolean) -> Unit,
     onSaveToken: (String) -> Unit,
 ) {
     item(key = "header") {
         ScreenHeader(
-            section = "settings",
             title = "Settings",
             subtitle = "Access, appearance, and how Mobie handles your data.",
+            modifier = Modifier.entrance(tracker, "header", 0),
         )
     }
     item(key = "appearance") {
-        SettingsGroup("Appearance") {
+        SettingsGroup("Appearance", Modifier.entrance(tracker, "appearance", 1)) {
             Row(
                 Modifier
                     .fillMaxWidth()
                     .toggleable(value = darkTheme, role = Role.Switch, onValueChange = onDarkThemeChange)
-                    .heightIn(min = 56.dp)
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                    .heightIn(min = 64.dp)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 IconTile(LucideR.drawable.lucide_ic_sun_moon)
-                Column(Modifier.weight(1f)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text("Dark mode", style = MaterialTheme.typography.titleMedium)
                     Text(
                         if (darkTheme) "On" else "Off",
@@ -667,9 +746,9 @@ private fun LazyListScope.settingsTab(
             }
         }
     }
-    item(key = "access") { TokenSettings(tokenConfigured, onSaveToken) }
+    item(key = "access") { TokenSettings(tokenConfigured, onSaveToken, Modifier.entrance(tracker, "access", 2)) }
     item(key = "privacy") {
-        SettingsGroup("Privacy") {
+        SettingsGroup("Privacy", Modifier.entrance(tracker, "privacy", 3)) {
             Column {
                 InfoRow(
                     icon = LucideR.drawable.lucide_ic_shield_check,
@@ -677,7 +756,7 @@ private fun LazyListScope.settingsTab(
                     body = "Every model runs on this phone. What you type and what the model writes is never sent anywhere.",
                     iconTint = Mobie.signals.ready,
                 )
-                Hairline(Modifier.padding(start = 58.dp))
+                Hairline(Modifier.padding(start = 64.dp))
                 InfoRow(
                     icon = LucideR.drawable.lucide_ic_download,
                     title = "Network use",
@@ -688,23 +767,22 @@ private fun LazyListScope.settingsTab(
     }
     item(key = "about") {
         val context = LocalContext.current
-        SettingsGroup("About") {
+        SettingsGroup("About", Modifier.entrance(tracker, "about", 4)) {
             Column {
                 InfoRow(
                     icon = LucideR.drawable.lucide_ic_github,
                     title = "Repository",
                     body = "github.com/YashasVM/Mobie",
-                    mono = true,
                     trailingIcon = LucideR.drawable.lucide_ic_external_link,
                     onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(REPOSITORY_URL))) },
                 )
-                Hairline(Modifier.padding(start = 58.dp))
+                Hairline(Modifier.padding(start = 64.dp))
                 InfoRow(
                     icon = LucideR.drawable.lucide_ic_file_text,
                     title = "Licensing",
                     body = "LiteRT-LM · Lucide Icons",
                 )
-                Hairline(Modifier.padding(start = 58.dp))
+                Hairline(Modifier.padding(start = 64.dp))
                 InfoRow(
                     icon = LucideR.drawable.lucide_ic_zap,
                     title = "Runtime",
@@ -715,28 +793,28 @@ private fun LazyListScope.settingsTab(
     }
     item(key = "credit") {
         Text(
-            "made by @yashas.vm",
-            modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 8.dp),
+            "Made by @yashas.vm",
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 8.dp).entrance(tracker, "credit", 5),
             textAlign = TextAlign.Center,
-            style = Mobie.numeric.tiny,
+            style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
 
 @Composable
-private fun TokenSettings(tokenConfigured: Boolean, onSaveToken: (String) -> Unit) {
+private fun TokenSettings(tokenConfigured: Boolean, onSaveToken: (String) -> Unit, modifier: Modifier = Modifier) {
     var editing by rememberSaveable { mutableStateOf(false) }
     // Deliberately not saveable: a credential draft must not be written into saved instance state.
     var draft by remember { mutableStateOf("") }
-    SettingsGroup("Account") {
+    SettingsGroup("Account", modifier) {
         Column(
-            Modifier.padding(14.dp).animateContentSize(tween(180)),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            Modifier.padding(16.dp).animateContentSize(tween(MotionMedium, easing = EmphasizedEase)),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 IconTile(LucideR.drawable.lucide_ic_key_round)
-                Column(Modifier.weight(1f)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text("Hugging Face access", style = MaterialTheme.typography.titleMedium)
                     Text(
                         if (tokenConfigured) "A token is securely stored on this device."
@@ -756,7 +834,7 @@ private fun TokenSettings(tokenConfigured: Boolean, onSaveToken: (String) -> Uni
                     textStyle = Mobie.numeric.small,
                     visualTransformation = PasswordVisualTransformation(),
                     label = { Text("Access token") },
-                    supportingText = { Text("Leave blank and save to remove it.") },
+                    supportingText = { Text("Leave blank and save to remove it.", style = MaterialTheme.typography.bodySmall) },
                     shape = FieldShape,
                     colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Mobie.signals.hairline),
                 )
@@ -774,8 +852,8 @@ private fun TokenSettings(tokenConfigured: Boolean, onSaveToken: (String) -> Uni
 }
 
 @Composable
-private fun SettingsGroup(label: String, content: @Composable () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+private fun SettingsGroup(label: String, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         SectionLabel(label, Modifier.padding(start = 4.dp).semantics { heading() })
         Panel(Modifier.fillMaxWidth(), shape = CardShape, content = content)
     }
@@ -787,7 +865,6 @@ private fun InfoRow(
     title: String,
     body: String,
     iconTint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
-    mono: Boolean = false,
     @DrawableRes trailingIcon: Int? = null,
     onClick: (() -> Unit)? = null,
 ) {
@@ -798,22 +875,18 @@ private fun InfoRow(
                 if (onClick != null) Modifier.clickable(role = Role.Button, onClickLabel = "Open $title", onClick = onClick)
                 else Modifier,
             )
-            .heightIn(min = 56.dp)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .heightIn(min = 64.dp)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         IconTile(icon, tint = iconTint)
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(
-                body,
-                style = if (mono) Mobie.numeric.tiny else MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Text(body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if (trailingIcon != null) {
-            LucideIcon(trailingIcon, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            LucideIcon(trailingIcon, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -823,13 +896,8 @@ private fun InfoRow(
 // region Shared pieces
 
 @Composable
-private fun ScreenHeader(section: String, title: String, subtitle: String) {
-    Column(Modifier.padding(top = 4.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Box(Modifier.size(8.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp)))
-            Text("mobie", style = Mobie.numeric.small.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.onSurface)
-            Text("/ $section", style = Mobie.numeric.small, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+private fun ScreenHeader(title: String, subtitle: String, modifier: Modifier = Modifier) {
+    Column(modifier.padding(top = 8.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(title, style = MaterialTheme.typography.headlineLarge, modifier = Modifier.semantics { heading() })
         Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
@@ -839,40 +907,77 @@ private fun ScreenHeader(section: String, title: String, subtitle: String) {
 @Composable
 private fun ListHeader(
     title: String,
+    modifier: Modifier = Modifier,
     count: Int? = null,
     trailingNote: String? = null,
     action: Pair<String, () -> Unit>? = null,
 ) {
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 40.dp).padding(start = 2.dp, top = 4.dp),
+        modifier.fillMaxWidth().heightIn(min = 44.dp).padding(start = 2.dp, top = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
         if (count != null) Tag(count.toString(), mono = true)
         Spacer(Modifier.weight(1f))
         if (trailingNote != null) {
-            Text(trailingNote, style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(trailingNote, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         action?.let { (label, onClick) -> TextButton(onClick = onClick) { Text(label) } }
     }
 }
 
+/**
+ * Sentence-case label over a numeric value. Values roll when they change. Used instead of the
+ * shared all-caps `Metric` so dense rows stay easy to read.
+ */
 @Composable
-private fun BytesMetric(
+private fun Spec(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    unit: String? = null,
+    valueStyle: TextStyle = Mobie.numeric.small,
+    valueColor: Color = MaterialTheme.colorScheme.onSurface,
+) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+            RollingText(value, style = valueStyle.copy(fontWeight = FontWeight.SemiBold), color = valueColor)
+            if (unit != null) {
+                Text(
+                    unit,
+                    style = Mobie.numeric.tiny,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    modifier = Modifier.padding(bottom = 1.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BytesSpec(
     label: String,
     bytes: Long,
     modifier: Modifier = Modifier,
-    small: Boolean = false,
+    valueStyle: TextStyle = Mobie.numeric.medium,
     valueColor: Color = MaterialTheme.colorScheme.onSurface,
 ) {
     val (value, unit) = splitBytes(bytes)
-    Metric(
+    Spec(
         label = label,
         value = if (bytes > 0) value else "—",
         modifier = modifier,
         unit = unit,
-        valueStyle = if (small) Mobie.numeric.small else Mobie.numeric.medium,
+        valueStyle = valueStyle,
         valueColor = valueColor,
     )
 }
@@ -881,12 +986,12 @@ private fun BytesMetric(
 private fun IconTile(@DrawableRes icon: Int, tint: Color = MaterialTheme.colorScheme.onSurfaceVariant) {
     Box(
         Modifier
-            .size(34.dp)
+            .size(36.dp)
             .background(MaterialTheme.colorScheme.surfaceVariant, IconTileShape)
             .border(1.dp, Mobie.signals.hairline, IconTileShape),
         contentAlignment = Alignment.Center,
     ) {
-        LucideIcon(icon, null, Modifier.size(17.dp), tint = tint)
+        LucideIcon(icon, null, Modifier.size(18.dp), tint = tint)
     }
 }
 
@@ -895,6 +1000,7 @@ private fun MessagePanel(
     @DrawableRes icon: Int,
     title: String,
     body: String,
+    modifier: Modifier = Modifier,
     tint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
     actionLabel: String? = null,
     onAction: () -> Unit = {},
@@ -902,21 +1008,21 @@ private fun MessagePanel(
     announce: Boolean = false,
 ) {
     Panel(
-        Modifier
+        modifier
             .fillMaxWidth()
             .then(if (announce) Modifier.semantics { liveRegion = LiveRegionMode.Polite } else Modifier),
         shape = CardShape,
     ) {
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 24.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             IconTile(icon, tint = tint)
             Text(title, style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
             Text(
                 body,
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
@@ -927,7 +1033,7 @@ private fun MessagePanel(
                 } else {
                     OutlinedButton(onClick = onAction, shape = FieldShape) {
                         if (actionLabel == "Retry") {
-                            LucideIcon(LucideR.drawable.lucide_ic_refresh_cw, null, Modifier.size(15.dp))
+                            LucideIcon(LucideR.drawable.lucide_ic_refresh_cw, null, Modifier.size(16.dp))
                             Spacer(Modifier.width(8.dp))
                         }
                         Text(actionLabel)
@@ -939,20 +1045,20 @@ private fun MessagePanel(
 }
 
 @Composable
-private fun InlineError(message: String) {
+private fun InlineError(message: String, modifier: Modifier = Modifier) {
     val color = Mobie.signals.blocked
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
             .background(color.copy(alpha = .08f), CardShape)
             .border(1.dp, color.copy(alpha = .28f), CardShape)
-            .padding(12.dp)
+            .padding(14.dp)
             .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        LucideIcon(LucideR.drawable.lucide_ic_circle_alert, null, Modifier.size(16.dp), tint = color)
-        Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+        LucideIcon(LucideR.drawable.lucide_ic_circle_alert, null, Modifier.size(18.dp), tint = color)
+        Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
     }
 }
 
@@ -970,40 +1076,63 @@ private fun ConsoleNavBar(selectedTab: Int, onSelect: (Int) -> Unit) {
             .navigationBarsPadding(),
     ) {
         Hairline()
-        Row(Modifier.fillMaxWidth().height(60.dp)) {
-            items.forEachIndexed { index, (label, icon, tag) ->
-                val selected = selectedTab == index
-                val color by animateColorAsState(
-                    if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    animationSpec = tween(150),
-                    label = "$label tint",
-                )
-                val indicator by animateColorAsState(
-                    if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                    animationSpec = tween(150),
-                    label = "$label indicator",
-                )
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .testTag(tag)
-                        .selectable(selected = selected, role = Role.Tab) { onSelect(index) },
-                ) {
+        BoxWithConstraints(Modifier.fillMaxWidth().height(64.dp)) {
+            // One indicator that glides to the selected tab rather than three that blink.
+            val tabWidth = maxWidth / TAB_COUNT
+            val indicatorWidth = 28.dp
+            val indicatorX by animateDpAsState(
+                tabWidth * selectedTab + (tabWidth - indicatorWidth) / 2,
+                tween(MotionMedium, easing = EmphasizedEase),
+                label = "nav indicator x",
+            )
+            Box(
+                Modifier
+                    .offset { IntOffset(indicatorX.roundToPx(), 0) }
+                    .width(indicatorWidth)
+                    .height(3.dp)
+                    .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(bottomStart = 3.dp, bottomEnd = 3.dp)),
+            )
+            Row(Modifier.fillMaxSize()) {
+                items.forEachIndexed { index, (label, icon, tag) ->
+                    val selected = selectedTab == index
+                    val color by animateColorAsState(
+                        if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        animationSpec = tween(MotionShort),
+                        label = "$label tint",
+                    )
+                    val iconScale by animateFloatAsState(
+                        if (selected) 1.1f else 1f,
+                        tween(MotionMedium, easing = EmphasizedEase),
+                        label = "$label icon scale",
+                    )
+                    val interaction = remember { MutableInteractionSource() }
                     Box(
                         Modifier
-                            .align(Alignment.TopCenter)
-                            .width(24.dp)
-                            .height(2.dp)
-                            .background(indicator, RoundedCornerShape(bottomStart = 2.dp, bottomEnd = 2.dp)),
-                    )
-                    Column(
-                        Modifier.align(Alignment.Center),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .testTag(tag)
+                            .selectable(
+                                selected = selected,
+                                interactionSource = interaction,
+                                indication = null,
+                                role = Role.Tab,
+                            ) { onSelect(index) }
+                            .pressScale(interaction, pressedScale = .92f),
                     ) {
-                        LucideIcon(icon, null, Modifier.size(20.dp), tint = color)
-                        Text(label, style = MaterialTheme.typography.labelSmall, color = color)
+                        Column(
+                            Modifier.align(Alignment.Center),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            LucideIcon(icon, null, Modifier.size(22.dp).scale(iconScale), tint = color)
+                            Text(
+                                label,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                ),
+                                color = color,
+                            )
+                        }
                     }
                 }
             }
