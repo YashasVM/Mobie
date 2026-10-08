@@ -23,6 +23,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -63,7 +64,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -355,6 +355,7 @@ private fun TelemetryStrip(stats: InferenceStats?) {
             Modifier
                 .fillMaxWidth()
                 .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 8.dp)
                 .semantics(mergeDescendants = true) { contentDescription = description },
             verticalAlignment = Alignment.CenterVertically,
@@ -369,13 +370,6 @@ private fun TelemetryStrip(stats: InferenceStats?) {
             TelemetryValue("ttft", ttft)
             VerticalHairline(14.dp)
             TelemetryValue("ram", ram)
-            Spacer(Modifier.weight(1f))
-            Text(
-                if (stats == null) "not measured" else "last reply",
-                style = Mobie.mono.tiny,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .7f),
-                maxLines = 1,
-            )
         }
         Hairline()
     }
@@ -567,11 +561,10 @@ private fun UserMessage(message: ChatMessage, modifier: Modifier = Modifier) {
 @Composable
 private fun AttachedImage(path: String) {
     val context = LocalContext.current
-    val bitmap by produceState<ImageBitmap?>(initialValue = null, path) {
-        value = decodeThumbnail(context, path)
-    }
-    val shape = RoundedCornerShape(12.dp)
+    var bitmap by remember(path) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(path) { bitmap = decodeThumbnail(context, path) }
     val image = bitmap
+    val shape = RoundedCornerShape(12.dp)
     if (image != null) {
         Image(
             image,
