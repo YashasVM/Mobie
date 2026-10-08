@@ -1,16 +1,30 @@
 package dev.yashasvm.mobie.ui
 
 import androidx.annotation.DrawableRes
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,18 +41,25 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -55,6 +76,7 @@ import dev.yashasvm.mobie.ui.theme.Mobie
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.delay
 
 // Shared visual building blocks. Screens compose these instead of styling raw Surfaces so that
 // panels, telemetry, and status colors read as one system.
@@ -72,12 +94,14 @@ internal fun Panel(
     onClick: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
+    val interaction = remember { MutableInteractionSource() }
     Box(
         modifier
+            .then(if (onClick != null) Modifier.pressScale(interaction) else Modifier)
             .clip(shape)
             .background(color, shape)
             .border(1.dp, borderColor, shape)
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+            .then(if (onClick != null) Modifier.clickable(interactionSource = interaction, indication = ripple(), onClick = onClick) else Modifier),
     ) {
         CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
             content()
@@ -123,7 +147,7 @@ internal fun Metric(
             overflow = TextOverflow.Ellipsis,
         )
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(value, style = valueStyle, color = valueColor, maxLines = 1)
+            RollingText(value, style = valueStyle, color = valueColor)
             if (unit != null) {
                 Text(
                     unit,
@@ -236,6 +260,9 @@ internal fun MemoryBar(
 ) {
     val track = Mobie.signals.track
     val markerColor = MaterialTheme.colorScheme.onSurface
+    // Bars sweep in from empty the first time they appear, then glide between values.
+    val reveal = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { reveal.animateTo(1f, tween(MotionLong, easing = EmphasizedEase)) }
     val description = segments.joinToString { "${it.label} ${formatBytes(it.bytes)}" } +
         " of ${formatBytes(capacityBytes)}"
     Canvas(
@@ -250,7 +277,7 @@ internal fun MemoryBar(
         var x = 0f
         val gap = 2.dp.toPx()
         segments.filter { it.bytes > 0 }.forEach { segment ->
-            val width = (segment.bytes.toFloat() / capacityBytes * size.width).coerceAtMost(size.width - x)
+            val width = (segment.bytes.toFloat() / capacityBytes * size.width * reveal.value).coerceAtMost(size.width - x)
             if (width <= 0f) return@forEach
             drawRoundRect(
                 segment.color,
@@ -262,7 +289,7 @@ internal fun MemoryBar(
         }
         markerBytes?.takeIf { it in 1..capacityBytes }?.let { marker ->
             val mx = marker.toFloat() / capacityBytes * size.width
-            drawRect(markerColor, topLeft = Offset(mx - 1f, -2f), size = Size(2.dp.toPx(), size.height + 4f))
+            drawRect(markerColor.copy(alpha = reveal.value), topLeft = Offset(mx - 1f, -2f), size = Size(2.dp.toPx(), size.height + 4f))
         }
     }
 }
@@ -271,12 +298,138 @@ internal fun MemoryBar(
 @Composable
 internal fun ProgressTrack(progress: Float, modifier: Modifier = Modifier, color: Color = MaterialTheme.colorScheme.primary) {
     val track = Mobie.signals.track
+    val animated by animateFloatAsState(progress.coerceIn(0f, 1f), tween(MotionMedium, easing = EmphasizedEase), label = "progress")
+    val sheen = rememberInfiniteTransition(label = "progress sheen")
+    val sheenX by sheen.animateFloat(0f, 1f, infiniteRepeatable(tween(1600, easing = LinearEasing)), label = "progress sheen x")
     Canvas(modifier.fillMaxWidth().height(4.dp)) {
         val radius = CornerRadius(size.height / 2, size.height / 2)
         drawRoundRect(track, cornerRadius = radius)
-        drawRoundRect(color, size = Size(size.width * progress.coerceIn(0f, 1f), size.height), cornerRadius = radius)
+        val filled = size.width * animated
+        drawRoundRect(color, size = Size(filled, size.height), cornerRadius = radius)
+        // A soft highlight travelling along the filled part signals that work is ongoing.
+        if (filled > 0f && animated < 1f) {
+            val band = size.height * 12
+            val cx = filled * sheenX
+            drawRect(
+                Brush.horizontalGradient(
+                    listOf(Color.Transparent, Color.White.copy(alpha = .35f), Color.Transparent),
+                    startX = cx - band,
+                    endX = cx + band,
+                ),
+                topLeft = Offset((cx - band).coerceAtLeast(0f), 0f),
+                size = Size((band * 2).coerceAtMost(filled - (cx - band).coerceAtLeast(0f)).coerceAtLeast(0f), size.height),
+            )
+        }
     }
 }
+
+// ---------------------------------------------------------------------------------------------
+// Motion. Durations and easing are shared so every screen moves with the same rhythm.
+
+internal const val MotionShort = 160
+internal const val MotionMedium = 280
+internal const val MotionLong = 520
+internal val EmphasizedEase = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+
+/** Shrinks slightly while pressed, springing back on release. */
+internal fun Modifier.pressScale(interaction: MutableInteractionSource, pressedScale: Float = .975f): Modifier = composed {
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        if (pressed) pressedScale else 1f,
+        spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        label = "press scale",
+    )
+    graphicsLayer { scaleX = scale; scaleY = scale }
+}
+
+/**
+ * Remembers which list items have already played their entrance, so scrolling back up does not
+ * replay it. Create one per list with [rememberEntranceTracker].
+ */
+internal class EntranceTracker {
+    val seen = mutableSetOf<Any>()
+}
+
+@Composable
+internal fun rememberEntranceTracker(): EntranceTracker = remember { EntranceTracker() }
+
+/**
+ * Fades and lifts an item into place the first time [key] is shown. Items appearing together are
+ * staggered by [index] (capped, so long lists don't wait).
+ */
+internal fun Modifier.entrance(tracker: EntranceTracker, key: Any, index: Int = 0): Modifier = composed {
+    val first = remember(key) { key !in tracker.seen }
+    val progress = remember(key) { Animatable(if (first) 0f else 1f) }
+    LaunchedEffect(key) {
+        if (first) {
+            tracker.seen += key
+            delay(index.coerceIn(0, 8) * 45L)
+            progress.animateTo(1f, tween(MotionMedium + 140, easing = EmphasizedEase))
+        }
+    }
+    graphicsLayer {
+        alpha = progress.value
+        translationY = (1f - progress.value) * 18.dp.toPx()
+    }
+}
+
+/** One-shot entrance for a single element; [delayMillis] staggers siblings. */
+internal fun Modifier.appear(delayMillis: Int = 0, offsetDp: Float = 14f): Modifier = composed {
+    val progress = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        delay(delayMillis.toLong())
+        progress.animateTo(1f, tween(MotionMedium + 140, easing = EmphasizedEase))
+    }
+    graphicsLayer {
+        alpha = progress.value
+        translationY = (1f - progress.value) * offsetDp.dp.toPx()
+    }
+}
+
+/** Placeholder shimmer for skeleton content. */
+internal fun Modifier.shimmer(): Modifier = composed {
+    val base = Mobie.signals.track
+    val highlight = MaterialTheme.colorScheme.onSurface.copy(alpha = .07f)
+    val transition = rememberInfiniteTransition(label = "shimmer")
+    val x by transition.animateFloat(-1f, 2f, infiniteRepeatable(tween(1300, easing = LinearEasing)), label = "shimmer x")
+    drawWithCache {
+        val brush = Brush.linearGradient(
+            listOf(base, highlight, base),
+            start = Offset(size.width * x - size.width / 2, 0f),
+            end = Offset(size.width * x + size.width / 2, size.height),
+        )
+        onDrawBehind { drawRect(base); drawRect(brush) }
+    }
+}
+
+/**
+ * Text whose changes roll vertically (up when the value grows, down when it shrinks for numbers).
+ * Use for live or recomputed values such as tok/s, progress, and RAM.
+ */
+@Composable
+internal fun RollingText(
+    value: String,
+    modifier: Modifier = Modifier,
+    style: TextStyle = Mobie.numeric.medium,
+    color: Color = MaterialTheme.colorScheme.onSurface,
+) {
+    AnimatedContent(
+        targetState = value,
+        modifier = modifier,
+        transitionSpec = {
+            val up = (targetState.leadingNumber() ?: 0.0) >= (initialState.leadingNumber() ?: 0.0)
+            val direction = if (up) 1 else -1
+            (slideInVertically(tween(MotionMedium, easing = EmphasizedEase)) { it / 2 * direction } + fadeIn(tween(MotionMedium))) togetherWith
+                (slideOutVertically(tween(MotionShort)) { -it / 2 * direction } + fadeOut(tween(MotionShort))) using
+                SizeTransform(clip = false)
+        },
+        label = "rolling text",
+    ) { text ->
+        Text(text, style = style, color = color, maxLines = 1)
+    }
+}
+
+private fun String.leadingNumber(): Double? = Regex("[0-9]+(?:\\.[0-9]+)?").find(this)?.value?.toDoubleOrNull()
 
 @Composable
 internal fun LucideIcon(

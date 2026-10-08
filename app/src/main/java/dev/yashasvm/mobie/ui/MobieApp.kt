@@ -7,12 +7,12 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.FastOutLinearInEasing
-import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -29,7 +29,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LocalContentColor
@@ -107,8 +107,18 @@ fun MobieApp(
                 else -> "catalog"
             },
             transitionSpec = {
-                (fadeIn(tween(220, easing = LinearOutSlowInEasing)) + scaleIn(tween(220), initialScale = .99f)) togetherWith
-                    fadeOut(tween(120, easing = FastOutLinearInEasing))
+                // Shared-axis motion: deeper screens (catalog → model → chat) slide in from the
+                // right; going back reverses it. The outgoing screen recedes slightly.
+                val forward = screenDepth(targetState) > screenDepth(initialState)
+                val direction = if (forward) 1 else -1
+                (
+                    slideInHorizontally(tween(MotionMedium + 60, easing = EmphasizedEase)) { it / 6 * direction } +
+                        fadeIn(tween(MotionMedium, delayMillis = 60))
+                    ) togetherWith (
+                    slideOutHorizontally(tween(MotionMedium, easing = EmphasizedEase)) { -it / 10 * direction } +
+                        fadeOut(tween(MotionShort)) +
+                        scaleOut(tween(MotionMedium), targetScale = .97f)
+                    )
             },
             label = "screen",
         ) { screen ->
@@ -173,10 +183,14 @@ private fun WelcomeScreen(onContinue: () -> Unit) {
             Image(
                 painter = painterResource(R.drawable.ic_launcher_foreground),
                 contentDescription = "Mobie logo",
-                modifier = Modifier.size(84.dp),
+                modifier = Modifier.size(84.dp).appear(offsetDp = 8f),
             )
-            Text("mobie", style = MaterialTheme.typography.displaySmall)
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("mobie", style = MaterialTheme.typography.displaySmall, modifier = Modifier.appear(delayMillis = 70))
+            Row(
+                Modifier.appear(delayMillis = 140),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 StatusDot(Mobie.signals.ready, pulsing = true)
                 Text(
                     "on-device inference",
@@ -201,6 +215,7 @@ private fun AppBackdrop(modifier: Modifier = Modifier, content: @Composable () -
 @Composable
 private fun HistorySheet(sessions: List<ChatHistorySession>, onDismiss: () -> Unit, onSelect: (String) -> Unit) {
     val visible = remember(sessions) { sessions.filter { it.messages.isNotEmpty() } }
+    val entrance = rememberEntranceTracker()
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = MaterialTheme.colorScheme.surface,
@@ -236,8 +251,8 @@ private fun HistorySheet(sessions: List<ChatHistorySession>, onDismiss: () -> Un
                     }
                 }
             } else {
-                items(visible, key = { it.id }) { session ->
-                    Panel(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), onClick = { onSelect(session.id) }) {
+                itemsIndexed(visible, key = { _, session -> session.id }) { index, session ->
+                    Panel(Modifier.fillMaxWidth().entrance(entrance, session.id, index), shape = RoundedCornerShape(14.dp), onClick = { onSelect(session.id) }) {
                         Row(
                             Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 14.dp, vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -274,4 +289,10 @@ private fun HistorySheet(sessions: List<ChatHistorySession>, onDismiss: () -> Un
             }
         }
     }
+}
+
+private fun screenDepth(screen: String): Int = when (screen) {
+    "chat" -> 2
+    "model" -> 1
+    else -> 0
 }
