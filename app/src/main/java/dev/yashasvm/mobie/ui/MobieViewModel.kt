@@ -9,6 +9,7 @@ import dev.yashasvm.mobie.core.model.AiModel
 import dev.yashasvm.mobie.core.model.Compatibility
 import dev.yashasvm.mobie.core.model.CompatibilityResult
 import dev.yashasvm.mobie.core.model.DeviceProfile
+import dev.yashasvm.mobie.core.model.MemoryAdmissionTier
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.runtime.InferenceEvent
 import dev.yashasvm.mobie.core.runtime.InferenceStats
@@ -173,7 +174,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 recentModels = if (presentedModel == null) it.recentModels else {
                     (listOf(presentedModel) + it.recentModels.filterNot { recent -> recent.id == presentedModel.id }).take(5)
                 },
-                compatibility = artifact?.let { candidate -> container.compatibility.resolve(candidate, device) },
+                compatibility = artifact?.let { candidate -> container.compatibility.resolve(candidate, device, model?.supportsVision == true) },
                 download = null,
                 downloadedPath = null,
                 chatting = false,
@@ -207,7 +208,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val model = current.selected ?: return
         val artifact = current.selectedArtifact ?: return
         val device = container.deviceProfile.current()
-        val compatibility = container.compatibility.resolve(artifact, device)
+        val compatibility = container.compatibility.resolve(artifact, device, model.supportsVision)
         mutableState.update { it.copy(device = device, compatibility = compatibility, error = null) }
         if (model.gated && !state.value.tokenConfigured) {
             mutableState.update { it.copy(error = "This gated model requires a Hugging Face token.") }
@@ -230,10 +231,23 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         container.downloads.cancel(model, artifact)
     }
 
-    fun runInstalled() {
+    fun runInstalled(allowReclaim: Boolean = false) {
         val path = state.value.downloadedPath
         if (path != null && File(path).isFile) {
-            openChat(path)
+            val current = state.value
+            val device = container.deviceProfile.current()
+            val compatibility = container.compatibility.resolve(current.selectedArtifact, device,
+                current.selected?.supportsVision == true)
+            mutableState.update { it.copy(device = device, compatibility = compatibility) }
+            if (compatibility.status == Compatibility.INCOMPATIBLE) {
+                mutableState.update { it.copy(error = compatibility.reason) }
+                return
+            }
+            if (compatibility.memoryTier == MemoryAdmissionTier.FITS_AFTER_RECLAIM && !allowReclaim) {
+                mutableState.update { it.copy(error = compatibility.reason) }
+                return
+            }
+            openChat(path, allowReclaim)
         } else {
             mutableState.update {
                 it.copy(
@@ -245,7 +259,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    private fun openChat(path: String) {
+    private fun openChat(path: String, allowReclaim: Boolean = false) {
         val current = state.value
         val model = current.selected ?: return
         val artifact = current.selectedArtifact ?: return
@@ -265,7 +279,8 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         }
         inferenceJob?.cancel()
         inferenceJob = viewModelScope.launch {
-            loadRuntimeConversation(model, artifact, path, history, preferReset = false, operation = operation)
+            loadRuntimeConversation(model, artifact, path, history, preferReset = false,
+                operation = operation, allowReclaim = allowReclaim)
         }
     }
 
@@ -276,6 +291,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         history: List<ChatMessage>,
         preferReset: Boolean,
         operation: Long,
+        allowReclaim: Boolean = false,
     ) {
         val adapter = container.runtimes.adapterFor(artifact.format)
         if (adapter == null) {
@@ -300,13 +316,15 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                     reset
                 } else {
                     runtimeOwnership.clear()
-                    adapter.load(path, model.supportsVision, restored).also { loaded ->
+                    (if (allowReclaim) adapter.loadAllowingMemoryReclaim(path, model.supportsVision, restored)
+                     else adapter.load(path, model.supportsVision, restored)).also { loaded ->
                         if (loaded.isSuccess) runtimeOwnership.markLoaded(model.id)
                     }
                 }
             } else {
                 runtimeOwnership.clear()
-                adapter.load(path, model.supportsVision, restored).also { loaded ->
+                (if (allowReclaim) adapter.loadAllowingMemoryReclaim(path, model.supportsVision, restored)
+                 else adapter.load(path, model.supportsVision, restored)).also { loaded ->
                     if (loaded.isSuccess) runtimeOwnership.markLoaded(model.id)
                 }
             }
