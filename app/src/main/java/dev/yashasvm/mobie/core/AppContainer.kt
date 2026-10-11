@@ -26,27 +26,31 @@ class AppContainer(context: Context) {
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
-    val tokenStore = HuggingFaceTokenStore(appContext)
-    val catalog = HuggingFaceCatalogRepository(http, tokenStore)
-    val conversion = ConversionRepository(http)
-    val downloads = ModelDownloadManager(appContext)
-    val chatHistory = ChatHistoryStore(appContext)
-    val samplerSettings = SamplerSettingsStore(appContext)
-    val deviceProfile = DeviceProfileProvider(appContext)
-    val runSampler = DeviceRunSampler(appContext)
+    // Heavy members are created on first use so cold start only pays for what the first screen needs.
+    // EncryptedSharedPreferences and Keystore master-key setup are the most expensive of these.
+    val tokenStore by lazy { HuggingFaceTokenStore(appContext) }
+    val catalog by lazy { HuggingFaceCatalogRepository(http, tokenStore) }
+    val conversion by lazy { ConversionRepository(http) }
+    val downloads by lazy { ModelDownloadManager(appContext) }
+    val chatHistory by lazy { ChatHistoryStore(appContext) }
+    val samplerSettings by lazy { SamplerSettingsStore(appContext) }
+    val deviceProfile by lazy { DeviceProfileProvider(appContext) }
+    val runSampler by lazy { DeviceRunSampler(appContext) }
     val compatibility = CompatibilityResolver()
-    val computeSettings = RuntimeComputeSettings(appContext)
-    private val liteRtRuntime = LiteRtLmRuntimeAdapter(appContext, computeSettings)
-    private val stallGuardedLiteRtRuntime = InferenceStallGuardRuntimeAdapter(liteRtRuntime)
-    val runtimes = RuntimeRegistry(
-        setOf(
-            ThermalGuardRuntimeAdapter(
-                delegate = stallGuardedLiteRtRuntime,
-                // Polled on the collector's (main) context, so keep it to one cheap PowerManager call.
-                thermalStatusProvider = ::currentThermalStatus,
+    val computeSettings by lazy { RuntimeComputeSettings(appContext) }
+    private val liteRtRuntime by lazy { LiteRtLmRuntimeAdapter(appContext, computeSettings) }
+    private val stallGuardedLiteRtRuntime by lazy { InferenceStallGuardRuntimeAdapter(liteRtRuntime) }
+    val runtimes by lazy {
+        RuntimeRegistry(
+            setOf(
+                ThermalGuardRuntimeAdapter(
+                    delegate = stallGuardedLiteRtRuntime,
+                    // Polled on the collector's (main) context, so keep it to one cheap PowerManager call.
+                    thermalStatusProvider = ::currentThermalStatus,
+                ),
             ),
-        ),
-    )
+        )
+    }
 
     private fun currentThermalStatus(): Int = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
         appContext.getSystemService(PowerManager::class.java).currentThermalStatus
