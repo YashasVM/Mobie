@@ -1,13 +1,13 @@
 package dev.yashasvm.mobie.core.device
 
-import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
 import android.os.Build
+import android.os.Debug
 import android.os.PowerManager
-import android.os.Process
+import android.os.SystemClock
 
 data class RunTelemetry(
     val sdkChunks: Int = 0,
@@ -20,16 +20,18 @@ data class RunTelemetry(
     val estimatedEnergyPerTokenMilliWh: Double? = null,
 )
 
-/** Android reports microamps, but a few devices incorrectly return milliamps. */
+/**
+ * Android documents microamps, but Samsung and some other vendors report milliamps. A phone
+ * running inference draws roughly 10 mA to 10 A, which is 10..10,000 in mA or 10,000..10,000,000
+ * in µA, so magnitudes below 10,000 are read as milliamps. The only misread case is a µA device
+ * drawing under 10 mA, which does not happen while a model is generating.
+ */
 internal object BatteryCurrentMath {
+    private const val MILLIAMP_CEILING = 10_000L
+
     fun microamps(raw: Long): Long? {
         if (raw == Long.MIN_VALUE || raw == 0L) return null
-        val magnitude = kotlin.math.abs(raw)
-        return when {
-            magnitude < 1_000L -> raw * 1_000L
-            magnitude < 10_000L -> null // Ambiguous: either a low current in µA or a large value in mA.
-            else -> raw
-        }
+        return if (kotlin.math.abs(raw) < MILLIAMP_CEILING) raw * 1_000L else raw
     }
 
     fun milliWh(currentMicroamps: Long?, voltageMillivolts: Int, elapsedMs: Long): Double? {
@@ -44,23 +46,47 @@ internal object BatteryCurrentMath {
 /** Samples whole-app memory and whole-device power. Call on a background dispatcher. */
 class DeviceRunSampler(context: Context) {
     private val appContext = context.applicationContext
-    private val activity = appContext.getSystemService(ActivityManager::class.java)
     private val power = appContext.getSystemService(PowerManager::class.java)
     private val battery = appContext.getSystemService(BatteryManager::class.java)
 
+    private var pssBytes: Long? = null
+    private var pssAt = Long.MIN_VALUE
+    private var voltageMillivolts = 0
+    private var charging = false
+    private var batteryAt = Long.MIN_VALUE
+
+    /**
+     * Battery current is read every call. PSS walks this process's page maps and the sticky
+     * battery broadcast is a binder round trip, so both are refreshed at most once a second.
+     * `Debug.getPss` is used instead of `ActivityManager.getProcessMemoryInfo`, which Android 10+
+     * rate-limits and would return stale values.
+     */
     fun sample(): Sample {
-        val pss = activity.getProcessMemoryInfo(intArrayOf(Process.myPid())).firstOrNull()
-            ?.totalPss?.toLong()?.times(1_024L)?.takeIf { it > 0 }
-        val voltage = appContext.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-            ?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 0) ?: 0
+        val now = SystemClock.elapsedRealtime()
+        if (now - pssAt >= SLOW_REFRESH_MS) {
+            pssBytes = Debug.getPss().takeIf { it > 0 }?.times(1_024L)
+            pssAt = now
+        }
+        if (now - batteryAt >= SLOW_REFRESH_MS) {
+            val status = appContext.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            voltageMillivolts = status?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 0) ?: 0
+            charging = (status?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0) != 0
+            batteryAt = now
+        }
         return Sample(
-            pssBytes = pss,
+            pssBytes = pssBytes,
             thermalStatus = if (Build.VERSION.SDK_INT >= 29) power.currentThermalStatus else null,
-            currentMicroamps = BatteryCurrentMath.microamps(
+            // While plugged in, battery current is net of the charger and says nothing about
+            // what inference costs, so it is not reported.
+            currentMicroamps = if (charging) null else BatteryCurrentMath.microamps(
                 battery.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW),
             ),
-            voltageMillivolts = voltage,
+            voltageMillivolts = voltageMillivolts,
         )
+    }
+
+    private companion object {
+        const val SLOW_REFRESH_MS = 1_000L
     }
 
     data class Sample(

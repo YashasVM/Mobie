@@ -8,7 +8,10 @@ class BatteryCurrentMathTest {
     @Test fun `normalizes reported milliamp and microamp values with sign`() {
         assertEquals(-500_000L, BatteryCurrentMath.microamps(-500L))
         assertEquals(500_000L, BatteryCurrentMath.microamps(500_000L))
-        assertNull(BatteryCurrentMath.microamps(5_000L))
+        // Samsung-style milliamp reports under heavy load must not be dropped.
+        assertEquals(-1_500_000L, BatteryCurrentMath.microamps(-1_500L))
+        assertEquals(9_999_000L, BatteryCurrentMath.microamps(9_999L))
+        assertEquals(10_000L, BatteryCurrentMath.microamps(10_000L))
         assertNull(BatteryCurrentMath.microamps(Long.MIN_VALUE))
         assertNull(BatteryCurrentMath.microamps(0L))
     }
