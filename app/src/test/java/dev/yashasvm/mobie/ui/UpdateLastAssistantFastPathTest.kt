@@ -111,6 +111,23 @@ class UpdateLastAssistantFastPathTest {
     }
 
     @Test
+    fun `completion and interruption release unfinished opening tags`() {
+        for (suffix in listOf("<", "<th", "<think")) {
+            val streamed = listOf(ChatMessage(false, "")).updateLastAssistant("if a $suffix")
+            assertEquals("if a $suffix", streamed.finishReply().single().text)
+            assertEquals("if a $suffix", streamed.finishInterruptedReply().single().text)
+            assertNull(streamed.finishReply().single().rawText)
+        }
+    }
+
+    @Test
+    fun `completion keeps actual reasoning hidden`() {
+        val streamed = listOf(ChatMessage(false, "")).updateLastAssistant("<think>private</think>answer")
+        assertEquals("answer", streamed.finishReply().single().text)
+        assertEquals("private", streamed.finishReply().single().thinking)
+    }
+
+    @Test
     fun `cross-chunk think tag is parsed correctly`() {
         var messages = listOf(ChatMessage(fromUser = false, text = ""))
         listOf("<th", "ink>hidden</think>Visible").forEach { chunk ->

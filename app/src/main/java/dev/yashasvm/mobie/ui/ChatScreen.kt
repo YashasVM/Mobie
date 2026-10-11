@@ -71,6 +71,8 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -123,6 +125,8 @@ import androidx.compose.ui.unit.sp
 import com.composables.icons.lucide.R as LucideR
 import dev.yashasvm.mobie.core.model.AiModel
 import dev.yashasvm.mobie.core.runtime.InferenceStats
+import dev.yashasvm.mobie.core.runtime.SamplerSettings
+import org.json.JSONObject
 import dev.yashasvm.mobie.ui.theme.Mobie
 import java.io.File
 import java.util.Locale
@@ -145,11 +149,12 @@ import kotlinx.coroutines.withContext
 @Composable
 internal fun ChatScreen(
     state: MobieUiState,
-    onSend: (String, String?) -> Unit,
+    onSend: (String, String?) -> Boolean,
     onStop: () -> Unit = {},
     onBack: () -> Unit = {},
     onHistory: () -> Unit = {},
     onNewChat: () -> Unit = {},
+    onSamplerChange: (SamplerSettings) -> String? = { null },
 ) {
     val model = state.selected ?: return
     val context = LocalContext.current
@@ -194,9 +199,19 @@ internal fun ChatScreen(
     val generating = state.runtimeState == RuntimeState.GENERATING
     val runtimeLabel = state.selectedArtifact?.runtimeLabel ?: "LiteRT-LM"
     val canSubmit = ready && !imageCopying && prompt.isNotBlank()
+    val imageAllowed = model.supportsVision && state.imageInputReady
+    // Capability can be lost mid-draft (reload, or stop after uncertain cancellation). Drop the photo
+    // here so submit never sends a stale attachment that the ViewModel would reject.
+    LaunchedEffect(imageAllowed) {
+        if (shouldDropPendingImage(imagePath, imageAllowed)) {
+            imagePath?.let { File(it).delete() }
+            imagePath = null
+            imageError = PHOTO_REMOVED_MESSAGE
+        }
+    }
     val submit = {
-        if (canSubmit) {
-            onSend(prompt, imagePath)
+        // Keep the draft unless the ViewModel accepted the prompt.
+        if (canSubmit && onSend(prompt, imagePath)) {
             prompt = ""
             imagePath = null
             imageError = null
@@ -222,7 +237,7 @@ internal fun ChatScreen(
             enter = fadeIn(tween(MotionMedium)) + expandVertically(tween(MotionMedium, easing = EmphasizedEase)),
             exit = fadeOut(tween(MotionShort)) + shrinkVertically(tween(MotionShort)),
         ) {
-            TelemetryStrip(state.stats)
+            RunDetails(state, onSamplerChange)
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
@@ -272,7 +287,7 @@ internal fun ChatScreen(
             onPromptChange = { prompt = it },
             runtimeState = state.runtimeState,
             runtimeLabel = runtimeLabel,
-            supportsVision = model.supportsVision && state.imageInputReady,
+            supportsVision = imageAllowed,
             imagePath = imagePath,
             imageCopying = imageCopying,
             canSubmit = canSubmit,
@@ -289,6 +304,12 @@ internal fun ChatScreen(
         )
     }
 }
+
+internal const val PHOTO_REMOVED_MESSAGE = "Photo removed: this model can't read images right now."
+
+/** A pending photo must be dropped as soon as the loaded model can no longer read images. */
+internal fun shouldDropPendingImage(imagePath: String?, imageAllowed: Boolean): Boolean =
+    imagePath != null && !imageAllowed
 
 /**
  * Decides which messages play an entrance animation. Messages that arrive live (a send adds the
@@ -429,45 +450,86 @@ private fun ChatHeader(
     }
 }
 
-/** Last measured numbers. Unmeasured values stay as a dash; nothing is estimated here. */
+/** Live callbacks are SDK chunks; final token rates come from LiteRT benchmark data. */
 @Composable
-private fun TelemetryStrip(stats: InferenceStats?) {
-    val decode = stats?.tokensPerSecond?.takeIf { it > 0 }?.let { String.format(Locale.US, "%.1f", it) } ?: "—"
-    val prefill = stats?.prefillTokensPerSecond?.takeIf { it > 0 }?.let { String.format(Locale.US, "%.0f", it) }
-    val ttft = formatMillis(stats?.timeToFirstTokenMs ?: 0)
-    val ram = stats?.ramBytes?.takeIf { it > 0 }?.let(::formatBytes) ?: "—"
-    val description = if (stats == null) {
-        "No reply measured yet"
-    } else {
-        buildString {
-            append("Last reply: decode $decode tokens per second")
-            prefill?.let { append(", prefill $it tokens per second") }
-            append(", time to first token $ttft, memory $ram")
-        }
-    }
-    Column(Modifier.fillMaxWidth()) {
+private fun RunDetails(state: MobieUiState, onSamplerChange: (SamplerSettings) -> String?) {
+    val clipboard = LocalClipboard.current
+    val scope = rememberCoroutineScope()
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    var temperature by remember(state.sampler) { mutableStateOf(state.sampler.temperature.toString()) }
+    var topK by remember(state.sampler) { mutableStateOf(state.sampler.topK.toString()) }
+    var topP by remember(state.sampler) { mutableStateOf(state.sampler.topP.toString()) }
+    var seed by remember(state.sampler) { mutableStateOf(state.sampler.seed.toString()) }
+    var settingsError by remember { mutableStateOf<String?>(null) }
+    val stats = state.stats
+    val live = state.telemetry
+    val decode = stats?.tokensPerSecond?.takeIf { it > 0 }?.let { String.format(Locale.US, "%.1f tok/s", it) }
+        ?: live.liveSdkChunksPerSecond?.let { String.format(Locale.US, "%.1f SDK chunks/s", it) }
+        ?: "Waiting for output"
+    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerLow)) {
         Row(
-            Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 9.dp)
-                .semantics(mergeDescendants = true) { contentDescription = description },
+            Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(horizontal = 16.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            TelemetryValue(label = null, value = decode, unit = "tok/s")
-            if (prefill != null) {
-                VerticalHairline(16.dp)
-                TelemetryValue(label = "Prefill", value = prefill, unit = "tok/s")
+            Text("Run details ${if (expanded) "▴" else "▾"}", style = MaterialTheme.typography.labelMedium)
+            Text(decode, style = MaterialTheme.typography.labelSmall)
+        }
+        if (expanded) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                val first = live.firstChunkMs ?: stats?.timeToFirstTokenMs?.takeIf { it > 0 }
+                Text("First SDK chunk: ${first?.let(::formatMillis) ?: "—"}")
+                Text("Prefill: ${stats?.prefillTokensPerSecond?.takeIf { it > 0 }?.let { String.format(Locale.US, "%.1f tok/s (%d tokens)", it, stats.prefillTokenCount) } ?: "—"}")
+                Text("Decode: ${stats?.tokensPerSecond?.takeIf { it > 0 }?.let { String.format(Locale.US, "%.1f tok/s (%d tokens)", it, stats.decodeTokenCount) } ?: "—"}")
+                Text("App PSS: ${live.pssBytes?.let(::formatBytes) ?: "—"} · Thermal status: ${live.thermalStatus?.toString() ?: "—"}")
+                Text("Battery current: ${live.batteryCurrentMilliAmps?.let { String.format(Locale.US, "%.0f mA", it) } ?: "—"}")
+                Text("Estimated whole-device energy/token: ${live.estimatedEnergyPerTokenMilliWh?.let { String.format(Locale.US, "%.5f mWh", it) } ?: "—"}")
+                Text("Live speed uses SDK chunks; final token counts use LiteRT.", style = MaterialTheme.typography.labelSmall)
+                TextButton(onClick = {
+                    scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Run JSON", runJson(state)))) }
+                }, enabled = stats != null || live.sdkChunks > 0) { Text("Copy run as JSON") }
+                Text("Sampling", style = MaterialTheme.typography.labelMedium)
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(temperature, { temperature = it }, label = { Text("Temperature") }, singleLine = true, modifier = Modifier.width(120.dp))
+                    OutlinedTextField(topK, { topK = it }, label = { Text("Top-k") }, singleLine = true, modifier = Modifier.width(100.dp))
+                    OutlinedTextField(topP, { topP = it }, label = { Text("Top-p") }, singleLine = true, modifier = Modifier.width(100.dp))
+                    OutlinedTextField(seed, { seed = it }, label = { Text("Seed") }, singleLine = true, modifier = Modifier.width(120.dp))
+                }
+                TextButton(onClick = {
+                    val parsed = listOfNotNull(temperature.toDoubleOrNull(), topK.toIntOrNull(), topP.toDoubleOrNull(), seed.toIntOrNull())
+                    settingsError = if (parsed.size != 4) "Enter valid numbers for all sampling fields." else {
+                        onSamplerChange(SamplerSettings(temperature.toDouble(), topK.toInt(), topP.toDouble(), seed.toInt()))
+                    }
+                }) { Text("Apply sampling") }
+                settingsError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
-            VerticalHairline(16.dp)
-            TelemetryValue(label = "First token", value = ttft)
-            VerticalHairline(16.dp)
-            TelemetryValue(label = "RAM", value = ram)
         }
         Hairline()
     }
+}
+
+private fun runJson(state: MobieUiState): String {
+    val stats = state.stats
+    val live = state.telemetry
+    fun value(value: Any?): Any = value ?: JSONObject.NULL
+    return JSONObject().apply {
+        put("modelId", value(state.selected?.id))
+        put("artifact", value(state.selectedArtifact?.fileName))
+        put("sampler", JSONObject().put("temperature", state.sampler.temperature).put("topK", state.sampler.topK)
+            .put("topP", state.sampler.topP).put("seed", state.sampler.seed))
+        put("firstSdkChunkMs", value(live.firstChunkMs))
+        put("sdkChunks", live.sdkChunks)
+        put("liveSdkChunksPerSecond", value(live.liveSdkChunksPerSecond))
+        put("prefillTokensPerSecond", value(stats?.prefillTokensPerSecond))
+        put("prefillTokenCount", value(stats?.prefillTokenCount))
+        put("decodeTokensPerSecond", value(stats?.tokensPerSecond))
+        put("decodeTokenCount", value(stats?.decodeTokenCount))
+        put("appPssBytes", value(live.pssBytes))
+        put("thermalStatus", value(live.thermalStatus))
+        put("batteryCurrentMilliAmps", value(live.batteryCurrentMilliAmps))
+        put("estimatedWholeDeviceEnergyMilliWh", value(live.estimatedEnergyMilliWh))
+        put("estimatedWholeDeviceEnergyPerTokenMilliWh", value(live.estimatedEnergyPerTokenMilliWh))
+    }.toString(2)
 }
 
 @Composable

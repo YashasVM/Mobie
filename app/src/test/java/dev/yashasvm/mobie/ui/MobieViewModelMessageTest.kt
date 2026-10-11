@@ -4,8 +4,33 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 class MobieViewModelMessageTest {
+    @Test
+    fun `stop saves partial reply before waiting for native cancellation`() = runBlocking {
+        val entered = CompletableDeferred<Unit>()
+        val neverReturns = CompletableDeferred<Unit>()
+        val job = launch {
+            entered.complete(Unit)
+            try { neverReturns.await() } finally { neverReturns.await() }
+        }
+        entered.await()
+        var saved: List<ChatMessage>? = null
+        val stopper = launch {
+            saveBeforeCancellation(
+                listOf(ChatMessage(false, "", rawText = "if a <th")), job,
+            ) { saved = it }
+        }
+        kotlinx.coroutines.yield()
+        assertEquals("if a <th", saved?.single()?.text)
+        assertTrue(saved?.single()?.interrupted == true)
+        neverReturns.complete(Unit)
+        stopper.join()
+    }
+
     @Test
     fun `cancelling before output preserves the previous completed answer`() {
         val messages = listOf(

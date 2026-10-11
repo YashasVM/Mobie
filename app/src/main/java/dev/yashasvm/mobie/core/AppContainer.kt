@@ -3,8 +3,10 @@ package dev.yashasvm.mobie.core
 import android.content.Context
 import dev.yashasvm.mobie.core.device.CompatibilityResolver
 import dev.yashasvm.mobie.core.device.DeviceProfileProvider
+import dev.yashasvm.mobie.core.device.DeviceRunSampler
 import dev.yashasvm.mobie.core.runtime.InferenceStallGuardRuntimeAdapter
 import dev.yashasvm.mobie.core.runtime.LiteRtLmRuntimeAdapter
+import dev.yashasvm.mobie.core.runtime.SamplerSettingsStore
 import dev.yashasvm.mobie.core.runtime.RuntimeRegistry
 import dev.yashasvm.mobie.core.runtime.ThermalGuardRuntimeAdapter
 import dev.yashasvm.mobie.core.security.HuggingFaceTokenStore
@@ -26,7 +28,9 @@ class AppContainer(context: Context) {
     val conversion = ConversionRepository(http)
     val downloads = ModelDownloadManager(appContext)
     val chatHistory = ChatHistoryStore(appContext)
+    val samplerSettings = SamplerSettingsStore(appContext)
     val deviceProfile = DeviceProfileProvider(appContext)
+    val runSampler = DeviceRunSampler(appContext)
     val compatibility = CompatibilityResolver()
     private val liteRtRuntime = LiteRtLmRuntimeAdapter(appContext)
     private val stallGuardedLiteRtRuntime = InferenceStallGuardRuntimeAdapter(liteRtRuntime)

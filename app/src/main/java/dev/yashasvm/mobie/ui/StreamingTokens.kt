@@ -41,6 +41,8 @@ internal suspend fun Flow<InferenceEvent>.collectBatchedTokens(onEvent: (Inferen
                         timer?.cancel()
                         timer = null
                     }
+                } else if (event is InferenceEvent.Progress) {
+                    onEvent(event)
                 } else {
                     flush()
                     onEvent(event)

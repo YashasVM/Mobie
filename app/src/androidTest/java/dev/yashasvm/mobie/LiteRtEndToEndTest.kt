@@ -203,7 +203,7 @@ class LiteRtEndToEndTest {
                         messages = listOf(ChatMessage(true, PROMPT), ChatMessage(false, output)),
                         stats = stats,
                     ),
-                    onSend = { _, _ -> },
+                    onSend = { _, _ -> true },
                 )
             }
         }

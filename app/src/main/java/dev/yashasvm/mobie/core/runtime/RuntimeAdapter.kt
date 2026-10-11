@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.Flow
 
 data class GenerationConfig(
     val maxNewTokens: Int = 1_024,
+    val sampler: SamplerSettings = SamplerSettings(),
 )
 
 data class RuntimeMessage(
@@ -29,6 +30,8 @@ data class InferenceStats(
 
 sealed interface InferenceEvent {
     data class Token(val text: String, val thinking: Boolean = false) : InferenceEvent
+    /** Live callbacks, not tokenizer tokens. */
+    data class Progress(val sdkChunks: Int, val elapsedMs: Long, val firstChunkMs: Long) : InferenceEvent
     data class Stats(val value: InferenceStats) : InferenceEvent
     data class Error(
         val message: String,
