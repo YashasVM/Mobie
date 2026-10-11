@@ -47,6 +47,12 @@ interface RuntimeAdapter {
         vision: Boolean = false,
         history: List<RuntimeMessage> = emptyList(),
     ): Result<Unit>
+    /** Explicit user retry when total RAM permits a load but Android must reclaim memory. */
+    suspend fun loadAllowingMemoryReclaim(
+        modelPath: String,
+        vision: Boolean = false,
+        history: List<RuntimeMessage> = emptyList(),
+    ): Result<Unit> = load(modelPath, vision, history)
     suspend fun resetConversation(history: List<RuntimeMessage> = emptyList()): Result<Unit>
     fun generate(
         prompt: String,

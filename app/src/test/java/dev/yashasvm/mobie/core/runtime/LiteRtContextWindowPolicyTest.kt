@@ -34,14 +34,14 @@ class LiteRtContextWindowPolicyTest {
     }
 
     @Test
-    fun shrinksExtendedContextWhenCurrentFreeRamCannotSafelyBackFullKvCache() {
+    fun shrinksExtendedContextWhenTotalRamCannotBackFullKvCache() {
         val selected = LiteRtContextWindowPolicy.select(
             advertisedContextWindowTokens = 65_536,
-            modelWeightsBytes = 1L * GIB,
+            modelWeightsBytes = 4L * GIB,
             totalRamBytes = 4L * GIB,
             availableRamBytes = 2_200L * MIB,
             lowMemoryThresholdBytes = 192L * MIB,
-            isLowRamDevice = false,
+            isLowRamDevice = true,
         )
 
         assertTrue(selected in 1_024 until 4_096)
@@ -49,10 +49,10 @@ class LiteRtContextWindowPolicyTest {
     }
 
     @Test
-    fun lowRamDevicesUseStricterAvailableMemoryFraction() {
+    fun lowRamDevicesUseStricterTotalMemoryReserve() {
         val normal = LiteRtContextWindowPolicy.select(
             advertisedContextWindowTokens = 32_768,
-            modelWeightsBytes = 768L * MIB,
+            modelWeightsBytes = 4L * GIB,
             totalRamBytes = 4L * GIB,
             availableRamBytes = 2_000L * MIB,
             lowMemoryThresholdBytes = 192L * MIB,
@@ -60,7 +60,7 @@ class LiteRtContextWindowPolicyTest {
         )
         val lowRam = LiteRtContextWindowPolicy.select(
             advertisedContextWindowTokens = 32_768,
-            modelWeightsBytes = 768L * MIB,
+            modelWeightsBytes = 4L * GIB,
             totalRamBytes = 4L * GIB,
             availableRamBytes = 2_000L * MIB,
             lowMemoryThresholdBytes = 192L * MIB,

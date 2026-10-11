@@ -24,6 +24,10 @@ internal class ThermalGuardRuntimeAdapter(
         history: List<RuntimeMessage>,
     ): Result<Unit> = delegate.load(modelPath, vision, history)
 
+    override suspend fun loadAllowingMemoryReclaim(
+        modelPath: String, vision: Boolean, history: List<RuntimeMessage>,
+    ): Result<Unit> = delegate.loadAllowingMemoryReclaim(modelPath, vision, history)
+
     override suspend fun resetConversation(history: List<RuntimeMessage>): Result<Unit> =
         delegate.resetConversation(history)
 

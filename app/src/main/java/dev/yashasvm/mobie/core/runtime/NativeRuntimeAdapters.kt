@@ -1,6 +1,7 @@
 package dev.yashasvm.mobie.core.runtime
 
 import android.app.ActivityManager
+import dev.yashasvm.mobie.core.device.MemorySnapshotReader
 import android.content.Context
 import android.os.Build
 import android.os.PowerManager
@@ -74,6 +75,14 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         modelPath: String,
         vision: Boolean,
         history: List<RuntimeMessage>,
+    ): Result<Unit> = loadInternal(modelPath, vision, history, allowReclaim = false)
+
+    override suspend fun loadAllowingMemoryReclaim(
+        modelPath: String, vision: Boolean, history: List<RuntimeMessage>,
+    ): Result<Unit> = loadInternal(modelPath, vision, history, allowReclaim = true)
+
+    private suspend fun loadInternal(
+        modelPath: String, vision: Boolean, history: List<RuntimeMessage>, allowReclaim: Boolean,
     ): Result<Unit> = withContext(Dispatchers.Default) {
         val transition = cancellationState.beginLifecycleTransition()
         try {
@@ -86,7 +95,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                         }
                         closeRuntime()
                         val configuredContextWindowTokens = selectRuntimeContextWindowTokens(modelPath)
-                        ensureLoadHeadroom(modelPath, configuredContextWindowTokens)
+                        ensureLoadHeadroom(modelPath, configuredContextWindowTokens, allowReclaim, vision)
                         ExperimentalFlags.enableBenchmark = true
                         val loadedEngine = initializeEngineWithVisionFallback(
                             modelPath = modelPath,
@@ -538,31 +547,34 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
 
     private fun selectRuntimeContextWindowTokens(modelPath: String): Int {
         val manager = appContext.getSystemService(ActivityManager::class.java)
-        val memory = ActivityManager.MemoryInfo().also(manager::getMemoryInfo)
+        val memory = MemorySnapshotReader(manager).read()
         val modelFile = File(modelPath)
         return LiteRtContextWindowPolicy.select(
             advertisedContextWindowTokens = runtimeContextWindowTokens(modelPath),
             modelWeightsBytes = modelFile.length(),
-            totalRamBytes = memory.totalMem,
-            availableRamBytes = memory.availMem,
-            lowMemoryThresholdBytes = memory.threshold,
+            totalRamBytes = memory.totalBytes,
+            availableRamBytes = memory.availableNowBytes,
+            lowMemoryThresholdBytes = memory.thresholdBytes,
             isLowRamDevice = manager.isLowRamDevice,
         )
     }
 
-    private fun ensureLoadHeadroom(modelPath: String, contextWindowTokens: Int) {
+    private fun ensureLoadHeadroom(modelPath: String, contextWindowTokens: Int, allowReclaim: Boolean, vision: Boolean) {
         val manager = appContext.getSystemService(ActivityManager::class.java)
-        val memory = ActivityManager.MemoryInfo().also(manager::getMemoryInfo)
+        val memory = MemorySnapshotReader(manager).read()
         val modelFile = File(modelPath)
         val memoryReason = RuntimeLoadMemoryPolicy.blockReason(
             modelWeightsBytes = modelFile.length(),
-            totalRamBytes = memory.totalMem,
-            availableRamBytes = memory.availMem,
-            lowMemoryThresholdBytes = memory.threshold,
-            isLowMemory = memory.lowMemory,
+            totalRamBytes = memory.totalBytes,
+            availableRamBytes = memory.availableNowBytes,
+            availableAfterReclaimBytes = memory.availableAfterReclaimBytes,
+            lowMemoryThresholdBytes = memory.thresholdBytes,
+            isLowMemory = memory.isLowMemory,
             isLowRamDevice = manager.isLowRamDevice,
             thermalStatus = currentThermalStatus(),
             contextWindowTokens = contextWindowTokens,
+            allowReclaim = allowReclaim,
+            visionEncoderLoaded = vision,
         )
         if (memoryReason != null) throw IllegalStateException(memoryReason)
 

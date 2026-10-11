@@ -88,13 +88,13 @@ class CompatibilityResolverTest {
     }
 
     @Test
-    fun `constrained device reports minimum bounded context instead of advertised context`() {
-        val constrained = device.copy(availableRamBytes = 2 * gib)
+    fun `current pressure warns without shrinking useful context`() {
+        val constrained = device.copy(availableRamBytes = gib)
         val result = resolver.resolve(artifact(size = gib, name = "model-c64k.litertlm"), constrained)
 
         assertEquals(Compatibility.WARNING, result.status)
-        assertEquals(1_024, result.contextWindowTokens)
-        assertEquals(64 * mib, result.kvCacheBytes)
+        assertEquals(4_096, result.contextWindowTokens)
+        assertEquals(256 * mib, result.kvCacheBytes)
     }
 
     @Test
@@ -198,7 +198,7 @@ class CompatibilityResolverTest {
 
     @Test
     fun `model that can fit total ram but not safe current ram warns`() {
-        val constrained = device.copy(availableRamBytes = 2 * gib)
+        val constrained = device.copy(availableRamBytes = gib)
         assertEquals(Compatibility.WARNING, resolver.resolve(artifact(size = gib), constrained).status)
     }
 
@@ -230,24 +230,24 @@ class CompatibilityResolverTest {
 
     @Test
     fun `android low memory threshold is reserved from recommendation headroom`() {
-        val thresholdConstrained = device.copy(availableRamBytes = 3 * gib, lowMemoryThresholdBytes = 2 * gib)
+        val thresholdConstrained = device.copy(availableRamBytes = 2 * gib, lowMemoryThresholdBytes = 2 * gib)
         assertEquals(Compatibility.WARNING, resolver.resolve(artifact(size = gib), thresholdConstrained).status)
     }
 
     @Test
     fun `low ram devices use stricter total ram ceiling`() {
         val lowRam = device.copy(totalRamBytes = 4 * gib, availableRamBytes = 4 * gib, isLowRamDevice = true)
-        val result = resolver.resolve(artifact(size = 2 * gib), lowRam)
+        val result = resolver.resolve(artifact(size = 7 * gib / 2), lowRam)
         assertEquals(Compatibility.INCOMPATIBLE, result.status)
-        assertTrue(result.reason.contains("low-RAM device"))
+        assertTrue(result.reason.contains("more RAM"))
     }
 
     @Test
     fun `low ram devices reserve more current memory headroom`() {
-        val lowRam = device.copy(availableRamBytes = 5 * gib / 2, isLowRamDevice = true)
+        val lowRam = device.copy(availableRamBytes = 3 * gib / 2, isLowRamDevice = true)
         val result = resolver.resolve(artifact(size = gib), lowRam)
         assertEquals(Compatibility.WARNING, result.status)
-        assertTrue(result.reason.contains("extra Android memory headroom"))
+        assertTrue(result.reason.contains("free about"))
     }
 
     @Test

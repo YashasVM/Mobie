@@ -1,16 +1,11 @@
 package dev.yashasvm.mobie.core.runtime
 
+import dev.yashasvm.mobie.core.model.ModelArtifact
+import dev.yashasvm.mobie.core.model.ModelFormat
+import dev.yashasvm.mobie.core.model.estimateLiteRtRuntimeMemory
 import kotlin.math.max
-import kotlin.math.min
 
-/**
- * Caps ordinary chat at 4K tokens and reduces that allocation further to fit the conservative RAM
- * envelope used by runtime admission. Free RAM should not cause an extended-context artifact to
- * reserve its entire advertised KV cache.
- *
- * This policy is intentionally pure so its memory assumptions can be regression-tested before it
- * is wired into native EngineConfig.
- */
+/** Choose a stable chat context from total RAM. Current pressure affects admission, not context. */
 internal object LiteRtContextWindowPolicy {
     const val MIN_USEFUL_CONTEXT_TOKENS = 1_024
     private const val MAX_CHAT_CONTEXT_TOKENS = 4_096
@@ -22,46 +17,20 @@ internal object LiteRtContextWindowPolicy {
         availableRamBytes: Long,
         lowMemoryThresholdBytes: Long,
         isLowRamDevice: Boolean,
+        backend: ComputeBackend = ComputeBackend.CPU,
     ): Int {
-        // Never ask LiteRT for more KV capacity than the artifact explicitly advertises. Some
-        // community packages encode small fixed caches (for example c512); rounding those up to our
-        // normal 1K minimum can exceed the package's real capacity and fail during engine init.
         val advertised = advertisedContextWindowTokens.coerceIn(1, MAX_CHAT_CONTEXT_TOKENS)
-        if (modelWeightsBytes <= 0 || totalRamBytes <= 0 || availableRamBytes <= 0) return advertised
-
-        val runtimeOverheadBytes = max((modelWeightsBytes * 0.4).toLong(), MIN_RUNTIME_OVERHEAD_BYTES)
-        val totalFraction = if (isLowRamDevice) 0.70 else 0.80
-        val totalRuntimeBudget = (totalRamBytes * totalFraction).toLong()
-
-        val reserve = max(lowMemoryThresholdBytes, totalRamBytes / 20)
-        val availableFraction = if (isLowRamDevice) 0.75 else 0.85
-        val availableRuntimeBudget = ((availableRamBytes - reserve).coerceAtLeast(0) * availableFraction).toLong()
-
-        val kvBudgetBytes = min(totalRuntimeBudget, availableRuntimeBudget) - modelWeightsBytes - runtimeOverheadBytes
-        val budgetedTokens = if (kvBudgetBytes <= MIN_KV_CACHE_BYTES) {
-            MIN_USEFUL_CONTEXT_TOKENS
-        } else {
-            (kvBudgetBytes / KV_BYTES_PER_TOKEN)
-                .coerceAtMost(Int.MAX_VALUE.toLong())
-                .toInt()
-                .coerceAtLeast(MIN_USEFUL_CONTEXT_TOKENS)
+        if (modelWeightsBytes <= 0 || totalRamBytes <= 0) return advertised
+        val reserve = max(lowMemoryThresholdBytes, totalRamBytes / if (isLowRamDevice) 5 else 10)
+        val budget = (totalRamBytes - reserve).coerceAtLeast(0)
+        var tokens = advertised / 256 * 256
+        while (tokens > MIN_USEFUL_CONTEXT_TOKENS) {
+            val artifact = ModelArtifact("model.litertlm", "", modelWeightsBytes,
+                format = ModelFormat.LITERT_LM, contextWindowTokens = tokens)
+            if (requireNotNull(estimateLiteRtRuntimeMemory(artifact,
+                privateWeightCopy = backend.privateWeightCopy)).estimatedRamBytes <= budget) return tokens
+            tokens -= 256
         }
-
-        val selected = min(advertised, budgetedTokens)
-        if (selected <= MIN_USEFUL_CONTEXT_TOKENS) return selected
-
-        // Keep allocations stable instead of changing by a handful of tokens as Android's free-RAM
-        // reading fluctuates. 256-token steps are small relative to phone chat contexts but avoid
-        // unnecessary engine/cache churn when this policy is integrated with runtime loading.
-        return (selected / CONTEXT_ALIGNMENT_TOKENS * CONTEXT_ALIGNMENT_TOKENS)
-            .coerceAtLeast(MIN_USEFUL_CONTEXT_TOKENS)
+        return minOf(advertised, MIN_USEFUL_CONTEXT_TOKENS)
     }
-
-    private const val MIB = 1024L * 1024L
-    private const val MIN_RUNTIME_OVERHEAD_BYTES = 512L * MIB
-    private const val MIN_KV_CACHE_BYTES = 64L * MIB
-    private const val DEFAULT_KV_CACHE_BYTES = 256L * MIB
-    private const val DEFAULT_CONTEXT_TOKENS = 4_096L
-    private const val KV_BYTES_PER_TOKEN = DEFAULT_KV_CACHE_BYTES / DEFAULT_CONTEXT_TOKENS
-    private const val CONTEXT_ALIGNMENT_TOKENS = 256
 }

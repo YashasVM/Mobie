@@ -7,8 +7,11 @@ import dev.yashasvm.mobie.core.model.CompatibilityResult
 import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
+import dev.yashasvm.mobie.core.model.MemoryAdmissionTier
 import dev.yashasvm.mobie.core.model.estimateLiteRtRuntimeMemory
+import dev.yashasvm.mobie.core.runtime.ComputeBackend
 import dev.yashasvm.mobie.core.runtime.LiteRtContextWindowPolicy
+import dev.yashasvm.mobie.core.runtime.RuntimeLoadMemoryPolicy
 import dev.yashasvm.mobie.core.runtime.RuntimeLoadStoragePolicy
 import kotlin.math.max
 
@@ -24,7 +27,7 @@ class CompatibilityResolver {
                 // download for this device until Hugging Face returns a concrete size.
                 it.sizeBytes > 0
         }
-        .map { artifact -> artifact to resolve(artifact, device) }
+        .map { artifact -> artifact to resolve(artifact, device, model.supportsVision) }
         .filter { (_, result) ->
             result.status == Compatibility.COMPATIBLE || result.status == Compatibility.WARNING
         }
@@ -42,7 +45,12 @@ class CompatibilityResolver {
         )
         ?.first
 
-    fun resolve(artifact: ModelArtifact?, device: DeviceProfile): CompatibilityResult {
+    fun resolve(
+        artifact: ModelArtifact?,
+        device: DeviceProfile,
+        visionEncoderLoaded: Boolean = false,
+        backend: ComputeBackend = ComputeBackend.CPU,
+    ): CompatibilityResult {
         if (artifact == null || artifact.format != ModelFormat.LITERT_LM) {
             return CompatibilityResult(
                 Compatibility.CONVERSION_REQUIRED,
@@ -91,14 +99,14 @@ class CompatibilityResolver {
             )
         }
         val memoryEstimate = requireNotNull(
-            estimateLiteRtRuntimeMemory(artifact.copy(contextWindowTokens = selectedContext)),
+            estimateLiteRtRuntimeMemory(artifact.copy(contextWindowTokens = selectedContext),
+                privateWeightCopy = backend.privateWeightCopy, visionEncoderLoaded = visionEncoderLoaded),
         )
         val estimatedRam = memoryEstimate.estimatedRamBytes
         val requiredStorage = requiredStorageBytes(artifact.sizeBytes)
-        val memoryReserve = max(device.lowMemoryThresholdBytes, device.totalRamBytes / 20)
-        val availableFraction = if (device.isLowRamDevice) 0.75 else 0.85
-        val totalFraction = if (device.isLowRamDevice) 0.70 else 0.80
-        val safeAvailableRam = ((device.availableRamBytes - memoryReserve).coerceAtLeast(0) * availableFraction).toLong()
+        val admission = RuntimeLoadMemoryPolicy.admit(memoryEstimate, device.totalRamBytes,
+            device.availableRamBytes, device.availableAfterReclaimBytes,
+            device.lowMemoryThresholdBytes, device.isLowMemory, device.isLowRamDevice)
         fun result(status: Compatibility, reason: String) = CompatibilityResult(
             status = status,
             reason = reason,
@@ -108,6 +116,9 @@ class CompatibilityResolver {
             kvCacheBytes = memoryEstimate.kvCacheBytes,
             contextWindowTokens = memoryEstimate.contextWindowTokens,
             requiredStorageBytes = requiredStorage,
+            memoryTier = admission.tier,
+            anonymousBytes = memoryEstimate.anonymousBytes,
+            residentWeightBudgetBytes = memoryEstimate.residentWeightBudgetBytes,
         )
         if (requiredStorage > device.availableStorageBytes) {
             return result(
@@ -115,20 +126,7 @@ class CompatibilityResolver {
                 "Not enough free storage for the model, download headroom, and LiteRT's first-load optimized cache.",
             )
         }
-        if (estimatedRam > device.totalRamBytes * totalFraction) {
-            val reason = if (device.isLowRamDevice) {
-                "Android classifies this as a low-RAM device; the model leaves too little memory for a stable local runtime."
-            } else {
-                "The model is too large for this device's RAM."
-            }
-            return result(Compatibility.INCOMPATIBLE, reason)
-        }
-        if (device.isLowMemory) {
-            return result(
-                Compatibility.WARNING,
-                "Android reports active memory pressure. Free memory before loading this model.",
-            )
-        }
+        if (admission.tier == MemoryAdmissionTier.IMPOSSIBLE) return result(Compatibility.INCOMPATIBLE, admission.reason)
         if (device.thermalStatus >= THERMAL_STATUS_CRITICAL) {
             return result(
                 Compatibility.WARNING,
@@ -141,15 +139,8 @@ class CompatibilityResolver {
                 "Android reports severe thermal pressure. The model can still run, but Mobie will cap new responses at 256 tokens until the device cools.",
             )
         }
-        if (estimatedRam > safeAvailableRam) {
-            val reason = if (device.isLowRamDevice) {
-                "The model may fit, but this low-RAM device needs extra Android memory headroom. Close other apps first."
-            } else {
-                "The model may fit, but current free RAM is too close to Android's low-memory limit. Close other apps first."
-            }
-            return result(Compatibility.WARNING, reason)
-        }
-        return result(Compatibility.COMPATIBLE, "Expected to fit this device with Android memory headroom reserved.")
+        if (admission.tier == MemoryAdmissionTier.FITS_AFTER_RECLAIM) return result(Compatibility.WARNING, admission.reason)
+        return result(Compatibility.COMPATIBLE, admission.reason)
     }
 
     /**
