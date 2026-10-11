@@ -1,0 +1,23 @@
+model=litert-community/Qwen3-0.6B-int4
+artifact=qwen3_0.6b_nothink_q4_block32_ekv1280.litertlm
+artifact_bytes=347251840
+artifact_sha256=2df6821ec12702dafd33915e7a1a1adc7c4b053f3672fd9555dfaf3a114c4139
+artifact_revision=6aa2daf8aba4aa456797fb8040b36a3948bcfda7
+device=sdk_gphone64_x86_64;android=15;abis=x86_64, arm64-v8a;hardware=ranchu
+backend=CPU;ram_metric=end_of_generation_PSS_not_peak;second_chunk_not_exact_second_token
+first_load_ms=2478.248079
+conversation_reset_ms=1.5934
+full_unload_reload_ms=1119.008232
+cache_bytes_after_first_load=339217213
+cache_bytes_after_reload=339217213
+cache_growth_on_reload_bytes=0
+free_bytes_before_first_load=8577679360
+free_bytes_after_first_load=8238297088
+free_bytes_after_reload=8238415872
+filesystem_delta_first_load_bytes=339382272
+filesystem_delta_reload_bytes=-118784
+first.decode_tokens_per_second=20.398934923391984;first.decode_token_count=22;first.prefill_tokens_per_second=40.33533971685029;first.prefill_token_count=21;first.ttft_ms=804;first.first_visible_ms=804;first.second_chunk_ms=843;first.total_ms=1608;first.ram_bytes=1097141248
+second.decode_tokens_per_second=23.48995688822776;second.decode_token_count=14;second.prefill_tokens_per_second=55.66553581017357;second.prefill_token_count=25;second.ttft_ms=556;second.first_visible_ms=556;second.second_chunk_ms=594;second.total_ms=1047;second.ram_bytes=1098378240
+post_cancel.decode_tokens_per_second=21.346113729143443;post_cancel.decode_token_count=9;post_cancel.prefill_tokens_per_second=78.21968315116743;post_cancel.prefill_token_count=137;post_cancel.ttft_ms=2022;post_cancel.first_visible_ms=2022;post_cancel.second_chunk_ms=2064;post_cancel.total_ms=2342;post_cancel.ram_bytes=1119739904
+reset.decode_tokens_per_second=21.305551752383053;reset.decode_token_count=9;reset.prefill_tokens_per_second=65.79903540956535;reset.prefill_token_count=50;reset.ttft_ms=977;reset.first_visible_ms=977;reset.second_chunk_ms=1016;reset.total_ms=1293;reset.ram_bytes=1120288768
+reload.decode_tokens_per_second=12.979888482152365;reload.decode_token_count=8;reload.prefill_tokens_per_second=52.93571938176982;reload.prefill_token_count=24;reload.ttft_ms=730;reload.first_visible_ms=730;reload.second_chunk_ms=775;reload.total_ms=1072;reload.ram_bytes=1010290688

@@ -67,6 +67,7 @@ data class MobieUiState(
     val history: List<ChatHistorySession> = emptyList(),
     val sessionId: String? = null,
     val stats: InferenceStats? = null,
+    val imageInputReady: Boolean = false,
 )
 
 class MobieViewModel(private val container: AppContainer) : ViewModel() {
@@ -181,6 +182,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 history = sessions,
                 sessionId = currentSessionId,
                 stats = null,
+                imageInputReady = false,
                 error = null,
                 device = device,
             )
@@ -311,7 +313,9 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         }
         if (!isCurrentRuntimeOperation(operation)) return
         result.fold(
-            onSuccess = { mutableState.update { it.copy(runtimeState = RuntimeState.READY) } },
+            onSuccess = {
+                mutableState.update { it.copy(runtimeState = RuntimeState.READY, imageInputReady = adapter.supportsImageInput) }
+            },
             onFailure = { error ->
                 mutableState.update {
                     it.copy(runtimeState = RuntimeState.ERROR, error = error.message ?: "Model failed to load")
@@ -325,7 +329,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val model = current.selected ?: return
         val artifact = current.selectedArtifact ?: return
         if (prompt.isBlank() || current.runtimeState != RuntimeState.READY) return
-        if (imagePath != null && !model.supportsVision) return
+        if (imagePath != null && (!model.supportsVision || !current.imageInputReady)) return
         val adapter = container.runtimes.adapterFor(artifact.format) ?: return
         mutableState.update {
             it.copy(
@@ -336,8 +340,13 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             )
         }
         inferenceJob?.cancel()
+        val operation = runtimeOperation.get()
+        val sessionId = current.sessionId
         inferenceJob = viewModelScope.launch {
-            adapter.generate(prompt.trim(), imagePath).collect { event ->
+            adapter.generate(prompt.trim(), imagePath).collectBatchedTokens { event ->
+                if (!isCurrentRuntimeOperation(operation) ||
+                    state.value.selected?.id != model.id || state.value.sessionId != sessionId
+                ) return@collectBatchedTokens
                 when (event) {
                     is InferenceEvent.Token -> mutableState.update { currentState ->
                         currentState.copy(messages = currentState.messages.updateLastAssistant(event.text, event.thinking))
@@ -346,7 +355,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                         it.copy(stats = event.value, messages = it.messages.attachStatsToLastAssistant(event.value))
                     }
                     is InferenceEvent.Error -> {
-                        val messages = state.value.messages.removeBlankAssistant().markLastAssistantInterrupted()
+                        val messages = state.value.messages.finishInterruptedReply()
                         persistHistory(model.id, messages)
                         mutableState.update {
                             it.copy(
@@ -374,16 +383,24 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val activeInference = inferenceJob
         val modelId = current.selected?.id
         val sessionId = current.sessionId
-        val messages = current.messages.removeBlankAssistant().markLastAssistantInterrupted()
-        if (modelId != null) persistHistory(modelId, messages)
+        val operation = runtimeOperation.get()
         mutableState.update {
-            it.copy(runtimeState = RuntimeState.STOPPING, messages = messages, error = null)
+            // Keep the placeholder until collection has flushed pending text on cancellation.
+            it.copy(runtimeState = RuntimeState.STOPPING, error = null)
         }
         viewModelScope.launch {
             activeInference?.cancelAndJoin()
+            if (isCurrentRuntimeOperation(operation) && state.value.selected?.id == modelId && state.value.sessionId == sessionId &&
+                state.value.runtimeState == RuntimeState.STOPPING && modelId != null
+            ) {
+                val messages = state.value.messages.finishInterruptedReply()
+                mutableState.update { it.copy(messages = messages) }
+                persistHistory(modelId, messages)
+            }
             mutableState.update { latest ->
                 if (
                     latest.runtimeState == RuntimeState.STOPPING &&
+                    isCurrentRuntimeOperation(operation) &&
                     latest.selected?.id == modelId &&
                     latest.sessionId == sessionId
                 ) {
@@ -600,15 +617,17 @@ internal fun List<ChatMessage>.updateLastAssistant(chunk: String, thinkingChunk:
         val thinking = if (tag != null) {
             raw.substring(open + tag.first.length + 2, if (close > open) close else raw.length).trim()
         } else message.thinking
+        val trailingOpen = raw.lastIndexOf('<')
+        val partialTag = open < 0 && trailingOpen >= 0 &&
+            REASONING_TAGS.any { "<$it>".startsWith(raw.substring(trailingOpen), ignoreCase = true) }
         val answer = when {
-            open < 0 && REASONING_TAGS.any { "<$it>".startsWith(raw.trimStart(), ignoreCase = true) } -> ""
+            partialTag -> raw.substring(0, trailingOpen)
             open < 0 -> raw
             close < 0 -> raw.substring(0, open)
-            else -> (raw.substring(0, open) + raw.substring(close + tag!!.first.length + 3)).trim()
+            else -> (raw.substring(0, open) + raw.substring(close + tag!!.first.length + 3)).trimStart()
         }
         // Clear rawText once the close tag is found (or when no tag was involved).
         // Next token then hits the fast path above, skipping O(n) re-scans of accumulated raw text.
-        val partialTag = open < 0 && REASONING_TAGS.any { "<$it>".startsWith(raw.trimStart(), ignoreCase = true) }
         val newRawText = when {
             close >= 0 -> null   // close found: subsequent tokens are pure answer, no re-scan needed
             tag != null -> raw   // inside thinking block before close
@@ -627,10 +646,13 @@ internal fun List<ChatMessage>.markLastAssistantInterrupted(): List<ChatMessage>
     }
 }
 
+internal fun List<ChatMessage>.finishInterruptedReply(): List<ChatMessage> =
+    removeBlankAssistant().markLastAssistantInterrupted()
+
 private val REASONING_TAGS = listOf("think", "thinking", "analysis", "reasoning")
 
 private fun List<ChatMessage>.removeBlankAssistant(): List<ChatMessage> =
-    if (lastOrNull()?.let { !it.fromUser && it.text.isBlank() } == true) dropLast(1) else this
+    if (lastOrNull()?.let { !it.fromUser && it.text.isBlank() && it.thinking.isBlank() } == true) dropLast(1) else this
 
 internal fun List<ChatMessage>.attachStatsToLastAssistant(stats: InferenceStats): List<ChatMessage> {
     val index = indexOfLast { !it.fromUser }

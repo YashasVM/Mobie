@@ -65,6 +65,8 @@ class CompletedInstallRecoveryTest {
         val metadata = Properties().apply { metadataFile.inputStream().use(::load) }
         assertEquals(sourceUrl, metadata.getProperty(DownloadSourceIdentity.SOURCE_URL_PROPERTY))
         assertEquals(destination.length().toString(), metadata.getProperty("verifiedLength"))
+        assertEquals(artifact.sha256, metadata.getProperty("sha256"))
+        assertEquals(artifact.sha256, metadata.getProperty("localSha256"))
 
         modelDir.deleteRecursively()
         Unit

@@ -1,0 +1,14 @@
+scope=SDK chunk burst presentation and Markdown parsing only; no native inference
+device=sdk_gphone64_x86_64;sdk=35;abis=x86_64, arm64-v8a
+chunks=2048;characters=27764;warmups=2;rounds=7;order=alternating
+baseline_median_ms=7288.817621
+candidate_median_ms=59.314404
+presentation_speedup=122.88444508352474
+baseline_updates=[2048, 2048, 2048, 2048, 2048, 2048, 2048]
+candidate_updates=[16, 16, 16, 16, 16, 16, 16]
+baseline_first_chunk_ns=[13497, 20419, 17166, 13027, 25860, 18091, 26931]
+candidate_first_chunk_ns=[52824, 28551, 45104, 24129, 60497, 37260, 59789]
+baseline_second_chunk_ns=[73722, 74142, 62902, 61287, 72328, 86253, 73456]
+candidate_second_chunk_ns=[118630, 93047, 97265, 78559, 118726, 105394, 126606]
+baseline_elapsed_ns=[7272472296, 7115675848, 7381147524, 7269281078, 7946699173, 7568558033, 7288817621]
+candidate_elapsed_ns=[62863050, 57551564, 57017673, 61032306, 59314404, 65167857, 58009185]

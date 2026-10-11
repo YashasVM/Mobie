@@ -56,13 +56,14 @@ class GgufRuntimeAdapter : RuntimeAdapter {
 @OptIn(ExperimentalApi::class)
 class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     override val format = ModelFormat.LITERT_LM
+    override val supportsImageInput: Boolean get() = visionReady
     private val appContext = context.applicationContext
     private val lifecycle = Mutex()
     private val generation = Mutex()
     private val cancellationState = RuntimeCancellationState()
     private var engine: Engine? = null
     private var conversation: Conversation? = null
-    private var visionReady = false
+    @Volatile private var visionReady = false
     private var contextWindowTokens = DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS
     private var committedHistory: List<RuntimeMessage> = emptyList()
     private var conversationDirty = false
@@ -174,6 +175,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         config: GenerationConfig,
     ): Flow<InferenceEvent> {
         return flow {
+            val generationStartedAt = SystemClock.elapsedRealtime()
             val partialAnswer = StringBuilder()
             val generationPermit = cancellationState.captureGenerationPermit()
             generation.withLock {
@@ -193,27 +195,48 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                     if (conversationDirty || (imagePath != null && nativeConversationHasImage)) {
                         rebuildConversationFromCommittedHistory(restoreHistoryImage = imagePath == null)
                     }
-                    val activeConversation = conversation
+                    var activeConversation = conversation
                         ?: throw IllegalStateException("Load a model before starting a conversation")
-                    val safeMaxOutputTokens = GenerationContextPolicy.maxOutputTokens(
-                        contextWindowTokens = contextWindowTokens,
-                        history = committedHistory,
-                        prompt = prompt,
-                        requestedMaxOutputTokens = config.maxNewTokens,
-                        hasImage = imagePath != null,
-                        historyHasImage = nativeConversationHasImage,
-                    )
+                    fun admitOutput(): Int {
+                        val occupiedTokens = activeConversation.getTokenCount()
+                        return GenerationContextPolicy.maxOutputTokens(
+                            contextWindowTokens = contextWindowTokens,
+                            history = committedHistory,
+                            prompt = prompt,
+                            requestedMaxOutputTokens = config.maxNewTokens,
+                            hasImage = imagePath != null,
+                            historyHasImage = nativeConversationHasImage,
+                            // initialMessages are lazily prefetched by the pinned SDK. Zero occupancy
+                            // with nonempty replay history must still budget that pending preface.
+                            cachedTokenCount = occupiedTokens.takeIf { it > 0 || committedHistory.isEmpty() },
+                        )
+                    }
+                    val safeMaxOutputTokens = try {
+                        admitOutput()
+                    } catch (error: IllegalStateException) {
+                        // A long next prompt can exhaust a retained cache even below its usual
+                        // eviction threshold. Drop cached reasoning/old turns once before rejecting
+                        // the prompt, rather than leaving every retry stuck against the same cache.
+                        if (activeConversation.getTokenCount() <= 0 || committedHistory.isEmpty()) throw error
+                        rebuildConversationFromCommittedHistory(restoreHistoryImage = imagePath == null)
+                        activeConversation = checkNotNull(conversation)
+                        admitOutput()
+                    }
                     val contents = if (imagePath == null) {
                         Contents.of(prompt)
                     } else {
                         Contents.of(Content.Text(prompt), Content.ImageFile(imagePath))
                     }
-                    val generationStartedAt = SystemClock.elapsedRealtime()
                     var lastMemoryCheckAt = generationStartedAt
                     var firstTokenAt: Long? = null
+                    var firstVisibleOutputAt: Long? = null
+                    var secondChunkAt: Long? = null
+                    var nonemptyChunkCount = 0
                     var emittedVisibleOutput = false
                     var emittedReasoning = false
                     try {
+                        currentCoroutineContext().ensureActive()
+                        if (cancelRequested) throw CancellationException("Generation cancelled")
                         activeConversation.sendMessageAsync(contents, maxOutputToken = safeMaxOutputTokens).collect { chunk ->
                             currentCoroutineContext().ensureActive()
                             if (cancelRequested) throw CancellationException("Generation cancelled")
@@ -229,13 +252,17 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                                 .filterNot { (name, _) -> name.lowercase() in REASONING_CHANNELS }
                                 .joinToString("") { it.value }
                             val answer = visibleChannels.ifEmpty { if (reasoning.isEmpty()) chunk.toString() else "" }
+                            if (reasoning.isNotEmpty() || answer.isNotEmpty()) {
+                                nonemptyChunkCount += 1
+                                if (firstTokenAt == null) firstTokenAt = now
+                                if (nonemptyChunkCount == 2) secondChunkAt = now
+                            }
                             if (reasoning.isNotEmpty()) {
-                                if (firstTokenAt == null) firstTokenAt = SystemClock.elapsedRealtime()
                                 emittedReasoning = true
                                 emit(InferenceEvent.Token(reasoning, thinking = true))
                             }
                             if (answer.isNotEmpty()) {
-                                if (firstTokenAt == null) firstTokenAt = SystemClock.elapsedRealtime()
+                                if (firstVisibleOutputAt == null) firstVisibleOutputAt = now
                                 emittedVisibleOutput = true
                                 partialAnswer.append(answer)
                                 emit(InferenceEvent.Token(answer))
@@ -255,6 +282,8 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                                     prefillTokensPerSecond = benchmark.lastPrefillTokensPerSecond,
                                     prefillTokenCount = benchmark.lastPrefillTokenCount,
                                     decodeTokenCount = benchmark.lastDecodeTokenCount,
+                                    timeToFirstVisibleOutputMs = firstVisibleOutputAt?.minus(generationStartedAt),
+                                    timeToSecondChunkMs = secondChunkAt?.minus(generationStartedAt),
                                 ),
                             ),
                         )
@@ -418,17 +447,21 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     private fun rebuildConversationFromCommittedHistory(restoreHistoryImage: Boolean = true) {
         val activeEngine = engine
             ?: throw IllegalStateException("Load a model before rebuilding the conversation")
+        // A live cache can retain more text than the conservative replay byte allowance. A new
+        // conversation loses its measured occupancy, so bound the actual pending preface again.
+        val restored = ConversationHistoryPolicy.select(committedHistory, contextWindowTokens)
         val previous = conversation
         replaceRuntimeResourceBeforeClosingPrevious(
             previous = previous,
             createReplacement = {
                 activeEngine.createConversation(
-                    conversationConfig(committedHistory, restoreHistoryImage = restoreHistoryImage),
+                    conversationConfig(restored, restoreHistoryImage = restoreHistoryImage),
                 )
             },
             installReplacement = { replacement ->
                 conversation = replacement
-                nativeConversationHasImage = restoreHistoryImage && hasRestorableHistoryImage(committedHistory)
+                committedHistory = restored
+                nativeConversationHasImage = restoreHistoryImage && hasRestorableHistoryImage(restored)
                 conversationDirty = false
             },
             closePrevious = { stale -> stale.close() },
@@ -442,6 +475,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
             answer = answer,
             imagePath = imagePath,
             contextWindowTokens = contextWindowTokens,
+            cachedTokenCount = conversation?.getTokenCount(),
         )
         committedHistory = replay.history
         conversationDirty = replay.nativeConversationMustRebuild

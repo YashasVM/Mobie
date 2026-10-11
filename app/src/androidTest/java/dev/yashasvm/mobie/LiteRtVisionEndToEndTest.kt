@@ -32,7 +32,7 @@ class LiteRtVisionEndToEndTest {
         const val TAG = "MobieVisionE2E"
         const val MODEL_ID = "litert-community/SmolVLM2-500M"
         const val FILE_NAME = "SmolVLM2-500M.litertlm"
-        const val MODEL_URL = "https://huggingface.co/litert-community/SmolVLM2-500M/resolve/main/SmolVLM2-500M.litertlm"
+        const val MODEL_URL = "https://huggingface.co/litert-community/SmolVLM2-500M/resolve/78a25681a0811230bfa3079504a717e9a4a139d1/SmolVLM2-500M.litertlm"
     }
 
     @Test
@@ -42,9 +42,8 @@ class LiteRtVisionEndToEndTest {
         val artifact = ModelArtifact(
             fileName = FILE_NAME,
             downloadUrl = MODEL_URL,
-            // The upstream bundle may receive metadata/tokenizer-only refreshes. Let the download
-            // worker trust the server-reported length instead of pinning a stale byte count here.
-            sizeBytes = 0,
+            sizeBytes = 360_822_960L,
+            sha256 = "b808b328d845a600a33c5295f93d9217487317bd334dbc91b2a8d50e26e60ad0",
             format = ModelFormat.LITERT_LM,
             quantization = "INT4",
             contextWindowTokens = 2_048,

@@ -1,5 +1,6 @@
 package dev.yashasvm.mobie.data.catalog
 
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -8,19 +9,37 @@ import org.junit.Test
 
 class HuggingFaceCatalogSearchTest {
     @Test
-    fun `search is restricted to LiteRT LM at the Hub but not by owner`() {
-        val url = huggingFaceSearchUrl("Qwen3.5 LiteRT")
+    fun `search is restricted to official LiteRT community models at the Hub`() {
+        val url = huggingFaceSearchUrl("Qwen3.5 LiteRT").toHttpUrl()
 
-        assertTrue(url.contains("search=Qwen3.5+LiteRT"))
-        assertTrue(url.contains("filter=litert-lm"))
-        assertFalse(url.contains("author="))
-        assertTrue(catalogOwnerAllowed("LudwigBanach/Qwen3.5-0.8B-LiteRT", expectedOwner = null))
+        assertEquals("Qwen3.5 LiteRT", url.queryParameter("search"))
+        assertEquals("litert-lm", url.queryParameter("filter"))
+        assertEquals("litert-community", url.queryParameter("author"))
     }
 
     @Test
-    fun `featured owner restriction remains explicit`() {
-        assertTrue(catalogOwnerAllowed("litert-community/Qwen3-0.6B", "litert-community"))
-        assertFalse(catalogOwnerAllowed("someone-else/Qwen3-0.6B", "litert-community"))
+    fun `catalog rejects third party publishers and similar owner names`() {
+        assertTrue(catalogOwnerAllowed("litert-community/Qwen3-0.6B"))
+        assertFalse(catalogOwnerAllowed("someone-else/Qwen3-0.6B"))
+        assertFalse(catalogOwnerAllowed("LudwigBanach/Qwen3.5-0.8B-LiteRT"))
+        assertFalse(catalogOwnerAllowed("litert-community-copy/Qwen3-0.6B"))
+        assertFalse(catalogOwnerAllowed("someone-else/litert-community"))
+    }
+
+    @Test
+    fun `catalog rejects incomplete or nested repository IDs`() {
+        assertFalse(catalogOwnerAllowed("litert-community"))
+        assertFalse(catalogOwnerAllowed("litert-community/"))
+        assertFalse(catalogOwnerAllowed("litert-community/ "))
+        assertFalse(catalogOwnerAllowed("litert-community/nested/model"))
+    }
+
+    @Test
+    fun `search query cannot override allowed publisher`() {
+        val url = huggingFaceSearchUrl("  qwen&author=someone-else  ").toHttpUrl()
+
+        assertEquals("qwen&author=someone-else", url.queryParameter("search"))
+        assertEquals(listOf("litert-community"), url.queryParameterValues("author"))
     }
 
     @Test

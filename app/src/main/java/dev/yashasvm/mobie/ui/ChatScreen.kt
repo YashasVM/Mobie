@@ -130,7 +130,10 @@ import kotlin.math.PI
 import kotlin.math.sin
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -167,7 +170,7 @@ internal fun ChatScreen(
             try {
                 val copiedPath = copyImageToCache(context, uri)
                 if (copiedPath == null) {
-                    imageError = "Couldn't attach that image. Try another one."
+                    imageError = IMAGE_IMPORT_ERROR
                 } else {
                     imagePath?.let { File(it).delete() }
                     imagePath = copiedPath
@@ -227,6 +230,7 @@ internal fun ChatScreen(
                 state.runtimeState == RuntimeState.ERROR -> ErrorPanel(state.error ?: "The model could not run on this phone.")
                 state.messages.isEmpty() -> EmptyChat(
                     model = model,
+                    imageInputReady = state.imageInputReady,
                     onStarter = { starter ->
                         prompt = starter
                         if (ready) inputFocus.requestFocus()
@@ -268,7 +272,7 @@ internal fun ChatScreen(
             onPromptChange = { prompt = it },
             runtimeState = state.runtimeState,
             runtimeLabel = runtimeLabel,
-            supportsVision = model.supportsVision,
+            supportsVision = model.supportsVision && state.imageInputReady,
             imagePath = imagePath,
             imageCopying = imageCopying,
             canSubmit = canSubmit,
@@ -558,13 +562,13 @@ private fun ErrorPanel(message: String) {
 }
 
 @Composable
-private fun EmptyChat(model: AiModel, onStarter: (String) -> Unit) {
-    val starters = remember(model.supportsVision) {
+private fun EmptyChat(model: AiModel, imageInputReady: Boolean, onStarter: (String) -> Unit) {
+    val starters = remember(model.supportsVision, imageInputReady) {
         buildList {
             add("Explain how on-device AI works")
             add("Write a short poem about the sea")
             add("Summarize the pros and cons of electric cars")
-            if (model.supportsVision) add("Describe an image") else add("Help me plan a weekend trip")
+            if (model.supportsVision && imageInputReady) add("Describe an image") else add("Help me plan a weekend trip")
         }
     }
     Column(
@@ -591,7 +595,13 @@ private fun EmptyChat(model: AiModel, onStarter: (String) -> Unit) {
                 modifier = Modifier.appear(delayMillis = 60),
             )
             Text(
-                "Runs entirely on this phone. Nothing you type leaves it.",
+                if (model.supportsVision && imageInputReady) {
+                    "Chat about text or an attached photo on this phone. Image generation isn't available."
+                } else if (model.supportsVision) {
+                    "This phone loaded text chat only. Photo input is unavailable for this session."
+                } else {
+                    "Chat about text on this phone. Nothing you type leaves it."
+                },
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.appear(delayMillis = 120),
@@ -1409,32 +1419,68 @@ private fun SendStopButton(generating: Boolean, canSubmit: Boolean, onSubmit: ()
 // Files
 
 /** Decodes a downsampled preview of a cached chat image off the main thread; null if unreadable. */
-private suspend fun decodeThumbnail(context: Context, path: String): ImageBitmap? = withContext(Dispatchers.IO) {
+internal suspend fun decodeThumbnail(context: Context, path: String): ImageBitmap? = withContext(Dispatchers.IO) {
     val file = File(path)
-    if (!file.isFile || !file.absolutePath.startsWith(context.cacheDir.absolutePath)) return@withContext null
+    if (!file.isFile || !file.canonicalFile.toPath().startsWith(context.cacheDir.canonicalFile.toPath())) return@withContext null
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeFile(path, bounds)
     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@withContext null
     var sample = 1
-    while (bounds.outWidth / (sample * 2) >= 320 && bounds.outHeight / (sample * 2) >= 320) sample *= 2
+    while (maxOf(bounds.outWidth, bounds.outHeight).toLong() > 320L * sample) sample *= 2
     // BitmapFactory returns null (rather than throwing) for undecodable input; the caller then shows a tag.
     BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
 }
 
-internal suspend fun copyImageToCache(context: Context, uri: Uri): String? = withContext(Dispatchers.IO) {
-    val image = File.createTempFile("chat-image-", ".bin", context.cacheDir)
+private const val MAX_IMAGE_BYTES = 20L * 1024 * 1024
+private const val MAX_IMAGE_PIXELS = 25_000_000L
+private const val MAX_IMAGE_DIMENSION = 16_384
+private const val IMAGE_IMPORT_ERROR = "Choose a JPEG, PNG, or WebP image under 20 MB and 25 megapixels."
+
+/** Copies recognized image bytes without resizing the image used for inference. */
+internal suspend fun copyImageToCache(context: Context, uri: Uri): String? {
+    var image: File? = null
     var copied = false
     try {
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            image.outputStream().use(input::copyTo)
-        } ?: return@withContext null
-        copied = true
-        image.absolutePath
+        return withContext(Dispatchers.IO) {
+            val destination = File.createTempFile("chat-image-", ".bin", context.cacheDir)
+            image = destination
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                destination.outputStream().use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    var total = 0L
+                    while (true) {
+                        currentCoroutineContext().ensureActive()
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        total += count
+                        if (total > MAX_IMAGE_BYTES) return@withContext null
+                        output.write(buffer, 0, count)
+                    }
+                }
+            } ?: return@withContext null
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(destination.path, bounds)
+            if (
+                bounds.outMimeType !in setOf("image/jpeg", "image/png", "image/webp") ||
+                bounds.outWidth !in 1..MAX_IMAGE_DIMENSION ||
+                bounds.outHeight !in 1..MAX_IMAGE_DIMENSION ||
+                bounds.outWidth.toLong() * bounds.outHeight > MAX_IMAGE_PIXELS
+            ) return@withContext null
+            var sample = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight).toLong() > 320L * sample) sample *= 2
+            val preview = BitmapFactory.decodeFile(
+                destination.path,
+                BitmapFactory.Options().apply { inSampleSize = sample },
+            ) ?: return@withContext null
+            preview.recycle()
+            currentCoroutineContext().ensureActive()
+            destination.absolutePath
+        }.also { copied = it != null }
     } catch (error: CancellationException) {
         throw error
     } catch (_: Exception) {
-        null
+        return null
     } finally {
-        if (!copied) image.delete()
+        if (!copied) withContext(NonCancellable + Dispatchers.IO) { image?.delete() }
     }
 }

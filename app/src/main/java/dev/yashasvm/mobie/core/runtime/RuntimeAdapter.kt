@@ -22,6 +22,9 @@ data class InferenceStats(
     val prefillTokensPerSecond: Double = 0.0,
     val prefillTokenCount: Int = 0,
     val decodeTokenCount: Int = 0,
+    val timeToFirstVisibleOutputMs: Long? = null,
+    /** SDK streaming callbacks may contain more than one token. This measures the second nonempty chunk. */
+    val timeToSecondChunkMs: Long? = null,
 )
 
 sealed interface InferenceEvent {
@@ -37,6 +40,8 @@ sealed interface InferenceEvent {
 
 interface RuntimeAdapter {
     val format: ModelFormat
+    /** True only while the loaded runtime has an initialized image encoder. */
+    val supportsImageInput: Boolean get() = false
     suspend fun load(
         modelPath: String,
         vision: Boolean = false,

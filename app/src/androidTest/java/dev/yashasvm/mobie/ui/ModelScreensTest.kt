@@ -1,5 +1,10 @@
 package dev.yashasvm.mobie.ui
 
+import android.os.ParcelFileDescriptor
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -13,9 +18,12 @@ import dev.yashasvm.mobie.core.model.CompatibilityResult
 import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
+import dev.yashasvm.mobie.core.model.ModelType
 import dev.yashasvm.mobie.data.download.InstalledModelEntry
 import dev.yashasvm.mobie.data.download.DownloadProgress
 import dev.yashasvm.mobie.ui.theme.MobieTheme
+import androidx.test.platform.app.InstrumentationRegistry
+import java.io.File
 import androidx.work.WorkInfo
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -30,7 +38,7 @@ class ModelScreensTest {
         val model = testModel()
         var selected = false
         composeRule.setContent {
-            MobieTheme {
+            ScreenTheme {
                 CatalogScreen(
                     state = MobieUiState(models = listOf(model), loading = false),
                     onQuery = {},
@@ -50,7 +58,7 @@ class ModelScreensTest {
     fun modelPageShowsRequirementsAndStartsDownload() {
         var downloadRequested = false
         composeRule.setContent {
-            MobieTheme {
+            ScreenTheme {
                 ModelScreen(
                     state = MobieUiState(
                         selected = testModel(),
@@ -81,7 +89,7 @@ class ModelScreensTest {
     @Test
     fun gatedModelExplainsWhyDownloadIsDisabled() {
         composeRule.setContent {
-            MobieTheme {
+            ScreenTheme {
                 ModelScreen(
                     state = MobieUiState(
                         selected = testModel().copy(gated = true),
@@ -105,7 +113,7 @@ class ModelScreensTest {
     fun activeDownloadCanBeCancelled() {
         var cancelled = false
         composeRule.setContent {
-            MobieTheme {
+            ScreenTheme {
                 ModelScreen(
                     state = MobieUiState(
                         selected = testModel(),
@@ -131,7 +139,7 @@ class ModelScreensTest {
     fun chatComposerSendsTypedMessage() {
         var sent = ""
         composeRule.setContent {
-            MobieTheme {
+            ScreenTheme {
                 ChatScreen(
                     state = MobieUiState(selected = testModel(), runtimeState = RuntimeState.READY),
                     onSend = { prompt, _ -> sent = prompt },
@@ -145,12 +153,46 @@ class ModelScreensTest {
     }
 
     @Test
+    fun textOnlyFallbackExplainsAndDisablesPhotoInput() {
+        composeRule.setContent {
+            ScreenTheme {
+                ChatScreen(
+                    state = MobieUiState(selected = testModel().copy(type = ModelType.VISION), runtimeState = RuntimeState.READY),
+                    onSend = { _, _ -> },
+                )
+            }
+        }
+        composeRule.onNodeWithContentDescription("Attach image").assertDoesNotExist()
+        composeRule.onNodeWithText("This phone loaded text chat only. Photo input is unavailable for this session.").assertIsDisplayed()
+        captureEvidence("mobie-text-only-fallback.png")
+    }
+
+    @Test
+    fun activeVisionEnablesPhotoInputAndExplainsImageGenerationLimit() {
+        composeRule.setContent {
+            ScreenTheme {
+                ChatScreen(
+                    state = MobieUiState(
+                        selected = testModel().copy(type = ModelType.VISION),
+                        runtimeState = RuntimeState.READY,
+                        imageInputReady = true,
+                    ),
+                    onSend = { _, _ -> },
+                )
+            }
+        }
+        composeRule.onNodeWithContentDescription("Attach image").assertIsDisplayed()
+        composeRule.onNodeWithText("Chat about text or an attached photo on this phone. Image generation isn't available.").assertIsDisplayed()
+        captureEvidence("mobie-image-input.png")
+    }
+
+    @Test
     fun installedModelStartsChatAndCanBeDeleted() {
         val entry = InstalledModelEntry(testModel(), "/private/test.litertlm")
         var opened = false
         var deleted = false
         composeRule.setContent {
-            MobieTheme {
+            ScreenTheme {
                 CatalogScreen(
                     state = MobieUiState(installedModels = listOf(entry), loading = false),
                     onQuery = {},
@@ -187,4 +229,24 @@ class ModelScreensTest {
     )
 
     private companion object { const val GIB = 1024L * 1024L * 1024L }
+
+    private fun captureEvidence(name: String) {
+        composeRule.waitForIdle()
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val file = File(checkNotNull(instrumentation.targetContext.getExternalFilesDir(null)), name)
+        file.outputStream().use { output ->
+            assertTrue(checkNotNull(instrumentation.uiAutomation.takeScreenshot()).compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output))
+        }
+        ParcelFileDescriptor.AutoCloseInputStream(
+            instrumentation.uiAutomation.executeShellCommand("cp ${file.absolutePath} /sdcard/$name"),
+        ).use { it.readBytes() }
+    }
+}
+
+/** Matches the content color that MobieApp's backdrop supplies to standalone screen tests. */
+@Composable
+private fun ScreenTheme(content: @Composable () -> Unit) {
+    MobieTheme {
+        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground, content = content)
+    }
 }

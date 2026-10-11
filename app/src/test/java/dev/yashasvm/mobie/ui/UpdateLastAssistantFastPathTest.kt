@@ -123,6 +123,28 @@ class UpdateLastAssistantFastPathTest {
     }
 
     @Test
+    fun `reasoning opening tag split after visible prefix remains hidden`() {
+        var messages = listOf(ChatMessage(fromUser = false, text = ""))
+        messages = messages.updateLastAssistant("Visible prefix <th")
+        assertEquals("Visible prefix ", messages.single().text)
+        messages = messages.updateLastAssistant("ink>private reasoning</think> final answer")
+        assertEquals("Visible prefix  final answer", messages.single().text)
+        assertEquals("private reasoning", messages.single().thinking)
+        assertNull(messages.single().rawText)
+    }
+
+    @Test
+    fun `batching preserves reasoning parsing at every opening tag boundary`() {
+        val text = "Prefix <think>reasoning</think>answer"
+        for (split in 1 until text.length) {
+            val messages = listOf(ChatMessage(false, "")).updateLastAssistant(text.take(split))
+                .updateLastAssistant(text.drop(split))
+            assertEquals("split=$split", "Prefix answer", messages.single().text)
+            assertEquals("split=$split", "reasoning", messages.single().thinking)
+        }
+    }
+
+    @Test
     fun `partial tag that never completes as a reasoning tag eventually becomes answer text`() {
         var messages = listOf(ChatMessage(fromUser = false, text = ""))
         // "<th" looks like a partial <think>, but resolves to an unrelated HTML tag

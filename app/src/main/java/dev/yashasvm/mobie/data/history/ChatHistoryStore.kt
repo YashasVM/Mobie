@@ -42,7 +42,7 @@ class ChatHistoryStore(context: Context) {
     fun write(modelId: String, messages: List<HistoryMessage>) {
         val now = System.currentTimeMillis()
         val id = currentId(modelId) ?: UUID.randomUUID().toString()
-        val existing = loadSessions(modelId).filterNot { it.id == id }
+        val existing = sessions(modelId).filterNot { it.id == id }
         val title = messages.firstOrNull { it.fromUser && it.text.isNotBlank() }
             ?.text
             ?.replace("\n", " ")
@@ -59,7 +59,7 @@ class ChatHistoryStore(context: Context) {
 
     fun startNewSession(modelId: String): String {
         val id = UUID.randomUUID().toString()
-        val sessions = (listOf(ChatHistorySession(id, "New local chat", System.currentTimeMillis())) + loadSessions(modelId))
+        val sessions = (listOf(ChatHistorySession(id, "New local chat", System.currentTimeMillis())) + sessions(modelId))
             .take(MAX_SESSIONS)
         sessionsCache[modelId] = sessions
         preferences.edit()

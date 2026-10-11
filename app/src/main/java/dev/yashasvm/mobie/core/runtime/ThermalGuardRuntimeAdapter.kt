@@ -16,6 +16,7 @@ internal class ThermalGuardRuntimeAdapter(
     private val thermalStatusProvider: () -> Int,
 ) : RuntimeAdapter {
     override val format: ModelFormat = delegate.format
+    override val supportsImageInput: Boolean get() = delegate.supportsImageInput
 
     override suspend fun load(
         modelPath: String,

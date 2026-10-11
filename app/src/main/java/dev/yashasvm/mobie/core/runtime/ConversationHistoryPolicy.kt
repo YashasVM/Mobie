@@ -29,6 +29,7 @@ internal object ConversationHistoryPolicy {
     private const val MIN_CONTEXT_WINDOW_TOKENS = 1_024
     private const val MAX_CONTEXT_SCALE = 8
     private const val MAX_SCALED_MESSAGES = 64
+    private const val MAX_LIVE_UTF8_BYTES = 96 * 1024
 
     data class CompletedTurnReplay(
         val history: List<RuntimeMessage>,
@@ -73,7 +74,13 @@ internal object ConversationHistoryPolicy {
         var selectedMessages = 0
         var selectedChars = 0
         var selectedUtf8Bytes = 0
+        var selectedHasImage = false
         var selectedAny = false
+
+        fun maxReplayBytes(hasImage: Boolean): Long = minOf(
+            budget.maxUtf8Bytes.toLong(),
+            GenerationContextPolicy.replayTextBudget(contextWindowTokens, hasImage),
+        )
 
         for (turn in turns.asReversed()) {
             // A stopped/failed generation may leave either a user-only turn or a partial assistant
@@ -84,9 +91,12 @@ internal object ConversationHistoryPolicy {
             val turnChars = turn.sumOf { it.text.length }
             val turnUtf8Bytes = turn.sumOf { it.text.utf8ByteCount() }
             val turnMessages = turn.size
+            // File usability is checked later by the native adapter. Reserving for any image path
+            // here prevents a usable restored image from exhausting the pending replay context.
+            val turnHasImage = turn.any { it.imagePath != null }
             val turnFitsAlone =
                 turnChars <= budget.maxChars &&
-                    turnUtf8Bytes <= budget.maxUtf8Bytes &&
+                    turnUtf8Bytes <= maxReplayBytes(turnHasImage) &&
                     turnMessages <= budget.maxMessages
 
             if (!turnFitsAlone) {
@@ -98,7 +108,7 @@ internal object ConversationHistoryPolicy {
             if (
                 selectedMessages + turnMessages > budget.maxMessages ||
                 selectedChars + turnChars > budget.maxChars ||
-                selectedUtf8Bytes + turnUtf8Bytes > budget.maxUtf8Bytes
+                selectedUtf8Bytes + turnUtf8Bytes > maxReplayBytes(selectedHasImage || turnHasImage)
             ) {
                 break
             }
@@ -107,6 +117,7 @@ internal object ConversationHistoryPolicy {
             selectedMessages += turnMessages
             selectedChars += turnChars
             selectedUtf8Bytes += turnUtf8Bytes
+            selectedHasImage = selectedHasImage || turnHasImage
             selectedAny = true
         }
 
@@ -114,12 +125,12 @@ internal object ConversationHistoryPolicy {
     }
 
     /**
-     * Commits a successful turn to the bounded replay history and reports whether the already-live
+     * Commits a successful turn to the retained history and reports whether the already-live
      * native LiteRT conversation must be rebuilt before the next prompt. LiteRT keeps every turn
      * sent to a Conversation; if replay selection evicts older turns but the native Conversation is
      * left alive, later context admission would budget against less history than native inference
-     * actually retains. Rebuilding on the next turn keeps the native KV context and this policy in
-     * lockstep without paying a recreation cost on ordinary short conversations.
+     * actually retains. Measured cache occupancy lets a live conversation exceed the conservative
+     * replay byte cap; rebuilding near capacity keeps the next restored context bounded.
      */
     fun afterCompletedTurn(
         committedHistory: List<RuntimeMessage>,
@@ -127,14 +138,29 @@ internal object ConversationHistoryPolicy {
         answer: String,
         imagePath: String? = null,
         contextWindowTokens: Int = DEFAULT_CONTEXT_WINDOW_TOKENS,
+        cachedTokenCount: Int? = null,
     ): CompletedTurnReplay {
         val extended = committedHistory +
             RuntimeMessage(fromUser = true, text = prompt, imagePath = imagePath) +
             RuntimeMessage(fromUser = false, text = answer)
+        // Replay byte budgets protect unknown tokenizer density after restoration. Applying those
+        // bounds to a live cache needlessly discards context and repeats prefill. Measured native
+        // occupancy includes hidden reasoning and images, so retain the cache while one quarter of
+        // its context remains free. Keep independent application-memory and message-count bounds.
+        val liveTokenBudget = GenerationContextPolicy.liveCacheBudget(contextWindowTokens)
+        val canRetainLiveCache = cachedTokenCount != null &&
+            cachedTokenCount > 0 &&
+            cachedTokenCount.toLong() <= liveTokenBudget &&
+            extended.size <= MAX_SCALED_MESSAGES &&
+            extended.sumOf { it.text.utf8ByteCount().toLong() } <= MAX_LIVE_UTF8_BYTES
+        if (canRetainLiveCache) {
+            return CompletedTurnReplay(history = extended, nativeConversationMustRebuild = false)
+        }
         val selected = select(extended, contextWindowTokens)
         return CompletedTurnReplay(
             history = selected,
-            nativeConversationMustRebuild = selected != extended,
+            nativeConversationMustRebuild = selected != extended ||
+                (cachedTokenCount != null && cachedTokenCount > liveTokenBudget),
         )
     }
 

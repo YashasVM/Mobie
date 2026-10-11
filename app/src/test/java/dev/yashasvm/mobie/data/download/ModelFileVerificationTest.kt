@@ -5,11 +5,92 @@ import java.util.Properties
 import java.util.concurrent.CancellationException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
 class ModelFileVerificationTest {
+    @Test
+    fun `completed file verification returns its trusted digest and rejects mismatches`() {
+        val file = File.createTempFile("mobie-completed-digest", ".litertlm")
+        try {
+            file.writeText("abc")
+            val expectedSha = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+
+            assertEquals(expectedSha, ModelFileVerification.verifyComplete(file, 3, expectedSha)?.sha256)
+            assertEquals(expectedSha, ModelFileVerification.verifyComplete(file, 0, expectedSha)?.sha256)
+            assertNull(ModelFileVerification.verifyComplete(file, 3, "0".repeat(64)))
+            assertNull(ModelFileVerification.verifyComplete(file, 4, expectedSha))
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun `completed file verification preserves size only recovery requirements`() {
+        val file = File.createTempFile("mobie-completed-size", ".litertlm")
+        try {
+            file.writeText("abc")
+            val completed = ModelFileVerification.verifyComplete(file, 3, null)
+
+            assertTrue(completed != null)
+            assertNull(completed?.sha256)
+            assertNull(ModelFileVerification.verifyComplete(file, 0, null))
+            val malformedLength = Properties().apply {
+                setProperty(ModelFileVerification.KEY_INSTALLED_LENGTH, "invalid")
+            }
+            assertNull(ModelFileVerification.verifyComplete(file, 3, null, malformedLength))
+            file.delete()
+            assertNull(ModelFileVerification.verifyComplete(file, 3, null))
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun `completed file digest reuse rejects replacement bytes after fingerprint changes`() {
+        val file = File.createTempFile("mobie-completed-fingerprint", ".litertlm")
+        try {
+            file.writeText("abc")
+            val expectedSha = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+            val metadata = Properties().apply {
+                setProperty("fileName", file.name)
+                setProperty("sha256", expectedSha)
+            }
+            ModelFileVerification.stamp(metadata, file, expectedSha)
+
+            assertEquals(expectedSha, ModelFileVerification.verifyComplete(file, 3, expectedSha, metadata)?.sha256)
+            file.writeText("xyz")
+            assertTrue(file.setLastModified(metadata.getProperty(ModelFileVerification.KEY_VERIFIED_LAST_MODIFIED).toLong() + 1_000))
+            assertNull(ModelFileVerification.verifyComplete(file, 3, expectedSha, metadata))
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun `checksum less completed file verifies its local digest after fingerprint changes`() {
+        val file = File.createTempFile("mobie-completed-local-digest", ".litertlm")
+        try {
+            file.writeText("abc")
+            val localSha = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+            val metadata = Properties().apply { setProperty("fileName", file.name) }
+            ModelFileVerification.stampInstalledLength(metadata, file)
+            ModelFileVerification.stamp(metadata, file, localSha)
+            val installedMtime = file.lastModified()
+
+            assertTrue(file.setLastModified(installedMtime + 1_000))
+            assertEquals(localSha, ModelFileVerification.verifyComplete(file, 3, null, metadata)?.sha256)
+
+            file.writeText("xyz")
+            assertTrue(file.setLastModified(installedMtime + 2_000))
+            assertNull(ModelFileVerification.verifyComplete(file, 3, null, metadata))
+        } finally {
+            file.delete()
+        }
+    }
+
     @Test
     fun `reuses checksum only for the exact stamped file fingerprint`() {
         val file = File.createTempFile("mobie-verification", ".litertlm")

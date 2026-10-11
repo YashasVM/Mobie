@@ -76,22 +76,19 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
         }
 
         try {
-            if (
-                DownloadSourceIdentity.canReuseCompleted(verifiedMetadata, url, expectedSha) &&
-                isComplete(storageDestination, expectedSize, expectedSha, verifiedMetadata)
-            ) {
-                return@withContext completeInstall(
-                    storageDestination,
-                    resumeMetadataFile,
-                    ModelFileVerification.localSha256(verifiedMetadata),
-                )
+            if (DownloadSourceIdentity.canReuseCompleted(verifiedMetadata, url, expectedSha)) {
+                val verified = verifyComplete(storageDestination, expectedSize, expectedSha, verifiedMetadata)
+                if (verified != null) {
+                    return@withContext completeInstall(storageDestination, resumeMetadataFile, verified.sha256)
+                }
             }
 
-            if (
-                DownloadSourceIdentity.canRecoverInstalled(resumeMetadata, url) &&
-                isComplete(storageDestination, recoverySize, expectedSha)
-            ) {
-                return@withContext completeInstall(storageDestination, resumeMetadataFile, sha256(storageDestination))
+            if (DownloadSourceIdentity.canRecoverInstalled(resumeMetadata, url)) {
+                val verified = verifyComplete(storageDestination, recoverySize, expectedSha)
+                if (verified != null) {
+                    val completedSha = verified.sha256 ?: sha256(storageDestination)
+                    return@withContext completeInstall(storageDestination, resumeMetadataFile, completedSha)
+                }
             }
 
             if (storageDestination.exists()) storageDestination.delete()
@@ -109,8 +106,9 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                 resumeMetadataFile.delete()
                 downloaded = 0
             }
-            if (isComplete(partial, recoverySize, expectedSha)) {
-                val completedSha = sha256(partial)
+            val completedPartial = verifyComplete(partial, recoverySize, expectedSha)
+            if (completedPartial != null) {
+                val completedSha = completedPartial.sha256 ?: sha256(partial)
                 currentCoroutineContext().ensureActive()
                 finalizeFile(partial, storageDestination)
                 return@withContext completeInstall(storageDestination, resumeMetadataFile, completedSha)
@@ -135,8 +133,9 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                     )
                     404 -> return@withContext Result.failure(dataOf("Model artifact was not found"))
                     416 -> {
-                        if (isComplete(partial, recoverySize, expectedSha)) {
-                            val completedSha = sha256(partial)
+                        val verified = verifyComplete(partial, recoverySize, expectedSha)
+                        if (verified != null) {
+                            val completedSha = verified.sha256 ?: sha256(partial)
                             currentCoroutineContext().ensureActive()
                             finalizeFile(partial, storageDestination)
                             return@withContext completeInstall(storageDestination, resumeMetadataFile, completedSha)
@@ -235,21 +234,15 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
         }
     }
 
-    private suspend fun isComplete(
+    private suspend fun verifyComplete(
         file: File,
         expectedSize: Long,
         expectedSha: String?,
         verifiedMetadata: Properties? = null,
-    ): Boolean {
-        if (!file.isFile) return false
-        if (expectedSize > 0 && file.length() != expectedSize) return false
-        if (!ModelFileVerification.matchesInstalledLength(verifiedMetadata, file)) return false
-        return when {
-            !expectedSha.isNullOrBlank() && verifiedMetadata != null &&
-                ModelFileVerification.canReuseShaVerification(verifiedMetadata, file, expectedSha) -> true
-            !expectedSha.isNullOrBlank() -> sha256(file) == expectedSha
-            expectedSize > 0 -> true
-            else -> false
+    ): ModelFileVerification.CompletedFileVerification? {
+        val cancellationContext = currentCoroutineContext()
+        return ModelFileVerification.verifyComplete(file, expectedSize, expectedSha, verifiedMetadata) {
+            cancellationContext.ensureActive()
         }
     }
 

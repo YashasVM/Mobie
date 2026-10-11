@@ -4,6 +4,7 @@ import android.app.Instrumentation
 import android.content.Context
 import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
+import android.os.Build
 import android.os.SystemClock
 import android.util.Log
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -61,7 +62,7 @@ class LiteRtEndToEndTest {
         val context = instrumentation.targetContext
         val artifact = ModelArtifact(
             fileName = "qwen3_0.6b_nothink_q4_block32_ekv1280.litertlm",
-            downloadUrl = "https://huggingface.co/litert-community/Qwen3-0.6B-int4/resolve/main/qwen3_0.6b_nothink_q4_block32_ekv1280.litertlm",
+            downloadUrl = "https://huggingface.co/litert-community/Qwen3-0.6B-int4/resolve/6aa2daf8aba4aa456797fb8040b36a3948bcfda7/qwen3_0.6b_nothink_q4_block32_ekv1280.litertlm",
             sizeBytes = 347_251_840L,
             sha256 = "2df6821ec12702dafd33915e7a1a1adc7c4b053f3672fd9555dfaf3a114c4139",
             format = ModelFormat.LITERT_LM,
@@ -240,6 +241,12 @@ class LiteRtEndToEndTest {
         assertTrue("LiteRT reported no prefill tokens for $label", stats.prefillTokenCount > 0)
         assertTrue("LiteRT reported invalid prefill throughput for $label", stats.prefillTokensPerSecond > 0.0)
         assertTrue("LiteRT reported no decode tokens for $label", stats.decodeTokenCount > 0)
+        assertTrue("First visible output timing missing for $label", stats.timeToFirstVisibleOutputMs != null)
+        assertTrue("Invalid first visible output timing for $label", stats.timeToFirstVisibleOutputMs?.let { it in 0..stats.totalGenerationMs } == true)
+        assertTrue(
+            "Invalid second chunk timing for $label",
+            stats.timeToSecondChunkMs?.let { it in stats.timeToFirstTokenMs..stats.totalGenerationMs } != false,
+        )
     }
 
     private fun logStats(label: String, events: List<InferenceEvent>) {
@@ -274,6 +281,10 @@ class LiteRtEndToEndTest {
                 appendLine("model=litert-community/Qwen3-0.6B-int4")
                 appendLine("artifact=${artifact.fileName}")
                 appendLine("artifact_bytes=${artifact.sizeBytes}")
+                appendLine("artifact_sha256=${artifact.sha256}")
+                appendLine("artifact_revision=6aa2daf8aba4aa456797fb8040b36a3948bcfda7")
+                appendLine("device=${Build.MODEL};android=${Build.VERSION.RELEASE};abis=${Build.SUPPORTED_ABIS.joinToString()};hardware=${Build.HARDWARE}")
+                appendLine("backend=CPU;ram_metric=end_of_generation_PSS_not_peak;second_chunk_not_exact_second_token")
                 appendLine("first_load_ms=$firstLoadMs")
                 appendLine("conversation_reset_ms=$resetSetupMs")
                 appendLine("full_unload_reload_ms=$fullReloadSetupMs")
@@ -296,7 +307,7 @@ class LiteRtEndToEndTest {
     }
 
     private fun metricsLine(label: String, stats: InferenceStats): String =
-        "$label.decode_tokens_per_second=${stats.tokensPerSecond};$label.decode_token_count=${stats.decodeTokenCount};$label.prefill_tokens_per_second=${stats.prefillTokensPerSecond};$label.prefill_token_count=${stats.prefillTokenCount};$label.ttft_ms=${stats.timeToFirstTokenMs};$label.total_ms=${stats.totalGenerationMs};$label.ram_bytes=${stats.ramBytes}"
+        "$label.decode_tokens_per_second=${stats.tokensPerSecond};$label.decode_token_count=${stats.decodeTokenCount};$label.prefill_tokens_per_second=${stats.prefillTokensPerSecond};$label.prefill_token_count=${stats.prefillTokenCount};$label.ttft_ms=${stats.timeToFirstTokenMs};$label.first_visible_ms=${stats.timeToFirstVisibleOutputMs};$label.second_chunk_ms=${stats.timeToSecondChunkMs};$label.total_ms=${stats.totalGenerationMs};$label.ram_bytes=${stats.ramBytes}"
 
     private fun directoryBytes(directory: File): Long = if (!directory.isDirectory) {
         0L

@@ -50,6 +50,34 @@ class LocalPersistenceTest {
     }
 
     @Test
+    fun repeatedHistoryWritesPreserveInactiveSessionsAndSurviveRecreation() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val modelId = "test/cached-session-writes"
+        val store = ChatHistoryStore(context)
+        store.clear(modelId)
+        try {
+            val firstId = store.startNewSession(modelId)
+            store.write(modelId, listOf(HistoryMessage(true, "First chat")))
+            val secondId = store.startNewSession(modelId)
+            store.write(modelId, listOf(HistoryMessage(true, "Second chat")))
+
+            store.activate(modelId, firstId)
+            val updatedFirst = listOf(HistoryMessage(true, "First chat"), HistoryMessage(false, "Updated answer"))
+            store.write(modelId, updatedFirst)
+            store.write(modelId, updatedFirst + HistoryMessage(true, "Another question"))
+
+            val recreated = ChatHistoryStore(context)
+            assertEquals(2, recreated.sessions(modelId).size)
+            assertEquals(firstId, recreated.currentSessionId(modelId))
+            assertEquals(updatedFirst + HistoryMessage(true, "Another question"), recreated.read(modelId))
+            recreated.activate(modelId, secondId)
+            assertEquals(listOf(HistoryMessage(true, "Second chat")), recreated.read(modelId))
+        } finally {
+            store.clear(modelId)
+        }
+    }
+
+    @Test
     fun installedModelPreservesSourceArtifactIdentity() = kotlinx.coroutines.runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val modelId = "test/artifact-identity"

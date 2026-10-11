@@ -7,6 +7,173 @@ import org.junit.Test
 
 class ConversationHistoryPolicyTest {
     @Test
+    fun `selected pending text history always admits a normal next prompt`() {
+        val history = (1..20).flatMap {
+            listOf(RuntimeMessage(true, "u".repeat(128)), RuntimeMessage(false, "a".repeat(128)))
+        }
+
+        for (contextTokens in listOf(1024, 1280, 2048, 4096)) {
+            val selected = ConversationHistoryPolicy.select(history, contextTokens)
+            assertTrue("Text history disappeared at $contextTokens tokens", selected.isNotEmpty())
+            val output = GenerationContextPolicy.maxOutputTokens(
+                contextWindowTokens = contextTokens,
+                history = selected,
+                prompt = "p".repeat(128),
+                requestedMaxOutputTokens = 1024,
+                hasImage = false,
+            )
+            assertTrue("No useful output remains at $contextTokens tokens", output >= 16)
+        }
+    }
+
+    @Test
+    fun `selected pending image history leaves room for a normal text follow up`() {
+        val history = (1..20).flatMap {
+            listOf(
+                RuntimeMessage(true, "u".repeat(56), imagePath = "/tmp/image-$it.jpg"),
+                RuntimeMessage(false, "a".repeat(56)),
+            )
+        }
+
+        for (contextTokens in listOf(1024, 1280, 2048, 4096)) {
+            val selected = ConversationHistoryPolicy.select(history, contextTokens)
+            val retainsImage = selected.any { it.imagePath != null }
+            if (contextTokens == 1024) {
+                assertTrue("The 1K context cannot reserve a restored image and next prompt", selected.isEmpty())
+            } else {
+                assertTrue("Image history disappeared at $contextTokens tokens", retainsImage)
+            }
+            val output = GenerationContextPolicy.maxOutputTokens(
+                contextWindowTokens = contextTokens,
+                history = selected,
+                prompt = "p".repeat(128),
+                requestedMaxOutputTokens = 1024,
+                hasImage = false,
+                historyHasImage = retainsImage,
+            )
+            assertTrue("No useful output remains at $contextTokens tokens", output >= 16)
+        }
+    }
+
+    @Test
+    fun `an older image turn cannot consume the continuation reserve of newer text turns`() {
+        val history = listOf(
+            RuntimeMessage(true, "u".repeat(56), imagePath = "/tmp/image.jpg"),
+            RuntimeMessage(false, "a".repeat(56)),
+            RuntimeMessage(true, "p".repeat(56)),
+            RuntimeMessage(false, "b".repeat(56)),
+        )
+
+        val selected = ConversationHistoryPolicy.select(history, contextWindowTokens = 1280)
+
+        assertEquals(listOf("p".repeat(56), "b".repeat(56)), selected.map { it.text })
+        assertTrue(selected.none { it.imagePath != null })
+    }
+    @Test
+    fun `live cache retains a completed turn beyond conservative replay bytes`() {
+        val replay = ConversationHistoryPolicy.afterCompletedTurn(
+            committedHistory = emptyList(),
+            prompt = "u".repeat(2000),
+            answer = "a".repeat(2000),
+            cachedTokenCount = 1100,
+        )
+
+        assertEquals(listOf("u".repeat(2000), "a".repeat(2000)), replay.history.map { it.text })
+        assertTrue(!replay.nativeConversationMustRebuild)
+    }
+
+    @Test
+    fun `live cache rebuilds when native occupancy crosses the reserved headroom`() {
+        val replay = ConversationHistoryPolicy.afterCompletedTurn(
+            committedHistory = emptyList(),
+            prompt = "u".repeat(2000),
+            answer = "a".repeat(2000),
+            cachedTokenCount = 3073,
+        )
+
+        assertTrue(replay.history.isEmpty())
+        assertTrue(replay.nativeConversationMustRebuild)
+    }
+
+    @Test
+    fun `hidden reasoning near capacity forces rebuild even when visible history fits`() {
+        val replay = ConversationHistoryPolicy.afterCompletedTurn(
+            committedHistory = emptyList(),
+            prompt = "Question",
+            answer = "Answer",
+            cachedTokenCount = 3500,
+        )
+
+        assertEquals(listOf("Question", "Answer"), replay.history.map { it.text })
+        assertTrue(replay.nativeConversationMustRebuild)
+    }
+
+    @Test
+    fun `unknown native occupancy keeps the conservative replay limit`() {
+        val replay = ConversationHistoryPolicy.afterCompletedTurn(
+            committedHistory = emptyList(),
+            prompt = "u".repeat(2000),
+            answer = "a".repeat(2000),
+        )
+
+        assertTrue(replay.history.isEmpty())
+        assertTrue(replay.nativeConversationMustRebuild)
+    }
+
+    @Test
+    fun `measured occupancy retains context at the headroom boundary`() {
+        val replay = ConversationHistoryPolicy.afterCompletedTurn(
+            committedHistory = emptyList(),
+            prompt = "u".repeat(2000),
+            answer = "a".repeat(2000),
+            cachedTokenCount = 3072,
+        )
+
+        assertEquals(2, replay.history.size)
+        assertTrue(!replay.nativeConversationMustRebuild)
+    }
+
+    @Test
+    fun `native retention still bounds message count`() {
+        val history = (1..32).flatMap { turn ->
+            listOf(RuntimeMessage(true, "User $turn"), RuntimeMessage(false, "Answer $turn"))
+        }
+        val replay = ConversationHistoryPolicy.afterCompletedTurn(
+            committedHistory = history,
+            prompt = "Another question",
+            answer = "Another answer",
+            cachedTokenCount = 1000,
+        )
+
+        assertEquals(20, replay.history.size)
+        assertTrue(replay.nativeConversationMustRebuild)
+    }
+
+    @Test
+    fun `rebuilding a retained live conversation produces an admissible lazy preface`() {
+        val retained = ConversationHistoryPolicy.afterCompletedTurn(
+            committedHistory = listOf(RuntimeMessage(true, "u".repeat(1000)), RuntimeMessage(false, "a".repeat(1000))),
+            prompt = "p".repeat(1000),
+            answer = "b".repeat(1000),
+            cachedTokenCount = 1400,
+        )
+        assertTrue(!retained.nativeConversationMustRebuild)
+        val restored = ConversationHistoryPolicy.select(retained.history, contextWindowTokens = 4096)
+
+        assertEquals(listOf("p".repeat(1000), "b".repeat(1000)), restored.map { it.text })
+        assertEquals(
+            1024,
+            GenerationContextPolicy.maxOutputTokens(
+                contextWindowTokens = 4096,
+                history = restored,
+                prompt = "Next question",
+                requestedMaxOutputTokens = 1024,
+                hasImage = false,
+            ),
+        )
+    }
+
+    @Test
     fun `keeps recent user-led turns within message limit`() {
         val history = (1..15).flatMap { turn ->
             listOf(

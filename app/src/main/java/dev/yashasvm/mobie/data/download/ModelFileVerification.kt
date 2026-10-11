@@ -13,6 +13,8 @@ import java.util.Properties
  * app-private files can reuse the verification performed by the download worker.
  */
 internal object ModelFileVerification {
+    data class CompletedFileVerification(val sha256: String?)
+
     const val KEY_INSTALLED_LENGTH = "installedLength"
     const val KEY_LOCAL_SHA256 = "localSha256"
     const val KEY_VERIFIED_LENGTH = "verifiedLength"
@@ -55,6 +57,34 @@ internal object ModelFileVerification {
 
     fun localSha256(properties: Properties?): String? =
         properties?.getProperty(KEY_LOCAL_SHA256)?.trim()?.lowercase()?.takeIf(String::isNotBlank)
+
+    /** Returns the verified digest so interrupted installs can finalize without hashing twice. */
+    fun verifyComplete(
+        file: File,
+        expectedSize: Long,
+        expectedSha: String?,
+        verifiedMetadata: Properties? = null,
+        cancellationCheck: () -> Unit = {},
+    ): CompletedFileVerification? {
+        if (!file.isFile) return null
+        if (expectedSize > 0 && file.length() != expectedSize) return null
+        if (!matchesInstalledLength(verifiedMetadata, file)) return null
+        if (!expectedSha.isNullOrBlank()) {
+            if (verifiedMetadata != null && canReuseShaVerification(verifiedMetadata, file, expectedSha)) {
+                return CompletedFileVerification(expectedSha.lowercase())
+            }
+            val digest = sha256(file, cancellationCheck)
+            return if (digest == expectedSha) CompletedFileVerification(digest) else null
+        }
+        if (expectedSize <= 0) return null
+        val localSha = localSha256(verifiedMetadata)
+        if (localSha != null && verifiedMetadata != null && !canReuseLocalVerification(verifiedMetadata, file)) {
+            val digest = sha256(file, cancellationCheck)
+            if (digest != localSha) return null
+            return CompletedFileVerification(digest)
+        }
+        return CompletedFileVerification(localSha)
+    }
 
     fun sha256(file: File, cancellationCheck: () -> Unit = {}): String {
         val digest = MessageDigest.getInstance("SHA-256")
