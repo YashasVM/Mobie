@@ -130,6 +130,7 @@ fun MobieApp(
                     onBack = viewModel::leaveChat,
                     onHistory = { showHistory = true },
                     onNewChat = viewModel::newChat,
+                    onSamplerChange = viewModel::updateSampler,
                 )
                 "model" -> ModelScreen(
                     state = state,

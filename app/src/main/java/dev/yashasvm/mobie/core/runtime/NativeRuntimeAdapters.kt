@@ -68,6 +68,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     private var committedHistory: List<RuntimeMessage> = emptyList()
     private var conversationDirty = false
     private var nativeConversationHasImage = false
+    private var activeSampler = SamplerSettings()
     @Volatile private var cancelRequested = false
 
     override suspend fun load(
@@ -98,7 +99,10 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                             val restored = ConversationHistoryPolicy.select(history, contextWindowTokens)
                             engine = loadedEngine.engine
                             visionReady = loadedEngine.visionReady
-                            conversation = loadedEngine.engine.createConversation(conversationConfig(restored))
+                            conversation = loadedEngine.engine.createConversation(
+                                conversationConfig(restored, sampler = SamplerSettings()),
+                            )
+                            activeSampler = SamplerSettings()
                             committedHistory = restored
                             nativeConversationHasImage = hasRestorableHistoryImage(restored)
                             conversationDirty = false
@@ -186,14 +190,18 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                 cancellationState.beginGeneration()
                 try {
                     cancelRequested = false
+                    val requestedSampler = config.sampler.validated()
                     ensureGenerationMemoryHeadroom()
                     if (imagePath != null && !visionReady) {
                         throw IllegalStateException(
                             "Vision initialization failed on this device. The model is still available for text-only chat.",
                         )
                     }
-                    if (conversationDirty || (imagePath != null && nativeConversationHasImage)) {
-                        rebuildConversationFromCommittedHistory(restoreHistoryImage = imagePath == null)
+                    if (conversationDirty || requestedSampler != activeSampler || (imagePath != null && nativeConversationHasImage)) {
+                        rebuildConversationFromCommittedHistory(
+                            restoreHistoryImage = imagePath == null,
+                            sampler = requestedSampler,
+                        )
                     }
                     var activeConversation = conversation
                         ?: throw IllegalStateException("Load a model before starting a conversation")
@@ -232,6 +240,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                     var firstVisibleOutputAt: Long? = null
                     var secondChunkAt: Long? = null
                     var nonemptyChunkCount = 0
+                    var lastProgressAt = 0L
                     var emittedVisibleOutput = false
                     var emittedReasoning = false
                     try {
@@ -256,6 +265,14 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                                 nonemptyChunkCount += 1
                                 if (firstTokenAt == null) firstTokenAt = now
                                 if (nonemptyChunkCount == 2) secondChunkAt = now
+                                if (nonemptyChunkCount == 1 || now - lastProgressAt >= 250) {
+                                    emit(InferenceEvent.Progress(
+                                        sdkChunks = nonemptyChunkCount,
+                                        elapsedMs = now - generationStartedAt,
+                                        firstChunkMs = checkNotNull(firstTokenAt) - generationStartedAt,
+                                    ))
+                                    lastProgressAt = now
+                                }
                             }
                             if (reasoning.isNotEmpty()) {
                                 emittedReasoning = true
@@ -444,7 +461,10 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     private fun liteRtCacheDirectory(modelFile: File): File =
         File(modelFile.absoluteFile.parentFile, LITERT_CACHE_DIRECTORY)
 
-    private fun rebuildConversationFromCommittedHistory(restoreHistoryImage: Boolean = true) {
+    private fun rebuildConversationFromCommittedHistory(
+        restoreHistoryImage: Boolean = true,
+        sampler: SamplerSettings = activeSampler,
+    ) {
         val activeEngine = engine
             ?: throw IllegalStateException("Load a model before rebuilding the conversation")
         // A live cache can retain more text than the conservative replay byte allowance. A new
@@ -455,7 +475,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
             previous = previous,
             createReplacement = {
                 activeEngine.createConversation(
-                    conversationConfig(restored, restoreHistoryImage = restoreHistoryImage),
+                    conversationConfig(restored, restoreHistoryImage = restoreHistoryImage, sampler = sampler),
                 )
             },
             installReplacement = { replacement ->
@@ -463,6 +483,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
                 committedHistory = restored
                 nativeConversationHasImage = restoreHistoryImage && hasRestorableHistoryImage(restored)
                 conversationDirty = false
+                activeSampler = sampler
             },
             closePrevious = { stale -> stale.close() },
         )
@@ -501,6 +522,7 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
     private fun conversationConfig(
         history: List<RuntimeMessage>,
         restoreHistoryImage: Boolean = true,
+        sampler: SamplerSettings = activeSampler,
     ): ConversationConfig {
         val restoredImageIndex = if (restoreHistoryImage) {
             VisionHistoryPolicy.latestUsableImageIndex(
@@ -527,10 +549,10 @@ class LiteRtLmRuntimeAdapter(context: Context) : RuntimeAdapter {
         return ConversationConfig(
             initialMessages = restored,
             samplerConfig = SamplerConfig(
-                topK = 40,
-                topP = 0.95,
-                temperature = 0.7,
-                seed = 0,
+                topK = sampler.topK,
+                topP = sampler.topP,
+                temperature = sampler.temperature,
+                seed = sampler.seed,
             ),
             maxOutputToken = DEFAULT_MAX_OUTPUT_TOKENS,
         )

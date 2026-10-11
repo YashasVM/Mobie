@@ -142,7 +142,7 @@ class ModelScreensTest {
             ScreenTheme {
                 ChatScreen(
                     state = MobieUiState(selected = testModel(), runtimeState = RuntimeState.READY),
-                    onSend = { prompt, _ -> sent = prompt },
+                    onSend = { prompt, _ -> sent = prompt; true },
                 )
             }
         }
@@ -158,7 +158,7 @@ class ModelScreensTest {
             ScreenTheme {
                 ChatScreen(
                     state = MobieUiState(selected = testModel().copy(type = ModelType.VISION), runtimeState = RuntimeState.READY),
-                    onSend = { _, _ -> },
+                    onSend = { _, _ -> true },
                 )
             }
         }
@@ -177,7 +177,7 @@ class ModelScreensTest {
                         runtimeState = RuntimeState.READY,
                         imageInputReady = true,
                     ),
-                    onSend = { _, _ -> },
+                    onSend = { _, _ -> true },
                 )
             }
         }
