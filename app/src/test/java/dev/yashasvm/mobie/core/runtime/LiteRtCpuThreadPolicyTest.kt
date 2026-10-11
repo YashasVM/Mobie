@@ -11,7 +11,7 @@ class LiteRtCpuThreadPolicyTest {
 
     @Test fun snapdragon8Gen3CountsPrimeAndBigCores() {
         // 2 little + 2 middle + 3 big + 1 prime.
-        assertEquals(6, LiteRtCpuThreadPolicy.threadCount(layout(2265600, 2265600, 2803200, 2803200, 3153600, 3153600, 3153600, 3398400), 8))
+        assertEquals(4, LiteRtCpuThreadPolicy.threadCount(layout(2265600, 2265600, 2803200, 2803200, 3153600, 3153600, 3153600, 3398400), 8))
     }
 
     @Test fun tensorG3CountsFourPerformanceCores() {
@@ -19,7 +19,7 @@ class LiteRtCpuThreadPolicyTest {
     }
 
     @Test fun dimensityCountsPerformanceCoresAndCapsAtSix() {
-        assertEquals(6, LiteRtCpuThreadPolicy.threadCount(layout(2000000, 2000000, 2800000, 2800000, 2800000, 2800000, 3200000, 3400000), 8))
+        assertEquals(4, LiteRtCpuThreadPolicy.threadCount(layout(2000000, 2000000, 2800000, 2800000, 2800000, 2800000, 3200000, 3400000), 8))
     }
 
     @Test fun genericFourPlusFourAndFallback() {

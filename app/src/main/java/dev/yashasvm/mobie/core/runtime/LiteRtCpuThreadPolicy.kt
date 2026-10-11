@@ -6,6 +6,7 @@ import kotlin.math.max
 
 /** Selects the faster CPU cluster without assuming a particular vendor's core numbering. */
 internal object LiteRtCpuThreadPolicy {
+    private const val AUTO_MAX_THREADS = 4
     private val frequencyFile = Regex("cpu(\\d+)/cpufreq/cpuinfo_max_freq$")
 
     /**
@@ -13,7 +14,9 @@ internal object LiteRtCpuThreadPolicy {
      *
      * An explicit [override] is bounded to 1..8. Otherwise the count is the number of performance
      * cores (cores at or above the largest frequency gap, which separates little cores), clamped to
-     * 2..6 and never above the online processor count. If frequencies are unreadable or show no
+     * 2..4 and never above the online processor count. Decode is bound by memory bandwidth, so
+     * threads past four mostly add heat and contention with the UI thread; users can still pick
+     * up to eight to measure their own device. If frequencies are unreadable or show no
      * clear cluster split, it falls back to a conservative 2 threads.
      */
     fun threadCount(
@@ -31,7 +34,7 @@ internal object LiteRtCpuThreadPolicy {
         // prime, big and middle cores all count as performance cores on 1+3+2+2 SoCs.
         val gap = levels.zipWithNext().maxByOrNull { (low, high) -> high.toDouble() / low }!!
         if (gap.second.toDouble() / gap.first < 1.15) return minOf(2, online)
-        return max(2, measured.count { it >= gap.second }).coerceAtMost(minOf(6, online))
+        return max(2, measured.count { it >= gap.second }).coerceAtMost(minOf(AUTO_MAX_THREADS, online))
     }
 
     fun parseMaxFrequencies(entries: Map<String, String>): Map<Int, Int> = buildMap {
