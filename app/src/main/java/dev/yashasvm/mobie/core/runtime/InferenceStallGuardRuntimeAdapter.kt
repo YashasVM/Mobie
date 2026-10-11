@@ -35,6 +35,8 @@ class InferenceStallGuardRuntimeAdapter(
     private val lifecycleTimeoutMs: Long = LIFECYCLE_TIMEOUT_MS,
 ) : RuntimeAdapter {
     override val format: ModelFormat = delegate.format
+    override val activeCompute: ActiveCompute? get() = if (recoveryRequired) null else delegate.activeCompute
+    override fun configureCompute(options: ComputeOptions) = delegate.configureCompute(options)
     override val supportsImageInput: Boolean get() = !recoveryRequired && delegate.supportsImageInput
     @Volatile private var recoveryRequired = false
 

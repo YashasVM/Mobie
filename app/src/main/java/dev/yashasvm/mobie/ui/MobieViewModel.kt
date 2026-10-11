@@ -15,6 +15,9 @@ import dev.yashasvm.mobie.core.device.BatteryCurrentMath
 import dev.yashasvm.mobie.core.device.RunTelemetry
 import dev.yashasvm.mobie.core.runtime.GenerationConfig
 import dev.yashasvm.mobie.core.runtime.InferenceEvent
+import dev.yashasvm.mobie.core.runtime.ActiveCompute
+import dev.yashasvm.mobie.core.runtime.ComputeBackend
+import dev.yashasvm.mobie.core.runtime.ComputeOptions
 import dev.yashasvm.mobie.core.runtime.InferenceStats
 import dev.yashasvm.mobie.core.runtime.RuntimeMessage
 import dev.yashasvm.mobie.core.runtime.RuntimeModelOwnership
@@ -78,6 +81,9 @@ data class MobieUiState(
     val telemetry: RunTelemetry = RunTelemetry(),
     val sampler: SamplerSettings = SamplerSettings(),
     val imageInputReady: Boolean = false,
+    val computeBackend: ComputeBackend = ComputeBackend.AUTO,
+    val cpuThreads: Int? = null,
+    val activeCompute: ActiveCompute? = null,
 )
 
 class MobieViewModel(private val container: AppContainer) : ViewModel() {
@@ -88,6 +94,8 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             welcomeSeen = container.tokenStore.hasSeenWelcome(),
             onboardingComplete = container.tokenStore.hasCompletedOnboarding(),
             sampler = container.samplerSettings.read(),
+            computeBackend = container.computeSettings.selectedBackend(),
+            cpuThreads = container.computeSettings.selectedCpuThreads(),
         ),
     )
     val state: StateFlow<MobieUiState> = mutableState.asStateFlow()
@@ -116,6 +124,16 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         container.tokenStore.markWelcomeSeen()
         mutableState.update { it.copy(welcomeSeen = true) }
         loadFeatured()
+    }
+
+    fun setComputeBackend(backend: ComputeBackend) {
+        container.computeSettings.setBackend(backend)
+        mutableState.update { it.copy(computeBackend = backend) }
+    }
+
+    fun setCpuThreads(threads: Int?) {
+        container.computeSettings.setCpuThreads(threads)
+        mutableState.update { it.copy(cpuThreads = threads) }
     }
 
     fun loadFeatured() = loadCatalog { container.catalog.featured() }
@@ -195,6 +213,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 sessionId = currentSessionId,
                 stats = null,
                 imageInputReady = false,
+                activeCompute = null,
                 error = null,
                 device = device,
             )
@@ -269,6 +288,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 chatting = true,
                 downloadedPath = path,
                 runtimeState = RuntimeState.LOADING,
+                activeCompute = null,
                 messages = history,
                 history = sessions,
                 sessionId = container.chatHistory.currentSessionId(model.id),
@@ -306,6 +326,13 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         }
         val result = runtimeLifecycle.withLock {
             if (!isCurrentRuntimeOperation(operation)) return
+            adapter.configureCompute(
+                ComputeOptions(
+                    backend = state.value.computeBackend,
+                    cpuThreads = state.value.cpuThreads,
+                    artifactIdentity = "${model.id}|${artifact.fileName}|${artifact.downloadUrl}|${artifact.sha256.orEmpty()}",
+                ),
+            )
             if (preferReset && runtimeOwnership.owns(model.id)) {
                 val reset = adapter.resetConversation(restored)
                 if (reset.isSuccess) {
@@ -326,7 +353,13 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         if (!isCurrentRuntimeOperation(operation)) return
         result.fold(
             onSuccess = {
-                mutableState.update { it.copy(runtimeState = RuntimeState.READY, imageInputReady = adapter.supportsImageInput) }
+                mutableState.update {
+                    it.copy(
+                        runtimeState = RuntimeState.READY,
+                        imageInputReady = adapter.supportsImageInput,
+                        activeCompute = adapter.activeCompute,
+                    )
+                }
             },
             onFailure = { error ->
                 mutableState.update {

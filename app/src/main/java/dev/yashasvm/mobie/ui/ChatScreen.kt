@@ -124,6 +124,7 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.composables.icons.lucide.R as LucideR
 import dev.yashasvm.mobie.core.model.AiModel
+import dev.yashasvm.mobie.core.runtime.ActiveCompute
 import dev.yashasvm.mobie.core.runtime.InferenceStats
 import dev.yashasvm.mobie.core.runtime.SamplerSettings
 import org.json.JSONObject
@@ -467,6 +468,18 @@ private fun RunDetails(state: MobieUiState, onSamplerChange: (SamplerSettings) -
         ?: live.liveSdkChunksPerSecond?.let { String.format(Locale.US, "%.1f SDK chunks/s", it) }
         ?: "Waiting for output"
     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerLow)) {
+        state.activeCompute?.let { selected ->
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                Text(
+                    "Running on ${selected.label}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                selected.fallbackReason?.let { reason ->
+                    Text(reason, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
         Row(
             Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(horizontal = 16.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -515,6 +528,7 @@ private fun runJson(state: MobieUiState): String {
     return JSONObject().apply {
         put("modelId", value(state.selected?.id))
         put("artifact", value(state.selectedArtifact?.fileName))
+        put("compute", value(state.activeCompute?.label))
         put("sampler", JSONObject().put("temperature", state.sampler.temperature).put("topK", state.sampler.topK)
             .put("topP", state.sampler.topP).put("seed", state.sampler.seed))
         put("firstSdkChunkMs", value(live.firstChunkMs))

@@ -7,6 +7,7 @@ import dev.yashasvm.mobie.core.device.DeviceRunSampler
 import dev.yashasvm.mobie.core.runtime.InferenceStallGuardRuntimeAdapter
 import dev.yashasvm.mobie.core.runtime.LiteRtLmRuntimeAdapter
 import dev.yashasvm.mobie.core.runtime.SamplerSettingsStore
+import dev.yashasvm.mobie.core.runtime.RuntimeComputeSettings
 import dev.yashasvm.mobie.core.runtime.RuntimeRegistry
 import dev.yashasvm.mobie.core.runtime.ThermalGuardRuntimeAdapter
 import dev.yashasvm.mobie.core.security.HuggingFaceTokenStore
@@ -32,7 +33,8 @@ class AppContainer(context: Context) {
     val deviceProfile = DeviceProfileProvider(appContext)
     val runSampler = DeviceRunSampler(appContext)
     val compatibility = CompatibilityResolver()
-    private val liteRtRuntime = LiteRtLmRuntimeAdapter(appContext)
+    val computeSettings = RuntimeComputeSettings(appContext)
+    private val liteRtRuntime = LiteRtLmRuntimeAdapter(appContext, computeSettings)
     private val stallGuardedLiteRtRuntime = InferenceStallGuardRuntimeAdapter(liteRtRuntime)
     val runtimes = RuntimeRegistry(
         setOf(

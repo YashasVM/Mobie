@@ -26,6 +26,7 @@ data class InferenceStats(
     val timeToFirstVisibleOutputMs: Long? = null,
     /** SDK streaming callbacks may contain more than one token. This measures the second nonempty chunk. */
     val timeToSecondChunkMs: Long? = null,
+    val compute: ActiveCompute? = null,
 )
 
 sealed interface InferenceEvent {
@@ -43,6 +44,10 @@ sealed interface InferenceEvent {
 
 interface RuntimeAdapter {
     val format: ModelFormat
+    /** Backend selected by the loaded engine, including a visible automatic fallback reason. */
+    val activeCompute: ActiveCompute? get() = null
+    /** Applied before load; artifactIdentity includes the repository, artifact and pinned source. */
+    fun configureCompute(options: ComputeOptions) = Unit
     /** True only while the loaded runtime has an initialized image encoder. */
     val supportsImageInput: Boolean get() = false
     suspend fun load(

@@ -39,6 +39,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -72,6 +73,7 @@ import dev.yashasvm.mobie.core.model.Compatibility
 import dev.yashasvm.mobie.core.model.CompatibilityResult
 import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.ModelArtifact
+import dev.yashasvm.mobie.core.runtime.ComputeBackend
 import dev.yashasvm.mobie.data.download.DownloadProgress
 import dev.yashasvm.mobie.data.download.isCancellable
 import dev.yashasvm.mobie.ui.theme.Mobie
@@ -90,6 +92,8 @@ internal fun ModelScreen(
     onRun: () -> Unit,
     onCancelDownload: () -> Unit = {},
     onBack: () -> Unit = {},
+    onBackendChange: (ComputeBackend) -> Unit = {},
+    onCpuThreadsChange: (Int?) -> Unit = {},
 ) {
     val model = state.selected ?: return
     val artifact = model.bestArtifact ?: return
@@ -115,6 +119,15 @@ internal fun ModelScreen(
                 StoragePanel(artifact, state.compatibility, state.device, Modifier.entrance(entrance, "storage", 3))
             }
             item(key = "artifact") { ArtifactPanel(artifact, model, Modifier.entrance(entrance, "artifact", 4)) }
+            item(key = "compute") {
+                ComputeSettingsPanel(
+                    backend = state.computeBackend,
+                    cpuThreads = state.cpuThreads,
+                    onBackendChange = onBackendChange,
+                    onCpuThreadsChange = onCpuThreadsChange,
+                    modifier = Modifier.entrance(entrance, "compute", 5),
+                )
+            }
         }
         ActionDock(
             state = state,
@@ -142,6 +155,48 @@ internal fun ModelScreen(
             },
             dismissButton = { TextButton(onClick = { confirmWarning = false }) { Text("Cancel") } },
         )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ComputeSettingsPanel(
+    backend: ComputeBackend,
+    cpuThreads: Int?,
+    onBackendChange: (ComputeBackend) -> Unit,
+    onCpuThreadsChange: (Int?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Panel(modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SectionLabel("Compute")
+            Text("Backend", style = MaterialTheme.typography.bodyMedium)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(ComputeBackend.AUTO, ComputeBackend.CPU, ComputeBackend.GPU).forEach { choice ->
+                    FilterChip(
+                        selected = backend == choice,
+                        onClick = { onBackendChange(choice) },
+                        label = { Text(choice.name.lowercase().replaceFirstChar(Char::uppercase)) },
+                    )
+                }
+            }
+            Text("CPU threads", style = MaterialTheme.typography.bodyMedium)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = cpuThreads == null, onClick = { onCpuThreadsChange(null) }, label = { Text("Auto") })
+                (1..8).forEach { count ->
+                    FilterChip(
+                        selected = cpuThreads == count,
+                        onClick = { onCpuThreadsChange(count) },
+                        label = { Text(count.toString()) },
+                    )
+                }
+            }
+            Text(
+                "First GPU load can be slow. Auto tries GPU on supported phones and uses CPU if loading fails. Changes apply on the next model load.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
