@@ -243,6 +243,32 @@ class InferenceStallGuardRuntimeAdapterTest {
         assertTrue(error.message.contains("without a completion signal", ignoreCase = true))
     }
 
+    @Test
+    fun deliversBufferedTokenBurstInOrderWithoutCancelling() = runBlocking {
+        val tokenCount = 2_000
+        val delegate = RecordingRuntimeAdapter(
+            generation = flow {
+                // Emitted without suspension so the guard finds the next event already buffered.
+                repeat(tokenCount) { emit(InferenceEvent.Token("t$it")) }
+                emit(InferenceEvent.Complete)
+            },
+        )
+        val adapter = InferenceStallGuardRuntimeAdapter(
+            delegate = delegate,
+            firstEventTimeoutMs = 5_000L,
+            activeIdleTimeoutMs = 5_000L,
+            cancellationTimeoutMs = 100L,
+        )
+
+        val events = adapter.generate("prompt").toList()
+
+        assertFalse(delegate.cancelCalled)
+        assertEquals(tokenCount + 1, events.size)
+        assertEquals(InferenceEvent.Token("t0"), events.first())
+        assertEquals(InferenceEvent.Token("t${tokenCount - 1}"), events[tokenCount - 1])
+        assertEquals(InferenceEvent.Complete, events.last())
+    }
+
     private class RecordingRuntimeAdapter(
         private val generation: Flow<InferenceEvent>,
         private val cancelBlock: (() -> Unit)? = null,

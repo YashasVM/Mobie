@@ -93,8 +93,16 @@ class InferenceStallGuardRuntimeAdapter(
         var boundedCancellationRequested = false
         try {
             while (true) {
-                val timeoutMs = if (sawProgress) activeIdleTimeoutMs else firstEventTimeoutMs
-                val result = withTimeoutOrNull(timeoutMs) { events.receiveCatching() }
+                // Streaming usually has an event already buffered. Taking it without suspending avoids
+                // allocating a timeout coroutine for every token; the timed wait is only needed when the
+                // producer is actually behind.
+                val immediate = events.tryReceive()
+                val result = if (immediate.isSuccess || immediate.isClosed) {
+                    immediate
+                } else {
+                    val timeoutMs = if (sawProgress) activeIdleTimeoutMs else firstEventTimeoutMs
+                    withTimeoutOrNull(timeoutMs) { events.receiveCatching() }
+                }
                 if (result == null) {
                     recoveryRequired = true
                     requestBoundedCancellation()
