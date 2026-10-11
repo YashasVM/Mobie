@@ -80,6 +80,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -127,6 +128,7 @@ import dev.yashasvm.mobie.core.model.AiModel
 import dev.yashasvm.mobie.core.runtime.ActiveCompute
 import dev.yashasvm.mobie.core.runtime.InferenceStats
 import dev.yashasvm.mobie.core.runtime.SamplerSettings
+import dev.yashasvm.mobie.core.device.RunTelemetry
 import org.json.JSONObject
 import dev.yashasvm.mobie.ui.theme.Mobie
 import java.io.File
@@ -238,7 +240,16 @@ internal fun ChatScreen(
             enter = fadeIn(tween(MotionMedium)) + expandVertically(tween(MotionMedium, easing = EmphasizedEase)),
             exit = fadeOut(tween(MotionShort)) + shrinkVertically(tween(MotionShort)),
         ) {
-            RunDetails(state, onSamplerChange)
+            // Only the run telemetry and sampler fields are passed, so token-only updates skip this panel.
+            val latestState by rememberUpdatedState(state)
+            RunDetails(
+                activeCompute = state.activeCompute,
+                stats = state.stats,
+                live = state.telemetry,
+                sampler = state.sampler,
+                runJson = { runJson(latestState) },
+                onSamplerChange = onSamplerChange,
+            )
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
@@ -454,22 +465,27 @@ private fun ChatHeader(
 
 /** Live callbacks are SDK chunks; final token rates come from LiteRT benchmark data. */
 @Composable
-private fun RunDetails(state: MobieUiState, onSamplerChange: (SamplerSettings) -> String?) {
+private fun RunDetails(
+    activeCompute: ActiveCompute?,
+    stats: InferenceStats?,
+    live: RunTelemetry,
+    sampler: SamplerSettings,
+    runJson: () -> String,
+    onSamplerChange: (SamplerSettings) -> String?,
+) {
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     var expanded by rememberSaveable { mutableStateOf(false) }
-    var temperature by remember(state.sampler) { mutableStateOf(state.sampler.temperature.toString()) }
-    var topK by remember(state.sampler) { mutableStateOf(state.sampler.topK.toString()) }
-    var topP by remember(state.sampler) { mutableStateOf(state.sampler.topP.toString()) }
-    var seed by remember(state.sampler) { mutableStateOf(state.sampler.seed.toString()) }
+    var temperature by remember(sampler) { mutableStateOf(sampler.temperature.toString()) }
+    var topK by remember(sampler) { mutableStateOf(sampler.topK.toString()) }
+    var topP by remember(sampler) { mutableStateOf(sampler.topP.toString()) }
+    var seed by remember(sampler) { mutableStateOf(sampler.seed.toString()) }
     var settingsError by remember { mutableStateOf<String?>(null) }
-    val stats = state.stats
-    val live = state.telemetry
     val decode = stats?.tokensPerSecond?.takeIf { it > 0 }?.let { String.format(Locale.US, "%.1f tok/s", it) }
         ?: live.liveSdkChunksPerSecond?.let { String.format(Locale.US, "%.1f SDK chunks/s", it) }
         ?: "Waiting for output"
     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerLow)) {
-        state.activeCompute?.let { selected ->
+        activeCompute?.let { selected ->
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
                 Text(
                     "Running on ${selected.label}",
@@ -500,7 +516,7 @@ private fun RunDetails(state: MobieUiState, onSamplerChange: (SamplerSettings) -
                 Text("Estimated whole-device energy/token: ${live.estimatedEnergyPerTokenMilliWh?.let { String.format(Locale.US, "%.5f mWh", it) } ?: "—"}")
                 Text("Live speed uses SDK chunks; final token counts use LiteRT.", style = MaterialTheme.typography.labelSmall)
                 TextButton(onClick = {
-                    scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Run JSON", runJson(state)))) }
+                    scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Run JSON", runJson()))) }
                 }, enabled = stats != null || live.sdkChunks > 0) { Text("Copy run as JSON") }
                 Text("Sampling", style = MaterialTheme.typography.labelMedium)
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

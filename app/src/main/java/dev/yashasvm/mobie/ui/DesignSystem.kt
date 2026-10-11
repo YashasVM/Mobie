@@ -391,14 +391,20 @@ internal fun Modifier.shimmer(): Modifier = composed {
     val base = Mobie.signals.track
     val highlight = MaterialTheme.colorScheme.onSurface.copy(alpha = .07f)
     val transition = rememberInfiniteTransition(label = "shimmer")
-    val x by transition.animateFloat(-1f, 2f, infiniteRepeatable(tween(1300, easing = LinearEasing)), label = "shimmer x")
+    // Read the animated value in the draw phase only; reading it during composition would
+    // recompose the skeleton on every animation frame.
+    val x = transition.animateFloat(-1f, 2f, infiniteRepeatable(tween(1300, easing = LinearEasing)), label = "shimmer x")
     drawWithCache {
-        val brush = Brush.linearGradient(
-            listOf(base, highlight, base),
-            start = Offset(size.width * x - size.width / 2, 0f),
-            end = Offset(size.width * x + size.width / 2, size.height),
-        )
-        onDrawBehind { drawRect(base); drawRect(brush) }
+        onDrawBehind {
+            val offset = x.value
+            val brush = Brush.linearGradient(
+                listOf(base, highlight, base),
+                start = Offset(size.width * offset - size.width / 2, 0f),
+                end = Offset(size.width * offset + size.width / 2, size.height),
+            )
+            drawRect(base)
+            drawRect(brush)
+        }
     }
 }
 
