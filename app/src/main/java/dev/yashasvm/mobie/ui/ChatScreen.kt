@@ -122,6 +122,7 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.composables.icons.lucide.R as LucideR
 import dev.yashasvm.mobie.core.model.AiModel
+import dev.yashasvm.mobie.core.runtime.ActiveCompute
 import dev.yashasvm.mobie.core.runtime.InferenceStats
 import dev.yashasvm.mobie.ui.theme.Mobie
 import java.io.File
@@ -222,7 +223,7 @@ internal fun ChatScreen(
             enter = fadeIn(tween(MotionMedium)) + expandVertically(tween(MotionMedium, easing = EmphasizedEase)),
             exit = fadeOut(tween(MotionShort)) + shrinkVertically(tween(MotionShort)),
         ) {
-            TelemetryStrip(state.stats)
+            TelemetryStrip(state.stats, state.activeCompute)
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
@@ -431,7 +432,7 @@ private fun ChatHeader(
 
 /** Last measured numbers. Unmeasured values stay as a dash; nothing is estimated here. */
 @Composable
-private fun TelemetryStrip(stats: InferenceStats?) {
+private fun TelemetryStrip(stats: InferenceStats?, compute: ActiveCompute?) {
     val decode = stats?.tokensPerSecond?.takeIf { it > 0 }?.let { String.format(Locale.US, "%.1f", it) } ?: "—"
     val prefill = stats?.prefillTokensPerSecond?.takeIf { it > 0 }?.let { String.format(Locale.US, "%.0f", it) }
     val ttft = formatMillis(stats?.timeToFirstTokenMs ?: 0)
@@ -446,6 +447,18 @@ private fun TelemetryStrip(stats: InferenceStats?) {
         }
     }
     Column(Modifier.fillMaxWidth()) {
+        compute?.let { selected ->
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                Text(
+                    "Running on ${selected.label}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                selected.fallbackReason?.let { reason ->
+                    Text(reason, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
         Row(
             Modifier
                 .fillMaxWidth()
