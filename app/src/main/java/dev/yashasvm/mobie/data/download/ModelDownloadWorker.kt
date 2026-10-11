@@ -187,7 +187,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                 RandomAccessFile(partial, "rw").use { output ->
                     output.seek(startAt)
                     body.byteStream().use { input ->
-                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        val buffer = ByteArray(TRANSFER_BUFFER_SIZE)
                         var current = startAt
                         var lastProgressAt = 0L
                         val startedAt = SystemClock.elapsedRealtime()
@@ -417,5 +417,8 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
         private const val READ_TIMEOUT_SECONDS = 120L
         private const val MAX_ATTEMPTS = 4
         private const val PROGRESS_INTERVAL_MS = 250L
+
+        // Larger than the 8 KB default: fewer read/write calls across multi-GB transfers.
+        private const val TRANSFER_BUFFER_SIZE = 64 * 1024
     }
 }
