@@ -27,6 +27,7 @@ import dev.yashasvm.mobie.data.download.DownloadProgress
 import dev.yashasvm.mobie.data.download.InstalledModelEntry
 import dev.yashasvm.mobie.data.history.ChatHistorySession
 import dev.yashasvm.mobie.data.history.HistoryMessage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
@@ -90,7 +91,8 @@ data class MobieUiState(
 class MobieViewModel(private val container: AppContainer) : ViewModel() {
     private val mutableState = MutableStateFlow(
         MobieUiState(
-            device = container.deviceProfile.current(),
+            // Device facts are read off the main thread in init; the UI already tolerates a null device.
+            device = null,
             tokenConfigured = container.tokenStore.read() != null,
             welcomeSeen = container.tokenStore.hasSeenWelcome(),
             onboardingComplete = container.tokenStore.hasCompletedOnboarding(),
@@ -106,9 +108,15 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     private var telemetryJob: Job? = null
     private val runtimeLifecycle = Mutex()
     private val runtimeOperation = AtomicLong(0L)
+    private val selectionRevision = AtomicLong(0L)
     private val runtimeOwnership = RuntimeModelOwnership()
 
     init {
+        viewModelScope.launch {
+            val device = readDeviceProfile()
+            mutableState.update { it.copy(device = it.device ?: device) }
+        }
+        container.runtimes.all().forEach { it.configureSampler(mutableState.value.sampler) }
         refreshInstalled()
         if (mutableState.value.welcomeSeen || mutableState.value.onboardingComplete) loadFeatured()
     }
@@ -125,6 +133,15 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         container.tokenStore.markWelcomeSeen()
         mutableState.update { it.copy(welcomeSeen = true) }
         loadFeatured()
+    }
+
+    /** Device facts read /proc and binder, so they run on IO rather than the main thread. */
+    private suspend fun readDeviceProfile(): DeviceProfile = withContext(Dispatchers.IO) { container.deviceProfile.current() }
+
+    /** Cancels generation or a load together with its telemetry sampler, so neither outlives the other. */
+    private fun cancelInference() {
+        inferenceJob?.cancel()
+        telemetryJob?.cancel()
     }
 
     /** Auto falls back to CPU when GPU does not fit, so only an explicit choice is admitted as that backend. */
@@ -173,7 +190,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             request().fold(
                 onSuccess = { models ->
                     if (expectedQuery == null || state.value.query == expectedQuery) {
-                        val device = container.deviceProfile.current()
+                        val device = readDeviceProfile()
                         val compatible = models
                             .map { model -> model.preferArtifact(artifactForDevice(model, device)) }
                             .sortedWith(
@@ -200,12 +217,27 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    fun select(model: AiModel?) {
+    fun select(model: AiModel?) = beginSelection(model)
+
+    /**
+     * Stops the previous model's work now, then applies the new selection once the device profile
+     * is read off the main thread. A newer selection made in the meantime supersedes this one.
+     */
+    private fun beginSelection(model: AiModel?, afterSelect: (() -> Unit)? = null) {
         downloadObserverJob?.cancel()
-        inferenceJob?.cancel()
+        cancelInference()
         val operation = nextRuntimeOperation()
         viewModelScope.launch { unloadRuntime(operation) }
-        val device = container.deviceProfile.current()
+        val revision = selectionRevision.incrementAndGet()
+        viewModelScope.launch {
+            val device = readDeviceProfile()
+            if (selectionRevision.get() != revision) return@launch
+            applySelection(model, device)
+            afterSelect?.invoke()
+        }
+    }
+
+    private fun applySelection(model: AiModel?, device: DeviceProfile) {
         val artifact = model?.let { artifactForDevice(it, device) }
         val presentedModel = model?.preferArtifact(artifact)
         val sessions = presentedModel?.let { container.chatHistory.sessions(it.id) }.orEmpty()
@@ -251,21 +283,23 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val current = state.value
         val model = current.selected ?: return
         val artifact = current.selectedArtifact ?: return
-        val device = container.deviceProfile.current()
-        val compatibility = container.compatibility.resolve(artifact, device, model.supportsVision, admissionBackend())
-        mutableState.update { it.copy(device = device, compatibility = compatibility, error = null) }
-        if (model.gated && !state.value.tokenConfigured) {
-            mutableState.update { it.copy(error = "This gated model requires a Hugging Face token.") }
-            return
-        }
-        if (
-            compatibility.status !in setOf(Compatibility.COMPATIBLE, Compatibility.WARNING) ||
-            (compatibility.status == Compatibility.WARNING && !allowWarning)
-        ) return
+        viewModelScope.launch {
+            val device = readDeviceProfile()
+            val compatibility = container.compatibility.resolve(artifact, device, model.supportsVision, admissionBackend())
+            mutableState.update { it.copy(device = device, compatibility = compatibility, error = null) }
+            if (model.gated && !state.value.tokenConfigured) {
+                mutableState.update { it.copy(error = "This gated model requires a Hugging Face token.") }
+                return@launch
+            }
+            if (
+                compatibility.status !in setOf(Compatibility.COMPATIBLE, Compatibility.WARNING) ||
+                (compatibility.status == Compatibility.WARNING && !allowWarning)
+            ) return@launch
 
-        downloadObserverJob?.cancel()
-        container.downloads.enqueue(model, artifact)
-        observeDownload(model, artifact)
+            downloadObserverJob?.cancel()
+            container.downloads.enqueue(model, artifact)
+            observeDownload(model, artifact)
+        }
     }
 
     fun cancelDownload() {
@@ -278,20 +312,22 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     fun runInstalled(allowReclaim: Boolean = false) {
         val path = state.value.downloadedPath
         if (path != null && File(path).isFile) {
-            val current = state.value
-            val device = container.deviceProfile.current()
-            val compatibility = container.compatibility.resolve(current.selectedArtifact, device,
-                current.selected?.supportsVision == true, admissionBackend())
-            mutableState.update { it.copy(device = device, compatibility = compatibility) }
-            if (compatibility.status == Compatibility.INCOMPATIBLE) {
-                mutableState.update { it.copy(error = compatibility.reason) }
-                return
+            viewModelScope.launch {
+                val current = state.value
+                val device = readDeviceProfile()
+                val compatibility = container.compatibility.resolve(current.selectedArtifact, device,
+                    current.selected?.supportsVision == true, admissionBackend())
+                mutableState.update { it.copy(device = device, compatibility = compatibility) }
+                if (compatibility.status == Compatibility.INCOMPATIBLE) {
+                    mutableState.update { it.copy(error = compatibility.reason) }
+                    return@launch
+                }
+                if (compatibility.memoryTier == MemoryAdmissionTier.FITS_AFTER_RECLAIM && !allowReclaim) {
+                    mutableState.update { it.copy(error = compatibility.reason) }
+                    return@launch
+                }
+                openChat(path, allowReclaim)
             }
-            if (compatibility.memoryTier == MemoryAdmissionTier.FITS_AFTER_RECLAIM && !allowReclaim) {
-                mutableState.update { it.copy(error = compatibility.reason) }
-                return
-            }
-            openChat(path, allowReclaim)
         } else {
             mutableState.update {
                 it.copy(
@@ -322,7 +358,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 error = null,
             )
         }
-        inferenceJob?.cancel()
+        cancelInference()
         inferenceJob = viewModelScope.launch {
             loadRuntimeConversation(model, artifact, path, history, preferReset = false,
                 operation = operation, allowReclaim = allowReclaim)
@@ -417,8 +453,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 error = null,
             )
         }
-        inferenceJob?.cancel()
-        telemetryJob?.cancel()
+        cancelInference()
         telemetryJob = startTelemetrySampling()
         val operation = runtimeOperation.get()
         val sessionId = current.sessionId
@@ -536,6 +571,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val error = runCatching { settings.validated() }.exceptionOrNull()?.message
         if (error != null) return error
         container.samplerSettings.write(settings)
+        container.runtimes.all().forEach { it.configureSampler(settings) }
         mutableState.update { it.copy(sampler = settings) }
         return null
     }
@@ -571,7 +607,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val artifact = current.selectedArtifact ?: return
         val path = current.downloadedPath ?: return
         val canReuseLoadedModel = current.runtimeState == RuntimeState.READY
-        inferenceJob?.cancel()
+        cancelInference()
         val operation = nextRuntimeOperation()
         val sessionId = container.chatHistory.startNewSession(model.id)
         mutableState.update {
@@ -590,24 +626,40 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun startInstalledChat(entry: InstalledModelEntry) {
-        select(entry.model)
-        container.chatHistory.startNewSession(entry.model.id)
-        openChat(entry.localPath)
+        beginSelection(entry.model) {
+            container.chatHistory.startNewSession(entry.model.id)
+            openChat(entry.localPath)
+        }
     }
 
     fun deleteInstalled(entry: InstalledModelEntry) {
         val deletingSelectedModel = state.value.selected?.id == entry.model.id
-        if (deletingSelectedModel) inferenceJob?.cancel()
+        if (deletingSelectedModel) cancelInference()
         val operation = if (deletingSelectedModel) nextRuntimeOperation() else null
         viewModelScope.launch {
-            val deleted = runtimeLifecycle.withLock {
-                if (operation != null && !isCurrentRuntimeOperation(operation)) return@withLock false
-                if (deletingSelectedModel || runtimeOwnership.owns(entry.model.id)) {
-                    container.runtimes.all().forEach { it.unload() }
-                    runtimeOwnership.clear()
+            val deleted = try {
+                runtimeLifecycle.withLock {
+                    if (operation != null && !isCurrentRuntimeOperation(operation)) return@withLock false
+                    if (deletingSelectedModel || runtimeOwnership.owns(entry.model.id)) {
+                        container.runtimes.all().forEach { it.unload() }
+                        runtimeOwnership.clear()
+                    }
+                    if (operation != null && !isCurrentRuntimeOperation(operation)) return@withLock false
+                    container.downloads.deleteInstalled(entry.model)
                 }
-                if (operation != null && !isCurrentRuntimeOperation(operation)) return@withLock false
-                container.downloads.deleteInstalled(entry.model)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                telemetryJob?.cancel()
+                if (operation == null || isCurrentRuntimeOperation(operation)) {
+                    mutableState.update {
+                        it.copy(
+                            runtimeState = RuntimeState.ERROR,
+                            error = error.message ?: "${entry.model.title} could not be deleted.",
+                        )
+                    }
+                }
+                return@launch
             }
             if (deleted) {
                 mutableState.update { current ->
@@ -623,13 +675,21 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                     )
                 }
             } else if (operation == null || isCurrentRuntimeOperation(operation)) {
+                if (deletingSelectedModel) {
+                    // The stream was already cancelled, so GENERATING would never clear on its own.
+                    telemetryJob?.cancel()
+                    val runtimeLoaded = container.runtimes.all().any { it.activeCompute != null }
+                    mutableState.update {
+                        it.copy(runtimeState = if (runtimeLoaded) RuntimeState.READY else RuntimeState.IDLE)
+                    }
+                }
                 mutableState.update { it.copy(error = "${entry.model.title} could not be deleted.") }
             }
         }
     }
 
     fun leaveChat() {
-        inferenceJob?.cancel()
+        cancelInference()
         val operation = nextRuntimeOperation()
         viewModelScope.launch { unloadRuntime(operation) }
         mutableState.update {
@@ -638,10 +698,22 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     private suspend fun unloadRuntime(operation: Long) {
-        runtimeLifecycle.withLock {
-            if (!isCurrentRuntimeOperation(operation)) return
-            container.runtimes.all().forEach { it.unload() }
-            runtimeOwnership.clear()
+        try {
+            runtimeLifecycle.withLock {
+                if (!isCurrentRuntimeOperation(operation)) return
+                container.runtimes.all().forEach { it.unload() }
+                runtimeOwnership.clear()
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            // The stall guard fails closed after an unload timeout, so surface the state instead of crashing.
+            mutableState.update {
+                it.copy(
+                    runtimeState = RuntimeState.ERROR,
+                    error = error.message ?: "The model could not be unloaded. Restart Mobie before loading another model.",
+                )
+            }
         }
     }
 
@@ -653,7 +725,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val canReuseLoadedModel = current.runtimeState == RuntimeState.READY
         container.chatHistory.activate(model.id, sessionId)
         val history = readHistory(model)
-        inferenceJob?.cancel()
+        cancelInference()
         val operation = nextRuntimeOperation()
         mutableState.update {
             it.copy(

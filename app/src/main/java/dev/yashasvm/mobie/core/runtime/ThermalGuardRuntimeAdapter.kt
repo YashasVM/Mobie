@@ -18,6 +18,7 @@ internal class ThermalGuardRuntimeAdapter(
     override val format: ModelFormat = delegate.format
     override val activeCompute: ActiveCompute? get() = delegate.activeCompute
     override fun configureCompute(options: ComputeOptions) = delegate.configureCompute(options)
+    override fun configureSampler(sampler: SamplerSettings) = delegate.configureSampler(sampler)
     override val supportsImageInput: Boolean get() = delegate.supportsImageInput
 
     override suspend fun load(

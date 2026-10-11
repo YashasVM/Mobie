@@ -2,6 +2,7 @@ package dev.yashasvm.mobie.core.runtime
 
 import kotlinx.coroutines.CancellationException
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -9,10 +10,34 @@ import org.junit.Assert.fail
 import org.junit.Test
 
 class ComputeBackendPolicyTest {
-    @Test fun autoTriesGpuThenCpuAndReusesSuccess() {
+    @Test fun autoTriesGpuThenCpuAndKeepsGpuFirst() {
         assertEquals(listOf(ComputeBackend.GPU, ComputeBackend.CPU), ComputeBackendPolicy.attempts(ComputeBackend.AUTO, true, null))
-        assertEquals(listOf(ComputeBackend.CPU, ComputeBackend.GPU), ComputeBackendPolicy.attempts(ComputeBackend.AUTO, true, ComputeBackend.CPU))
+        assertEquals(listOf(ComputeBackend.GPU, ComputeBackend.CPU), ComputeBackendPolicy.attempts(ComputeBackend.AUTO, true, ComputeBackend.GPU))
         assertEquals(listOf(ComputeBackend.CPU), ComputeBackendPolicy.attempts(ComputeBackend.AUTO, false, ComputeBackend.GPU))
+    }
+
+    @Test fun onlyAutoGpuFirstWinsAreRemembered() {
+        assertTrue(ComputeBackendPolicy.shouldRememberSuccess(ComputeBackend.AUTO, listOf(ComputeBackend.GPU, ComputeBackend.CPU), ComputeBackend.GPU))
+        // A CPU fallback after GPU failed or was skipped for memory is not a preference.
+        assertFalse(ComputeBackendPolicy.shouldRememberSuccess(ComputeBackend.AUTO, listOf(ComputeBackend.GPU, ComputeBackend.CPU), ComputeBackend.CPU))
+        assertFalse(ComputeBackendPolicy.shouldRememberSuccess(ComputeBackend.AUTO, listOf(ComputeBackend.CPU), ComputeBackend.CPU))
+        // Explicit choices never change what Auto remembers.
+        assertFalse(ComputeBackendPolicy.shouldRememberSuccess(ComputeBackend.GPU, listOf(ComputeBackend.GPU), ComputeBackend.GPU))
+        assertFalse(ComputeBackendPolicy.shouldRememberSuccess(ComputeBackend.CPU, listOf(ComputeBackend.CPU), ComputeBackend.CPU))
+    }
+
+    @Test fun legacyCpuMemoryIsIgnoredAndGpuIsKept() {
+        val entries = mutableMapOf<String, String>()
+        val memory = SuccessfulBackendMemory(object : BackendKeyValueStore {
+            override fun get(key: String) = entries[key]
+            override fun put(key: String, value: String) { entries[key] = value }
+            override fun remove(key: String) { entries.remove(key) }
+        })
+        memory.remember("repo/artifact@revision-1", "device-a", ComputeBackend.GPU)
+        assertEquals(ComputeBackend.GPU, memory.get("repo/artifact@revision-1", "device-a"))
+        // An older build could persist a CPU fallback as preferred; it must not pin Auto to CPU.
+        for (key in entries.keys.toList()) entries[key] = ComputeBackend.CPU.name
+        assertNull(memory.get("repo/artifact@revision-1", "device-a"))
     }
 
     @Test fun explicitBackendsNeverSilentlyFallback() {

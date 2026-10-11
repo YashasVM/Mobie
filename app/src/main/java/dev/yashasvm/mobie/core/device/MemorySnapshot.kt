@@ -1,7 +1,7 @@
 package dev.yashasvm.mobie.core.device
 
 import android.app.ActivityManager
-import android.os.Process
+import android.os.Debug
 import java.io.File
 import java.io.IOException
 import kotlin.math.max
@@ -99,8 +99,8 @@ class MemorySnapshotReader(private val manager: ActivityManager) {
         }
         val total = proc?.totalBytes ?: android.totalMem
         val now = proc?.availableBytes ?: android.availMem
-        val pss = manager.getProcessMemoryInfo(intArrayOf(Process.myPid())).firstOrNull()
-            ?.totalPss?.toLong()?.times(1024) ?: 0L
+        // Debug.getPss() is this process's live PSS in kB; ActivityManager's per-process value is rate-limited.
+        val pss = Debug.getPss() * 1024L
         return MemorySnapshot(total, now,
             ReclaimableMemory.afterReclaim(proc, total, now, android.threshold, android.lowMemory),
             proc?.swapTotalBytes ?: 0L, proc?.swapFreeBytes ?: 0L, pss,

@@ -2,7 +2,10 @@ package dev.yashasvm.mobie.core.runtime
 
 /** Compute target requested for a LiteRT-LM engine. */
 enum class ComputeBackend {
-    /** Runtime chooses; memory admission assumes the most expensive (private-copy) case. */
+    /**
+     * Runtime chooses. Memory admission gates Auto on CPU, the cheapest backend that always ends
+     * the attempt list, and admits GPU separately before each GPU attempt.
+     */
     AUTO,
     CPU,
     GPU,

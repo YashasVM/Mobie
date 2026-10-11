@@ -37,6 +37,7 @@ class InferenceStallGuardRuntimeAdapter(
     override val format: ModelFormat = delegate.format
     override val activeCompute: ActiveCompute? get() = if (recoveryRequired) null else delegate.activeCompute
     override fun configureCompute(options: ComputeOptions) = delegate.configureCompute(options)
+    override fun configureSampler(sampler: SamplerSettings) = delegate.configureSampler(sampler)
     override val supportsImageInput: Boolean get() = !recoveryRequired && delegate.supportsImageInput
     @Volatile private var recoveryRequired = false
 

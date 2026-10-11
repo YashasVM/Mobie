@@ -4,6 +4,7 @@ import android.app.ActivityManager
 import dev.yashasvm.mobie.core.device.MemorySnapshotReader
 import android.content.Context
 import android.os.Build
+import android.os.Debug
 import android.os.PowerManager
 import android.os.SystemClock
 import com.google.ai.edge.litertlm.Backend
@@ -64,6 +65,7 @@ class LiteRtLmRuntimeAdapter(
     override val supportsImageInput: Boolean get() = visionReady
     override val activeCompute: ActiveCompute? get() = selectedCompute
     override fun configureCompute(options: ComputeOptions) { computeOptions = options }
+    override fun configureSampler(sampler: SamplerSettings) { configuredSampler = sampler }
     private val appContext = context.applicationContext
     private val lifecycle = Mutex()
     private val generation = Mutex()
@@ -80,6 +82,8 @@ class LiteRtLmRuntimeAdapter(
     private var conversationDirty = false
     private var nativeConversationHasImage = false
     private var activeSampler = SamplerSettings()
+    /** The user's stored sampler, so the first conversation after load does not need a rebuild. */
+    @Volatile private var configuredSampler = SamplerSettings()
     @Volatile private var cancelRequested = false
 
     override suspend fun load(
@@ -117,17 +121,19 @@ class LiteRtLmRuntimeAdapter(
                             vision = vision,
                             contextWindowTokens = configuredContextWindowTokens,
                             options = options,
+                            allowReclaim = allowReclaim,
                         )
                         try {
                             contextWindowTokens = configuredContextWindowTokens
                             val restored = ConversationHistoryPolicy.select(history, contextWindowTokens)
+                            val sampler = configuredSampler
                             engine = loadedEngine.engine
                             visionReady = loadedEngine.visionReady
                             selectedCompute = loadedEngine.compute
                             conversation = loadedEngine.engine.createConversation(
-                                conversationConfig(restored, sampler = SamplerSettings()),
+                                conversationConfig(restored, sampler = sampler),
                             )
-                            activeSampler = SamplerSettings()
+                            activeSampler = sampler
                             committedHistory = restored
                             nativeConversationHasImage = hasRestorableHistoryImage(restored)
                             conversationDirty = false
@@ -138,7 +144,7 @@ class LiteRtLmRuntimeAdapter(
                                 modelFile,
                                 configuredContextWindowTokens,
                             )
-                            if (options.artifactIdentity.isNotBlank()) {
+                            if (options.artifactIdentity.isNotBlank() && loadedEngine.rememberPreferred) {
                                 computeSettings.memory.remember(options.artifactIdentity, Build.FINGERPRINT, loadedEngine.compute.backend)
                             }
                             Unit
@@ -475,16 +481,17 @@ class LiteRtLmRuntimeAdapter(
         vision: Boolean,
         contextWindowTokens: Int,
         options: ComputeOptions,
+        allowReclaim: Boolean,
     ): LoadedEngine {
         val gpuPlausible = LiteRtVisionBackendPolicy.shouldAttemptGpu(
             Build.SUPPORTED_ABIS, Build.FINGERPRINT, Build.MODEL, Build.HARDWARE, Build.PRODUCT,
         )
         val remembered = options.artifactIdentity.takeIf { it.isNotBlank() }
             ?.let { computeSettings.memory.get(it, Build.FINGERPRINT) }
-        val admitted = admitAttemptsForMemory(
-            options.backend,
-            ComputeBackendPolicy.attempts(options.backend, gpuPlausible, remembered),
-        ) { backend -> memoryBlockReason(modelPath, contextWindowTokens, allowReclaim = false, vision, backend) }
+        val attempts = ComputeBackendPolicy.attempts(options.backend, gpuPlausible, remembered)
+        val admitted = admitAttemptsForMemory(options.backend, attempts) { backend ->
+            memoryBlockReason(modelPath, contextWindowTokens, allowReclaim, vision, backend)
+        }
         val result = loadWithBackendFallback(
             attempts = admitted.attempts,
             load = { backend ->
@@ -510,6 +517,7 @@ class LiteRtLmRuntimeAdapter(
                 fallbackReason = listOfNotNull(admitted.skippedReason, result.fallbackReason)
                     .joinToString(" ").ifEmpty { null },
             ),
+            rememberPreferred = ComputeBackendPolicy.shouldRememberSuccess(options.backend, admitted.attempts, result.backend),
         )
     }
 
@@ -749,11 +757,8 @@ class LiteRtLmRuntimeAdapter(
         )
     }
 
-    private fun currentAppRamBytes(): Long {
-        val manager = appContext.getSystemService(ActivityManager::class.java)
-        return manager.getProcessMemoryInfo(intArrayOf(android.os.Process.myPid()))
-            .firstOrNull()?.totalPss?.toLong()?.times(1024L) ?: 0L
-    }
+    /** Debug.getPss() reads this process directly; ActivityManager's per-process PSS is rate-limited and can be stale. */
+    private fun currentAppRamBytes(): Long = Debug.getPss() * 1024L
 
     private fun rethrowCancellation(error: Throwable) {
         if (error is CancellationException) throw error
@@ -763,6 +768,8 @@ class LiteRtLmRuntimeAdapter(
         val engine: Engine,
         val visionReady: Boolean,
         val compute: ActiveCompute = ActiveCompute(ComputeBackend.CPU),
+        /** Only a first-choice GPU success under Auto is remembered; a fallback is not a preference. */
+        val rememberPreferred: Boolean = false,
     )
 
     private companion object {

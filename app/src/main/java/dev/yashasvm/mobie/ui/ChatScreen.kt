@@ -178,7 +178,7 @@ internal fun ChatScreen(
                 if (copiedPath == null) {
                     imageError = IMAGE_IMPORT_ERROR
                 } else {
-                    imagePath?.let { File(it).delete() }
+                    imagePath?.let { deleteImageFile(it) }
                     imagePath = copiedPath
                 }
             } catch (error: CancellationException) {
@@ -205,7 +205,7 @@ internal fun ChatScreen(
     // here so submit never sends a stale attachment that the ViewModel would reject.
     LaunchedEffect(imageAllowed) {
         if (shouldDropPendingImage(imagePath, imageAllowed)) {
-            imagePath?.let { File(it).delete() }
+            imagePath?.let { deleteImageFile(it) }
             imagePath = null
             imageError = PHOTO_REMOVED_MESSAGE
         }
@@ -297,8 +297,9 @@ internal fun ChatScreen(
             focusRequester = inputFocus,
             onAttach = { imagePicker.launch("image/*") },
             onRemoveImage = {
-                imagePath?.let { File(it).delete() }
+                val stale = imagePath
                 imagePath = null
+                scope.launch { stale?.let { deleteImageFile(it) } }
             },
             onSubmit = submit,
             onStop = onStop,
@@ -1511,6 +1512,11 @@ private const val MAX_IMAGE_BYTES = 20L * 1024 * 1024
 private const val MAX_IMAGE_PIXELS = 25_000_000L
 private const val MAX_IMAGE_DIMENSION = 16_384
 private const val IMAGE_IMPORT_ERROR = "Choose a JPEG, PNG, or WebP image under 20 MB and 25 megapixels."
+
+/** Deletes a cached chat image off the main thread; the delete finishes even if the caller leaves composition. */
+internal suspend fun deleteImageFile(path: String) {
+    withContext(NonCancellable + Dispatchers.IO) { File(path).delete() }
+}
 
 /** Copies recognized image bytes without resizing the image used for inference. */
 internal suspend fun copyImageToCache(context: Context, uri: Uri): String? {

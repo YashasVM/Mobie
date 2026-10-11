@@ -48,6 +48,8 @@ interface RuntimeAdapter {
     val activeCompute: ActiveCompute? get() = null
     /** Applied before load; artifactIdentity includes the repository, artifact and pinned source. */
     fun configureCompute(options: ComputeOptions) = Unit
+    /** Stored sampler used to create the conversation at load; generate still applies its own sampler per request. */
+    fun configureSampler(sampler: SamplerSettings) = Unit
     /** True only while the loaded runtime has an initialized image encoder. */
     val supportsImageInput: Boolean get() = false
     suspend fun load(

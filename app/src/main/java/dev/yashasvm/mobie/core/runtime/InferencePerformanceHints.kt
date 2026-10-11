@@ -47,6 +47,14 @@ internal class InferenceHintTracker(
     }
 }
 
+/**
+ * Creates the ADPF session for one generation.
+ *
+ * Known limitation: the session pins [Process.myTid], which is the Kotlin coroutine thread that
+ * starts generation. LiteRT-LM decodes on its own native worker threads, so this hint may not
+ * cover the threads doing the work. Fixing that needs the native thread IDs, which the SDK does
+ * not expose. The benefit of this hint on device is unverified; treat it as best-effort only.
+ */
 internal class AndroidInferenceHintFactory(private val context: Context) {
     fun create(): InferenceHintSession {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return InferenceHintSessions.noOp

@@ -1,6 +1,8 @@
 package dev.yashasvm.mobie.core
 
 import android.content.Context
+import android.os.Build
+import android.os.PowerManager
 import dev.yashasvm.mobie.core.device.CompatibilityResolver
 import dev.yashasvm.mobie.core.device.DeviceProfileProvider
 import dev.yashasvm.mobie.core.device.DeviceRunSampler
@@ -40,10 +42,15 @@ class AppContainer(context: Context) {
         setOf(
             ThermalGuardRuntimeAdapter(
                 delegate = stallGuardedLiteRtRuntime,
-                thermalStatusProvider = {
-                    deviceProfile.current().thermalStatus
-                },
+                // Polled on the collector's (main) context, so keep it to one cheap PowerManager call.
+                thermalStatusProvider = ::currentThermalStatus,
             ),
         ),
     )
+
+    private fun currentThermalStatus(): Int = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        appContext.getSystemService(PowerManager::class.java).currentThermalStatus
+    } else {
+        PowerManager.THERMAL_STATUS_NONE
+    }
 }

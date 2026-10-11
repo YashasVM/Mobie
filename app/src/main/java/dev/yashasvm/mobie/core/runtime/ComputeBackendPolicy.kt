@@ -23,6 +23,13 @@ data class ActiveCompute(
 }
 
 internal object ComputeBackendPolicy {
+    /**
+     * A success is remembered only when Auto tried GPU first and GPU won. A CPU win, including a
+     * CPU fallback after GPU failed or was skipped for memory, is not a preference to remember.
+     */
+    fun shouldRememberSuccess(requested: ComputeBackend, attempts: List<ComputeBackend>, winner: ComputeBackend): Boolean =
+        requested == ComputeBackend.AUTO && winner == ComputeBackend.GPU && attempts.firstOrNull() == ComputeBackend.GPU
+
     fun attempts(requested: ComputeBackend, gpuPlausible: Boolean, remembered: ComputeBackend?): List<ComputeBackend> =
         when (requested) {
             ComputeBackend.CPU -> listOf(ComputeBackend.CPU)
@@ -102,13 +109,14 @@ internal interface BackendKeyValueStore {
 }
 
 internal class SuccessfulBackendMemory(private val store: BackendKeyValueStore) {
+    /** Only GPU is ever remembered; older CPU entries (written when CPU fallbacks were recorded) are ignored. */
     fun get(identity: String, fingerprint: String): ComputeBackend? =
         store.get(key(identity, fingerprint))?.let { saved ->
-            runCatching { ComputeBackend.valueOf(saved) }.getOrNull()?.takeIf { it in setOf(ComputeBackend.CPU, ComputeBackend.GPU) }
+            runCatching { ComputeBackend.valueOf(saved) }.getOrNull()?.takeIf { it == ComputeBackend.GPU }
         }
 
     fun remember(identity: String, fingerprint: String, backend: ComputeBackend) {
-        require(backend in setOf(ComputeBackend.CPU, ComputeBackend.GPU))
+        require(backend == ComputeBackend.GPU)
         store.put(key(identity, fingerprint), backend.name)
     }
 
