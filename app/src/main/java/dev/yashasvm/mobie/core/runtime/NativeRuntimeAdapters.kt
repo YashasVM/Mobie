@@ -21,7 +21,6 @@ import com.google.ai.edge.litertlm.SamplerConfig
 import dev.yashasvm.mobie.core.model.ModelFormat
 import dev.yashasvm.mobie.core.model.inferArtifactContextWindow
 import java.io.File
-import java.security.MessageDigest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -550,12 +549,13 @@ class LiteRtLmRuntimeAdapter(
         }
     }
 
-    private fun liteRtCacheDirectory(modelFile: File): File {
-        val digest = MessageDigest.getInstance("SHA-256")
-            .digest(modelFile.absolutePath.toByteArray(Charsets.UTF_8))
-            .joinToString("") { "%02x".format(it) }
-        return File(appContext.cacheDir, "$LITERT_CACHE_DIRECTORY/$digest")
-    }
+    /**
+     * Kept beside the model in its app-private directory, not in `cacheDir`: Android may clear
+     * `cacheDir` at any time, which would force slow GPU/XNNPACK rebuilds, and a per-model location
+     * is deleted together with the model instead of leaking storage.
+     */
+    private fun liteRtCacheDirectory(modelFile: File): File =
+        File(modelFile.absoluteFile.parentFile, LITERT_CACHE_DIRECTORY)
 
     private fun rebuildConversationFromCommittedHistory(
         restoreHistoryImage: Boolean = true,
