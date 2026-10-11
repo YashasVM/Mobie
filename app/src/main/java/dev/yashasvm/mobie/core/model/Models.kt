@@ -6,6 +6,7 @@ enum class ModelFormat { GGUF, LITERT_LM, UNKNOWN }
 enum class ModelType { TEXT_GENERATION, EMBEDDING, VISION, AUDIO, UNKNOWN }
 enum class Compatibility { COMPATIBLE, WARNING, INCOMPATIBLE, CONVERSION_REQUIRED }
 enum class ArtifactExecutionTarget { GENERIC, HARDWARE_SPECIFIC }
+enum class MemoryAdmissionTier { FITS_NOW, FITS_AFTER_RECLAIM, IMPOSSIBLE }
 
 data class ModelArtifact(
     val fileName: String,
@@ -82,21 +83,50 @@ internal data class LiteRtRuntimeMemoryEstimate(
     val runtimeOverheadBytes: Long,
     val kvCacheBytes: Long,
     val contextWindowTokens: Int,
+    val fileBackedWeightsBytes: Long,
+    val anonymousBytes: Long,
+    val residentWeightBudgetBytes: Long,
+    val visionEncoderBytes: Long,
 )
 
-internal fun estimateLiteRtRuntimeMemory(artifact: ModelArtifact): LiteRtRuntimeMemoryEstimate? {
+/**
+ * Estimates physical RAM for a LiteRT-LM artifact. Weights are memory-mapped, so only a bounded
+ * working set counts as resident; KV cache, runtime overhead, and any vision encoder are anonymous.
+ *
+ * [privateWeightCopy] is true for GPU/NPU/AUTO backends, which may keep a second private copy of
+ * the weights (see ComputeBackend in core.runtime). All constants are conservative admission
+ * heuristics pending measured peak PSS on the target device; they are not device measurements.
+ */
+internal fun estimateLiteRtRuntimeMemory(
+    artifact: ModelArtifact,
+    privateWeightCopy: Boolean = false,
+    visionEncoderLoaded: Boolean = false,
+): LiteRtRuntimeMemoryEstimate? {
     if (artifact.format != ModelFormat.LITERT_LM || artifact.sizeBytes <= 0) return null
     val contextWindow = artifact.contextWindowTokens ?: DEFAULT_CONTEXT_TOKENS
+    // Parameter count is unknown for most packages, so the file size is the only proxy. Assume
+    // roughly 1 KiB of KV per 16 weight bytes (about 64 KiB/token floor) as a conservative bound.
+    val kvPerToken = max(64L * 1024, artifact.sizeBytes / 16_384)
     val kvCache = max(
         MIN_KV_CACHE_BYTES,
-        DEFAULT_KV_CACHE_BYTES * contextWindow / DEFAULT_CONTEXT_TOKENS,
+        kvPerToken * contextWindow.toLong(),
     )
-    val runtimeOverhead = max((artifact.sizeBytes * 0.4).toLong(), 512L * MIB)
+    val runtimeOverhead = max(512L * MIB, artifact.sizeBytes / 8)
+    val visionBytes = if (visionEncoderLoaded) max(512L * MIB, artifact.sizeBytes / 4) else 0L
+    val backendCopy = if (privateWeightCopy) artifact.sizeBytes else 0L
+    val anonymous = runtimeOverhead + kvCache + visionBytes + backendCopy
+    // The mapped weights are evictable but hot layers still need pages. Budget half of the file,
+    // at least 512 MiB. This is an admission heuristic pending measured S24U PSS/peak RSS.
+    val residentWeights = minOf(artifact.sizeBytes, max(512L * MIB, artifact.sizeBytes / 2))
     return LiteRtRuntimeMemoryEstimate(
-        estimatedRamBytes = artifact.sizeBytes + runtimeOverhead + kvCache,
+        estimatedRamBytes = residentWeights + anonymous,
         runtimeOverheadBytes = runtimeOverhead,
         kvCacheBytes = kvCache,
         contextWindowTokens = contextWindow,
+        fileBackedWeightsBytes = artifact.sizeBytes,
+        anonymousBytes = anonymous,
+        residentWeightBudgetBytes = residentWeights,
+        visionEncoderBytes = visionBytes,
     )
 }
 
@@ -205,6 +235,10 @@ data class DeviceProfile(
     val socModel: String = "",
     val mediaPerformanceClass: Int = 0,
     val thermalStatus: Int = 0,
+    val availableAfterReclaimBytes: Long = availableRamBytes,
+    val swapTotalBytes: Long = 0,
+    val swapFreeBytes: Long = 0,
+    val appPssBytes: Long = 0,
 )
 
 data class CompatibilityResult(
@@ -216,6 +250,9 @@ data class CompatibilityResult(
     val kvCacheBytes: Long = 0,
     val contextWindowTokens: Int = 0,
     val requiredStorageBytes: Long = 0,
+    val memoryTier: MemoryAdmissionTier? = null,
+    val anonymousBytes: Long = 0,
+    val residentWeightBudgetBytes: Long = 0,
 )
 
 enum class ConversionStatus { REQUESTED, REVIEWING, CONVERTING, TESTING, READY, UNSUPPORTED }

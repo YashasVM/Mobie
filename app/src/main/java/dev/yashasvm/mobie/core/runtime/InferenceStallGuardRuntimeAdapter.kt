@@ -56,6 +56,13 @@ class InferenceStallGuardRuntimeAdapter(
         return delegate.load(modelPath, vision, history)
     }
 
+    override suspend fun loadAllowingMemoryReclaim(
+        modelPath: String, vision: Boolean, history: List<RuntimeMessage>,
+    ): Result<Unit> {
+        if (recoveryRequired) return Result.failure(recoveryRequiredError())
+        return delegate.loadAllowingMemoryReclaim(modelPath, vision, history)
+    }
+
     override suspend fun resetConversation(history: List<RuntimeMessage>): Result<Unit> =
         if (recoveryRequired) Result.failure(recoveryRequiredError()) else delegate.resetConversation(history)
 

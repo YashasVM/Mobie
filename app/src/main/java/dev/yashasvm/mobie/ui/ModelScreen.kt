@@ -74,6 +74,7 @@ import dev.yashasvm.mobie.core.model.CompatibilityResult
 import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.runtime.ComputeBackend
+import dev.yashasvm.mobie.core.model.MemoryAdmissionTier
 import dev.yashasvm.mobie.data.download.DownloadProgress
 import dev.yashasvm.mobie.data.download.isCancellable
 import dev.yashasvm.mobie.ui.theme.Mobie
@@ -89,7 +90,7 @@ private val ActionShape = RoundedCornerShape(12.dp)
 internal fun ModelScreen(
     state: MobieUiState,
     onDownload: (Boolean) -> Unit,
-    onRun: () -> Unit,
+    onRun: (Boolean) -> Unit,
     onCancelDownload: () -> Unit = {},
     onBack: () -> Unit = {},
     onBackendChange: (ComputeBackend) -> Unit = {},
@@ -98,6 +99,7 @@ internal fun ModelScreen(
     val model = state.selected ?: return
     val artifact = model.bestArtifact ?: return
     var confirmWarning by remember { mutableStateOf(false) }
+    var confirmRun by remember { mutableStateOf(false) }
     val downloading = state.download?.state in setOf(WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED, WorkInfo.State.RUNNING)
     val gatedWithoutToken = model.gated && !state.tokenConfigured
     // Sections stagger in once; scrolling back up does not replay the entrance.
@@ -140,7 +142,10 @@ internal fun ModelScreen(
             onDownloadClick = {
                 if (state.compatibility?.status == Compatibility.WARNING) confirmWarning = true else onDownload(false)
             },
-            onRun = onRun,
+            onRun = {
+                if (state.compatibility?.memoryTier == MemoryAdmissionTier.FITS_AFTER_RECLAIM) confirmRun = true
+                else onRun(false)
+            },
             onCancelDownload = onCancelDownload,
         )
     }
@@ -154,6 +159,17 @@ internal fun ModelScreen(
                 TextButton(onClick = { confirmWarning = false; onDownload(true) }) { Text("Download anyway") }
             },
             dismissButton = { TextButton(onClick = { confirmWarning = false }) { Text("Cancel") } },
+        )
+    }
+    if (confirmRun) {
+        AlertDialog(
+            onDismissRequest = { confirmRun = false },
+            title = { Text("Free memory before loading") },
+            text = { Text(state.compatibility?.reason.orEmpty()) },
+            confirmButton = {
+                TextButton(onClick = { confirmRun = false; onRun(true) }) { Text("Load anyway") }
+            },
+            dismissButton = { TextButton(onClick = { confirmRun = false }) { Text("Cancel") } },
         )
     }
 }
@@ -281,7 +297,7 @@ private fun VerdictPanel(result: CompatibilityResult?, modifier: Modifier = Modi
                 AnimatedContent(
                     targetState = when (status) {
                         Compatibility.COMPATIBLE -> "Runs on this phone"
-                        Compatibility.WARNING -> "Free memory first"
+                        Compatibility.WARNING -> if (result.memoryTier == MemoryAdmissionTier.FITS_AFTER_RECLAIM) "Fits after freeing memory" else "Check before running"
                         Compatibility.INCOMPATIBLE -> "Won't fit on this phone"
                         Compatibility.CONVERSION_REQUIRED -> "Not directly runnable"
                         null -> "Checking this phone"
@@ -340,14 +356,14 @@ private fun MemoryPanel(result: CompatibilityResult?, device: DeviceProfile?, mo
     val weightsColor = MaterialTheme.colorScheme.primary
     val kvColor = Mobie.signals.thinking
     val overheadColor = MaterialTheme.colorScheme.outline
-    val weights = result?.modelWeightsBytes ?: 0L
+    val weights = result?.residentWeightBudgetBytes ?: 0L
     val kv = result?.kvCacheBytes ?: 0L
     val overhead = result?.runtimeOverheadBytes ?: 0L
     val peak = result?.estimatedRamBytes?.takeIf { it > 0 } ?: (weights + kv + overhead)
     val hasBreakdown = weights + kv + overhead > 0
     val segments = if (hasBreakdown) {
         listOf(
-            MemorySegment("Model weights", weights, weightsColor),
+            MemorySegment("Active model pages", weights, weightsColor),
             MemorySegment("KV cache", kv, kvColor),
             MemorySegment("Runtime overhead", overhead, overheadColor),
         )
@@ -410,6 +426,14 @@ private fun MemoryPanel(result: CompatibilityResult?, device: DeviceProfile?, mo
                 "Context window",
                 result?.contextWindowTokens?.takeIf { it > 0 }?.let { "${formatTokens(it)} tokens" } ?: "Unknown",
                 numeric = true,
+            )
+            SpecRow("File-backed weights", formatBytes(result?.modelWeightsBytes ?: 0L), numeric = true)
+            Text(
+                "App RAM ${formatBytes(device?.appPssBytes ?: 0L)} · Now ${formatBytes(available)} · " +
+                    "After reclaim ${formatBytes(device?.availableAfterReclaimBytes ?: available)} · " +
+                    "Swap ${formatBytes(device?.swapFreeBytes ?: 0L)} free / ${formatBytes(device?.swapTotalBytes ?: 0L)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
                 "Needs about ${formatBytes(peak)} at peak. This phone has ${formatBytes(total)} in total, " +
@@ -655,7 +679,7 @@ private fun ActionDock(
                 val interaction = remember { MutableInteractionSource() }
                 Button(
                     onClick = if (downloaded) onRun else onDownloadClick,
-                    enabled = downloaded || canDownload,
+                    enabled = (downloaded && state.compatibility?.status != Compatibility.INCOMPATIBLE) || canDownload,
                     shape = ActionShape,
                     interactionSource = interaction,
                     colors = ButtonDefaults.buttonColors(

@@ -5,7 +5,6 @@ import java.security.MessageDigest
 import kotlinx.coroutines.CancellationException
 
 /** NPU remains reserved for a future SoC-specific artifact qualification path. */
-enum class ComputeBackend { AUTO, CPU, GPU, NPU }
 
 data class ComputeOptions(
     val backend: ComputeBackend = ComputeBackend.AUTO,
@@ -43,6 +42,30 @@ internal data class BackendLoadResult<T>(
     /** Plain-language reason shown after an automatic fallback; null when the first attempt succeeded. */
     val fallbackReason: String?,
 )
+
+/** Attempts that passed memory admission, plus a note when Auto skipped a backend for memory. */
+internal data class AdmittedAttempts(val attempts: List<ComputeBackend>, val skippedReason: String?)
+
+/**
+ * Under Auto, drops backends that do not fit in memory right now (GPU keeps a private copy of
+ * the weights) so Auto falls through to CPU instead of being blocked or pushing Android to kill
+ * apps. The last attempt is always kept; the general load gate decides whether it may run.
+ * Explicit choices are not filtered here.
+ */
+internal fun admitAttemptsForMemory(
+    requested: ComputeBackend,
+    attempts: List<ComputeBackend>,
+    blockReasonFor: (ComputeBackend) -> String?,
+): AdmittedAttempts {
+    if (requested != ComputeBackend.AUTO || attempts.size < 2) return AdmittedAttempts(attempts, null)
+    val skipped = attempts.dropLast(1).filter { blockReasonFor(it) != null }
+    if (skipped.isEmpty()) return AdmittedAttempts(attempts, null)
+    val kept = attempts - skipped.toSet()
+    return AdmittedAttempts(
+        kept,
+        "${skipped.joinToString { it.name }} skipped: not enough free memory for its copy of the weights. Using ${kept.first().name}.",
+    )
+}
 
 internal fun <T> loadWithBackendFallback(
     attempts: List<ComputeBackend>,

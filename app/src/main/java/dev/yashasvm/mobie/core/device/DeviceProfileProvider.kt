@@ -10,8 +10,7 @@ import dev.yashasvm.mobie.core.model.DeviceProfile
 class DeviceProfileProvider(private val context: Context) {
     fun current(): DeviceProfile {
         val activityManager = context.getSystemService(ActivityManager::class.java)
-        val memoryInfo = ActivityManager.MemoryInfo()
-        activityManager.getMemoryInfo(memoryInfo)
+        val memory = MemorySnapshotReader(activityManager).read()
         val storage = StatFs(context.filesDir.absolutePath)
         val thermalStatus = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             context.getSystemService(PowerManager::class.java).currentThermalStatus
@@ -19,14 +18,18 @@ class DeviceProfileProvider(private val context: Context) {
             PowerManager.THERMAL_STATUS_NONE
         }
         return DeviceProfile(
-            totalRamBytes = memoryInfo.totalMem,
-            availableRamBytes = memoryInfo.availMem,
+            totalRamBytes = memory.totalBytes,
+            availableRamBytes = memory.availableNowBytes,
+            availableAfterReclaimBytes = memory.availableAfterReclaimBytes,
+            swapTotalBytes = memory.swapTotalBytes,
+            swapFreeBytes = memory.swapFreeBytes,
+            appPssBytes = memory.appPssBytes,
             availableStorageBytes = storage.availableBytes,
             supportedAbis = Build.SUPPORTED_ABIS.toList(),
             sdkInt = Build.VERSION.SDK_INT,
             releaseVersion = Build.VERSION.RELEASE.orEmpty(),
-            lowMemoryThresholdBytes = memoryInfo.threshold,
-            isLowMemory = memoryInfo.lowMemory,
+            lowMemoryThresholdBytes = memory.thresholdBytes,
+            isLowMemory = memory.isLowMemory,
             isLowRamDevice = activityManager.isLowRamDevice,
             manufacturer = Build.MANUFACTURER.orEmpty(),
             model = Build.MODEL.orEmpty(),

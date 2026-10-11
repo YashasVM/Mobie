@@ -111,4 +111,26 @@ class ComputeBackendPolicyTest {
             assertTrue(expected.message!!.contains("NPU"))
         }
     }
+
+    @Test fun autoSkipsGpuWhenItsWeightCopyDoesNotFit() {
+        val admitted = admitAttemptsForMemory(ComputeBackend.AUTO, listOf(ComputeBackend.GPU, ComputeBackend.CPU)) {
+            if (it == ComputeBackend.GPU) "no room" else null
+        }
+        assertEquals(listOf(ComputeBackend.CPU), admitted.attempts)
+        assertTrue(admitted.skippedReason!!.startsWith("GPU skipped"))
+    }
+
+    @Test fun autoKeepsGpuWhenItFits() {
+        val admitted = admitAttemptsForMemory(ComputeBackend.AUTO, listOf(ComputeBackend.GPU, ComputeBackend.CPU)) { null }
+        assertEquals(listOf(ComputeBackend.GPU, ComputeBackend.CPU), admitted.attempts)
+        assertNull(admitted.skippedReason)
+    }
+
+    @Test fun lastAutoAttemptAndExplicitChoicesAreNeverFiltered() {
+        val onlyCpu = admitAttemptsForMemory(ComputeBackend.AUTO, listOf(ComputeBackend.CPU)) { "no room" }
+        assertEquals(listOf(ComputeBackend.CPU), onlyCpu.attempts)
+        val explicitGpu = admitAttemptsForMemory(ComputeBackend.GPU, listOf(ComputeBackend.GPU)) { "no room" }
+        assertEquals(listOf(ComputeBackend.GPU), explicitGpu.attempts)
+        assertNull(explicitGpu.skippedReason)
+    }
 }
