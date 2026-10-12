@@ -581,7 +581,8 @@ private fun ActionDock(
     onCancelDownload: () -> Unit,
 ) {
     val downloaded = state.downloadedPath != null
-    val showPrimary = !(downloaded && downloading)
+    // While a download runs, its progress line and Cancel say everything; a disabled button would not.
+    val showPrimary = !downloading
     val primary = when {
         downloaded -> PrimaryAction(LucideR.drawable.lucide_ic_play, "Run locally")
         downloading -> PrimaryAction(LucideR.drawable.lucide_ic_download, "Downloading…")

@@ -130,14 +130,14 @@ internal fun CatalogScreen(
     BackHandler(enabled = selectedTab != TAB_DISCOVER) { selectedTab = TAB_DISCOVER }
 
     Column(Modifier.fillMaxSize()) {
-        // tmux-style status line: the window list mirrors the bottom tabs, and the device sits at the right.
+        // tmux-style status line: session name, the current window, and the device at the right.
+        // Switching happens in the bottom bar, which is within thumb reach.
         StatusLine(
             segments = listOf(
-                StatusSegment("0:discover"),
-                StatusSegment("1:library"),
-                StatusSegment("2:settings"),
+                StatusSegment("mobie"),
+                StatusSegment("${selectedTab + 1}:" + listOf("discover", "library", "settings").getOrElse(selectedTab) { "" }),
             ),
-            selected = selectedTab,
+            selected = 0,
             trailing = deviceName(state.device) ?: "mobie",
             modifier = Modifier.statusBarsPadding(),
         )
@@ -314,16 +314,21 @@ private fun DeviceRig(device: DeviceProfile?, modifier: Modifier = Modifier) {
                     color = muted,
                 )
             }
+            // Two columns keep the panel short; the chip already sits in the title bar.
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                KeyValueRow("ram", bytesOrDash(device?.totalRamBytes))
-                KeyValueRow(
-                    "avail",
-                    bytesOrDash(device?.availableRamBytes),
-                    valueColor = if (device?.isLowMemory == true) Mobie.signals.caution else MaterialTheme.colorScheme.onSurface,
-                )
-                KeyValueRow("storage", bytesOrDash(device?.availableStorageBytes))
-                KeyValueRow("abi", device?.supportedAbis?.firstOrNull() ?: "—")
-                KeyValueRow("chip", chipName(device) ?: "—")
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    KeyValueRow("ram", bytesOrDash(device?.totalRamBytes), Modifier.weight(1f))
+                    KeyValueRow(
+                        "avail",
+                        bytesOrDash(device?.availableRamBytes),
+                        Modifier.weight(1f),
+                        valueColor = if (device?.isLowMemory == true) Mobie.signals.caution else MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    KeyValueRow("disk", bytesOrDash(device?.availableStorageBytes), Modifier.weight(1f))
+                    KeyValueRow("abi", device?.supportedAbis?.firstOrNull() ?: "—", Modifier.weight(1f))
+                }
             }
         }
     }
@@ -341,14 +346,14 @@ private fun KeyValueRow(
             key,
             style = Mobie.numeric.small,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(84.dp),
+            modifier = Modifier.width(56.dp),
         )
         Text(
             value,
             style = Mobie.numeric.small,
             color = valueColor,
             modifier = Modifier.weight(1f),
-            maxLines = 2,
+            maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
     }
@@ -420,7 +425,8 @@ private fun ModelRow(
     val statusColor = if (status == null) MaterialTheme.colorScheme.onSurfaceVariant else status.signalColor()
     val estimatedRam = compatibility?.estimatedRamBytes ?: 0
     val context = compatibility?.contextWindowTokens?.takeIf { it > 0 } ?: artifact?.contextWindowTokens ?: 0
-    val specs = specLine(artifact?.quantization, estimatedRam, context)
+    val ramShownBelow = device != null && device.totalRamBytes > 0 && estimatedRam > 0
+    val specs = specLine(artifact?.quantization, estimatedRam, context, ramShownBelow)
     val flags = listOfNotNull(
         "by ${model.author}",
         "installed".takeIf { installed },
@@ -447,7 +453,11 @@ private fun ModelRow(
             Text(formatBytes(artifact?.sizeBytes ?: 0), style = Mobie.numeric.small, color = tone.ink, maxLines = 1)
         }
         if (specs.isNotBlank()) SpecText(specs, tone.dim)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            Modifier.padding(start = 24.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             Text(
                 statusLabel(status),
                 style = Mobie.numeric.tiny.copy(fontWeight = FontWeight.SemiBold),
@@ -462,14 +472,16 @@ private fun ModelRow(
                 capacityBytes = device.totalRamBytes,
                 markerBytes = device.availableRamBytes.takeIf { it > 0 },
                 height = 6.dp,
+                modifier = Modifier.padding(start = 24.dp),
             )
             Text(
-                "Needs about ${formatBytes(estimatedRam)} of ${formatBytes(device.totalRamBytes)} RAM · " +
-                    "${formatBytes(device.availableRamBytes)} free now",
+                "needs ~${formatBytes(estimatedRam)} of ${formatBytes(device.totalRamBytes)} · " +
+                    "${formatBytes(device.availableRamBytes)} free",
                 style = Mobie.numeric.tiny,
                 color = tone.dim,
-                maxLines = 2,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 24.dp),
             )
         }
     }
@@ -492,10 +504,11 @@ private fun SpecText(text: String, color: Color) {
 private fun bytesOrDash(bytes: Long?): String = if (bytes == null || bytes <= 0) "—" else formatBytes(bytes)
 
 /** `quant · ~RAM · context`, skipping any value that is unknown. */
-private fun specLine(quantization: String?, estimatedRamBytes: Long, contextTokens: Int): String =
+private fun specLine(quantization: String?, estimatedRamBytes: Long, contextTokens: Int, ramShownBelow: Boolean = false): String =
     listOfNotNull(
         quantization,
-        "~${formatBytes(estimatedRamBytes)} RAM".takeIf { estimatedRamBytes > 0 },
+        // RAM is spelled out under the meter below, so the spec line carries only file facts.
+        "~${formatBytes(estimatedRamBytes)} RAM".takeIf { estimatedRamBytes > 0 && !ramShownBelow },
         "${formatTokens(contextTokens)} ctx".takeIf { contextTokens > 0 },
     ).joinToString(" · ")
 

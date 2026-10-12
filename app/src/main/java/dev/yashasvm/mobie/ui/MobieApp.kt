@@ -54,6 +54,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.withFrameMillis
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -215,7 +216,7 @@ private data class BootLine(val tag: String, val message: String) {
 private val BootLines = listOf(
     BootLine("[  ok  ]", " probing device"),
     BootLine("[  ok  ]", " local runtime: LiteRT-LM"),
-    BootLine("[  ok  ]", " chat works offline once a model is downloaded"),
+    BootLine("[  ok  ]", " offline chat after download"),
 )
 
 private const val BootCharDelayMillis = 16L
@@ -234,9 +235,12 @@ private fun WelcomeScreen(onContinue: () -> Unit) {
     LaunchedEffect(Unit) {
         for ((index, line) in BootLines.withIndex()) {
             if (!reduceMotion) {
-                for (count in 1 until line.length) {
-                    revealed[index] = count
-                    delay(BootCharDelayMillis)
+                // Driven by elapsed time, not per-character delays, so dropped frames skip ahead
+                // instead of stretching the whole boot log.
+                val start = withFrameMillis { it }
+                while (revealed[index] < line.length) {
+                    val elapsed = withFrameMillis { it } - start
+                    revealed[index] = (elapsed / BootCharDelayMillis).toInt().coerceIn(1, line.length)
                 }
                 delay(BootLineDelayMillis)
             }
@@ -272,9 +276,15 @@ private fun WelcomeScreen(onContinue: () -> Unit) {
                             CheckLine("Your prompts and replies stay on this phone.", "✓", Mobie.signals.ready)
                             CheckLine("Public models need no Hugging Face account.", "✓", Mobie.signals.ready)
                         }
-                        TermButton("continue", onClick = onContinue)
                     }
                 }
+            }
+            // Pinned at the bottom so the one action on this screen sits under the thumb.
+            AnimatedVisibility(
+                visible = booted,
+                enter = if (reduceMotion) EnterTransition.None else fadeIn(tween(MotionShort, easing = LinearEasing)),
+            ) {
+                TermButton("continue", onClick = onContinue, modifier = Modifier.fillMaxWidth().padding(20.dp))
             }
         }
     }
@@ -333,7 +343,7 @@ private fun Lead() {
         append("Run AI models ")
         withStyle(SpanStyle(color = amber, fontWeight = FontWeight.SemiBold)) { append("on your phone") }
         append(", offline.")
-        appendInlineContent(cursorId, "")
+        appendInlineContent(cursorId, " ")
     }
     Text(
         text,
