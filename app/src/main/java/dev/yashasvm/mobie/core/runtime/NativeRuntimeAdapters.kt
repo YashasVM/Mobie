@@ -293,13 +293,9 @@ class LiteRtLmRuntimeAdapter(
                                 lastMemoryCheckAt = now
                                 ensureGenerationMemoryHeadroom()
                             }
-                            val reasoning = chunk.channels.entries
-                                .filter { (name, _) -> name.lowercase() in REASONING_CHANNELS }
-                                .joinToString("") { it.value }
-                            val visibleChannels = chunk.channels.entries
-                                .filterNot { (name, _) -> name.lowercase() in REASONING_CHANNELS }
-                                .joinToString("") { it.value }
-                            val answer = visibleChannels.ifEmpty { if (reasoning.isEmpty()) chunk.toString() else "" }
+                            val split = LiteRtChannelText.split(chunk.channels, REASONING_CHANNELS)
+                            val reasoning = split.reasoning
+                            val answer = split.visible.ifEmpty { if (reasoning.isEmpty()) chunk.toString() else "" }
                             if (reasoning.isNotEmpty() || answer.isNotEmpty()) {
                                 hints.onOutput()
                                 nonemptyChunkCount += 1
