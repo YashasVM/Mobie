@@ -284,7 +284,7 @@ internal fun SignalTag(text: String, color: Color, modifier: Modifier = Modifier
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         StatusDot(color, pulsing = pulsing, size = 6.dp)
-        Text(text.lowercase(Locale.US), style = Mobie.numeric.tiny, color = color, maxLines = 1)
+        Text(text, style = Mobie.numeric.tiny, color = color, maxLines = 1)
     }
 }
 
@@ -449,10 +449,13 @@ internal fun TermButton(
             .clickable(interactionSource = interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
     ) {
         if (icon != null) LucideIcon(icon, null, Modifier.size(16.dp), tint = content)
-        Text("[ ${text.lowercase(Locale.US)} ]", style = MaterialTheme.typography.labelLarge, color = content, maxLines = 1)
+        // Brackets are separate glyphs so the label keeps its exact text for accessibility and tests.
+        Text("[", style = MaterialTheme.typography.labelLarge, color = content.copy(alpha = .7f))
+        Text(text, style = MaterialTheme.typography.labelLarge, color = content, maxLines = 1)
+        Text("]", style = MaterialTheme.typography.labelLarge, color = content.copy(alpha = .7f))
         if (hint != null) Text(hint, style = Mobie.numeric.tiny, color = content.copy(alpha = .7f), maxLines = 1)
     }
 }
