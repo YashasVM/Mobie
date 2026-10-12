@@ -55,6 +55,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -121,6 +122,8 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.composables.icons.lucide.R as LucideR
 import dev.yashasvm.mobie.core.model.AiModel
+import dev.yashasvm.mobie.core.model.Compatibility
+import dev.yashasvm.mobie.core.model.MemoryAdmissionTier
 import dev.yashasvm.mobie.core.runtime.ActiveCompute
 import dev.yashasvm.mobie.core.runtime.InferenceStats
 import dev.yashasvm.mobie.core.runtime.SamplerSettings
@@ -154,6 +157,7 @@ internal fun ChatScreen(
     onHistory: () -> Unit = {},
     onNewChat: () -> Unit = {},
     onSamplerChange: (SamplerSettings) -> String? = { null },
+    onLoadAnyway: () -> Unit = {},
 ) {
     val model = state.selected ?: return
     val context = LocalContext.current
@@ -250,7 +254,14 @@ internal fun ChatScreen(
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
                 state.runtimeState == RuntimeState.LOADING -> LoadingPanel(model.title)
-                state.runtimeState == RuntimeState.ERROR -> ErrorPanel(state.error ?: "The model could not run on this phone.", onBack = onBack)
+                state.runtimeState == RuntimeState.ERROR -> ErrorPanel(
+                    state.error ?: "The model could not run on this phone.",
+                    onBack = onBack,
+                    onLoadAnyway = onLoadAnyway.takeIf {
+                        state.compatibility?.memoryTier == MemoryAdmissionTier.FITS_AFTER_RECLAIM &&
+                            state.compatibility.status != Compatibility.INCOMPATIBLE
+                    },
+                )
                 state.messages.isEmpty() -> EmptyChat(
                     model = model,
                     imageInputReady = state.imageInputReady,
@@ -653,7 +664,7 @@ private fun IndeterminateTrack(color: Color) {
 }
 
 @Composable
-private fun ErrorPanel(message: String, onBack: () -> Unit) {
+private fun ErrorPanel(message: String, onBack: () -> Unit, onLoadAnyway: (() -> Unit)? = null) {
     Box(Modifier.fillMaxSize().padding(20.dp), contentAlignment = Alignment.Center) {
         TuiWindow(
             title = "engine error",
@@ -671,8 +682,14 @@ private fun ErrorPanel(message: String, onBack: () -> Unit) {
                 Text(message, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Hairline()
-            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.End) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            ) {
                 TermButton("back", onClick = onBack, style = TermButtonStyle.Ghost)
+                // Only offered when the model fits once Android frees memory, matching the model
+                // screen's "Load anyway"; models that can never fit get no override.
+                if (onLoadAnyway != null) TermButton("load anyway", onClick = onLoadAnyway)
             }
         }
     }
@@ -881,19 +898,26 @@ private fun ReplyFooter(message: ChatMessage) {
             footer,
             style = Mobie.numeric.tiny,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
-        TermButton(
-            if (copied) "copied" else "copy",
-            onClick = {
-                scope.launch {
-                    clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Reply", message.text)))
-                    copied = true
+        // A light inline action: a full bordered button would crowd the stats it sits beside.
+        Text(
+            if (copied) "[copied]" else "[copy]",
+            style = Mobie.numeric.tiny,
+            color = if (copied) Mobie.signals.ready else MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .heightIn(min = 44.dp)
+                .clickable(onClickLabel = "Copy reply", role = Role.Button) {
+                    scope.launch {
+                        clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Reply", message.text)))
+                        copied = true
+                    }
                 }
-            },
-            style = TermButtonStyle.Ghost,
+                .semantics { contentDescription = if (copied) "Copied" else "Copy reply" }
+                .wrapContentHeight(Alignment.CenterVertically)
+                .padding(start = 12.dp, end = 4.dp),
         )
     }
 }

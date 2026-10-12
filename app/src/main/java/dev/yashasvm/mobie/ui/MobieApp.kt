@@ -157,6 +157,7 @@ fun MobieApp(
                     onHistory = { showHistory = true },
                     onNewChat = viewModel::newChat,
                     onSamplerChange = viewModel::updateSampler,
+                    onLoadAnyway = { viewModel.runInstalled(allowReclaim = true) },
                 )
                 "model" -> ModelScreen(
                     state = state,

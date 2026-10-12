@@ -69,6 +69,8 @@ data class MobieUiState(
     val query: String = "",
     val loading: Boolean = false,
     val error: String? = null,
+    /** Catalog fetch failure, kept apart from [error] so an offline refresh never hides a model or chat error. */
+    val catalogError: String? = null,
     val tokenConfigured: Boolean = false,
     val welcomeSeen: Boolean = false,
     val onboardingComplete: Boolean = false,
@@ -186,7 +188,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     ) {
         catalogJob?.cancel()
         catalogJob = viewModelScope.launch {
-            mutableState.update { it.copy(loading = true, error = null, query = expectedQuery ?: "") }
+            mutableState.update { it.copy(loading = true, catalogError = null, query = expectedQuery ?: "") }
             request().fold(
                 onSuccess = { models ->
                     if (expectedQuery == null || state.value.query == expectedQuery) {
@@ -210,7 +212,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 },
                 onFailure = { error ->
                     if (expectedQuery == null || state.value.query == expectedQuery) {
-                        mutableState.update { it.copy(loading = false, error = error.message ?: "Catalog request failed") }
+                        mutableState.update { it.copy(loading = false, catalogError = catalogFailureMessage(error)) }
                     }
                 },
             )
@@ -904,4 +906,11 @@ internal fun List<ChatMessage>.attachStatsToLastAssistant(stats: InferenceStats)
     val index = indexOfLast { !it.fromUser }
     if (index < 0) return this
     return toMutableList().apply { this[index] = this[index].copy(stats = stats) }
+}
+
+/** Plain copy for a failed catalog fetch. Network failures say what still works offline. */
+internal fun catalogFailureMessage(error: Throwable): String = when (error) {
+    is java.net.UnknownHostException, is java.net.ConnectException, is java.net.SocketTimeoutException ->
+        "No connection to Hugging Face. Models you've downloaded still work offline from Library."
+    else -> error.message ?: "Catalog request failed"
 }

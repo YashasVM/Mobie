@@ -243,17 +243,17 @@ private fun LazyListScope.discoverTab(
         val searching = state.query.isNotBlank()
         ListHeader(
             title = if (searching) "Compatible results" else "Recommended",
-            count = state.models.size.takeIf { !state.loading && state.error == null && it > 0 },
+            count = state.models.size.takeIf { !state.loading && state.catalogError == null && it > 0 },
             action = if (searching) ("Clear" to onFeatured) else null,
             modifier = Modifier.entrance(tracker, "section", 3).padding(bottom = 6.dp),
         )
     }
     when {
         state.loading -> item(key = "loading") { SkeletonList() }
-        state.error != null -> item(key = "error") {
+        state.catalogError != null -> item(key = "error") {
             MessagePanel(
                 title = "Couldn't load models",
-                body = state.error,
+                body = state.catalogError,
                 mark = "[!]",
                 markColor = Mobie.signals.blocked,
                 actionLabel = "Retry",
@@ -773,7 +773,7 @@ private fun LazyListScope.settingsTab(
                 Hairline()
                 InfoRow(
                     title = "Licensing",
-                    body = "LiteRT-LM · Lucide Icons",
+                    body = "LiteRT-LM · Lucide Icons · IBM Plex Mono (OFL)",
                 )
                 Hairline()
                 InfoRow(
