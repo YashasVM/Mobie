@@ -60,8 +60,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -72,7 +70,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -90,13 +87,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -254,7 +250,7 @@ internal fun ChatScreen(
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
                 state.runtimeState == RuntimeState.LOADING -> LoadingPanel(model.title)
-                state.runtimeState == RuntimeState.ERROR -> ErrorPanel(state.error ?: "The model could not run on this phone.")
+                state.runtimeState == RuntimeState.ERROR -> ErrorPanel(state.error ?: "The model could not run on this phone.", onBack = onBack)
                 state.messages.isEmpty() -> EmptyChat(
                     model = model,
                     imageInputReady = state.imageInputReady,
@@ -266,8 +262,8 @@ internal fun ChatScreen(
                 else -> LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 20.dp),
-                    verticalArrangement = Arrangement.spacedBy(24.dp),
+                    contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 18.dp),
+                    verticalArrangement = Arrangement.spacedBy(22.dp),
                 ) {
                     itemsIndexed(
                         state.messages,
@@ -353,28 +349,24 @@ private class MessageEntrances {
 }
 
 /**
- * User messages slide in from the right and grow from their bottom-end corner; replies fade and
- * lift in a beat later.
+ * Prompts type in from the left like a typed command; replies print in a beat later, one step
+ * lower. Both are short so streaming never waits on them.
  */
 private fun Modifier.messageEntrance(animate: Boolean, fromUser: Boolean): Modifier = composed {
     val progress = remember { Animatable(if (animate) 0f else 1f) }
     LaunchedEffect(Unit) {
         if (animate) {
             if (!fromUser) delay(90)
-            progress.animateTo(1f, tween(MotionMedium + 80, easing = EmphasizedEase))
+            progress.animateTo(1f, tween(MotionShort + 60, easing = EmphasizedEase))
         }
     }
     graphicsLayer {
         val p = progress.value
         alpha = p
         if (fromUser) {
-            transformOrigin = TransformOrigin(1f, 1f)
-            translationX = (1f - p) * 28.dp.toPx()
-            val scale = .96f + .04f * p
-            scaleX = scale
-            scaleY = scale
+            translationX = (p - 1f) * 12.dp.toPx()
         } else {
-            translationY = (1f - p) * 14.dp.toPx()
+            translationY = (1f - p) * 8.dp.toPx()
         }
     }
 }
@@ -413,14 +405,20 @@ private fun ChatHeader(
     val status = engineStatus(runtimeState, runtimeLabel)
     val dotColor by animateColorAsState(runtimeState.signal(), tween(MotionMedium), label = "engine dot")
     Column(Modifier.fillMaxWidth().statusBarsPadding()) {
+        // tmux-style top bar: the app and the window in view, plus the runtime doing the work.
+        StatusLine(
+            segments = listOf(StatusSegment("mobie"), StatusSegment("chat")),
+            selected = 1,
+            trailing = runtimeLabel,
+        )
         Row(
-            Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 4.dp),
+            Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
                 LucideIcon(LucideR.drawable.lucide_ic_arrow_left, "Back", Modifier.size(22.dp))
             }
-            Column(Modifier.weight(1f).padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Column(Modifier.weight(1f).padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
                     title,
                     style = MaterialTheme.typography.titleMedium,
@@ -444,7 +442,7 @@ private fun ChatHeader(
                     ) { text ->
                         Text(
                             text,
-                            style = MaterialTheme.typography.bodySmall,
+                            style = Mobie.numeric.tiny,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -489,49 +487,72 @@ private fun RunDetails(
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
                 Text(
                     "Running on ${selected.label}",
-                    style = MaterialTheme.typography.bodySmall,
+                    style = Mobie.numeric.tiny,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 selected.fallbackReason?.let { reason ->
-                    Text(reason, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(reason, style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
+        // One readout line, like a status bar cell: the section name on the left, live speed on the right.
         Row(
-            Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(horizontal = 16.dp, vertical = 9.dp),
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 44.dp)
+                .clickable(role = Role.Button) { expanded = !expanded }
+                .padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text("Run details ${if (expanded) "▴" else "▾"}", style = MaterialTheme.typography.labelMedium)
-            Text(decode, style = MaterialTheme.typography.labelSmall)
+            Text(
+                "run details ${if (expanded) "▾" else "▸"}",
+                style = Mobie.numeric.small,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                decode,
+                style = Mobie.numeric.small,
+                color = if (stats?.tokensPerSecond?.let { it > 0 } == true) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
         }
         if (expanded) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 val first = live.firstChunkMs ?: stats?.timeToFirstTokenMs?.takeIf { it > 0 }
-                Text("First SDK chunk: ${first?.let(::formatMillis) ?: "—"}")
-                Text("Prefill: ${stats?.prefillTokensPerSecond?.takeIf { it > 0 }?.let { String.format(Locale.US, "%.1f tok/s (%d tokens)", it, stats.prefillTokenCount) } ?: "—"}")
-                Text("Decode: ${stats?.tokensPerSecond?.takeIf { it > 0 }?.let { String.format(Locale.US, "%.1f tok/s (%d tokens)", it, stats.decodeTokenCount) } ?: "—"}")
-                Text("App PSS: ${live.pssBytes?.let(::formatBytes) ?: "—"} · Thermal status: ${live.thermalStatus?.toString() ?: "—"}")
-                Text("Battery current: ${live.batteryCurrentMilliAmps?.let { String.format(Locale.US, "%.0f mA", it) } ?: "—"}")
-                Text("Estimated whole-device energy/token: ${live.estimatedEnergyPerTokenMilliWh?.let { String.format(Locale.US, "%.5f mWh", it) } ?: "—"}")
-                Text("Live speed uses SDK chunks; final token counts use LiteRT.", style = MaterialTheme.typography.labelSmall)
-                TextButton(onClick = {
-                    scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Run JSON", runJson()))) }
-                }, enabled = stats != null || live.sdkChunks > 0) { Text("Copy run as JSON") }
-                Text("Sampling", style = MaterialTheme.typography.labelMedium)
+                Text("First SDK chunk: ${first?.let(::formatMillis) ?: "—"}", style = Mobie.numeric.tiny)
+                Text("Prefill: ${stats?.prefillTokensPerSecond?.takeIf { it > 0 }?.let { String.format(Locale.US, "%.1f tok/s (%d tokens)", it, stats.prefillTokenCount) } ?: "—"}", style = Mobie.numeric.tiny)
+                Text("Decode: ${stats?.tokensPerSecond?.takeIf { it > 0 }?.let { String.format(Locale.US, "%.1f tok/s (%d tokens)", it, stats.decodeTokenCount) } ?: "—"}", style = Mobie.numeric.tiny)
+                Text("App PSS: ${live.pssBytes?.let(::formatBytes) ?: "—"} · Thermal status: ${live.thermalStatus?.toString() ?: "—"}", style = Mobie.numeric.tiny)
+                Text("Battery current: ${live.batteryCurrentMilliAmps?.let { String.format(Locale.US, "%.0f mA", it) } ?: "—"}", style = Mobie.numeric.tiny)
+                Text("Estimated whole-device energy/token: ${live.estimatedEnergyPerTokenMilliWh?.let { String.format(Locale.US, "%.5f mWh", it) } ?: "—"}", style = Mobie.numeric.tiny)
+                Text("Live speed uses SDK chunks; final token counts use LiteRT.", style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                TermButton(
+                    "Copy run as JSON",
+                    onClick = { scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Run JSON", runJson()))) } },
+                    style = TermButtonStyle.Ghost,
+                    enabled = stats != null || live.sdkChunks > 0,
+                    modifier = Modifier.padding(vertical = 4.dp),
+                )
+                SectionLabel("Sampling", Modifier.padding(top = 6.dp))
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(temperature, { temperature = it }, label = { Text("Temperature") }, singleLine = true, modifier = Modifier.width(120.dp))
-                    OutlinedTextField(topK, { topK = it }, label = { Text("Top-k") }, singleLine = true, modifier = Modifier.width(100.dp))
-                    OutlinedTextField(topP, { topP = it }, label = { Text("Top-p") }, singleLine = true, modifier = Modifier.width(100.dp))
-                    OutlinedTextField(seed, { seed = it }, label = { Text("Seed") }, singleLine = true, modifier = Modifier.width(120.dp))
+                    OutlinedTextField(temperature, { temperature = it }, label = { Text("Temperature") }, singleLine = true, modifier = Modifier.width(120.dp), shape = RectangleShape)
+                    OutlinedTextField(topK, { topK = it }, label = { Text("Top-k") }, singleLine = true, modifier = Modifier.width(100.dp), shape = RectangleShape)
+                    OutlinedTextField(topP, { topP = it }, label = { Text("Top-p") }, singleLine = true, modifier = Modifier.width(100.dp), shape = RectangleShape)
+                    OutlinedTextField(seed, { seed = it }, label = { Text("Seed") }, singleLine = true, modifier = Modifier.width(120.dp), shape = RectangleShape)
                 }
-                TextButton(onClick = {
-                    val parsed = listOfNotNull(temperature.toDoubleOrNull(), topK.toIntOrNull(), topP.toDoubleOrNull(), seed.toIntOrNull())
-                    settingsError = if (parsed.size != 4) "Enter valid numbers for all sampling fields." else {
-                        onSamplerChange(SamplerSettings(temperature.toDouble(), topK.toInt(), topP.toDouble(), seed.toInt()))
-                    }
-                }) { Text("Apply sampling") }
-                settingsError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                TermButton(
+                    "Apply sampling",
+                    onClick = {
+                        val parsed = listOfNotNull(temperature.toDoubleOrNull(), topK.toIntOrNull(), topP.toDoubleOrNull(), seed.toIntOrNull())
+                        settingsError = if (parsed.size != 4) "Enter valid numbers for all sampling fields." else {
+                            onSamplerChange(SamplerSettings(temperature.toDouble(), topK.toInt(), topP.toDouble(), seed.toInt()))
+                        }
+                    },
+                    style = TermButtonStyle.Ghost,
+                    modifier = Modifier.padding(vertical = 4.dp),
+                )
+                settingsError?.let { Text("[!] $it", style = Mobie.numeric.tiny, color = Mobie.signals.blocked) }
             }
         }
         Hairline()
@@ -582,19 +603,20 @@ private fun TelemetryValue(label: String?, value: String, unit: String? = null) 
 
 @Composable
 private fun LoadingPanel(modelTitle: String) {
-    Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-        Panel(Modifier.fillMaxWidth().widthIn(max = 420.dp).appear()) {
+    Box(Modifier.fillMaxSize().padding(20.dp), contentAlignment = Alignment.Center) {
+        TuiWindow(
+            title = "loading weights",
+            meta = "wait",
+            borderColor = Mobie.signals.caution.copy(alpha = .45f),
+            modifier = Modifier.fillMaxWidth().widthIn(max = 420.dp).appear(),
+        ) {
             Column(
                 Modifier
-                    .padding(20.dp)
+                    .padding(16.dp)
                     .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    LucideIcon(LucideR.drawable.lucide_ic_cpu, null, Modifier.size(18.dp), tint = Mobie.signals.caution)
-                    Text("Loading weights", style = MaterialTheme.typography.titleSmall, color = Mobie.signals.caution)
-                }
-                Text("Loading $modelTitle into memory", style = MaterialTheme.typography.titleLarge)
+                Text("[~] Loading $modelTitle into memory", style = Mobie.numeric.small, color = Mobie.signals.caution)
                 IndeterminateTrack(Mobie.signals.caution)
                 Text(
                     "The first load can take a while. Later loads are usually faster.",
@@ -606,49 +628,51 @@ private fun LoadingPanel(modelTitle: String) {
     }
 }
 
-/** A short segment sliding across a thin track. Signals work without implying a percentage. */
+/** A short block sliding across a thin track, like a cursor scanning a progress bar. */
 @Composable
 private fun IndeterminateTrack(color: Color) {
     val track = Mobie.signals.track
     val transition = rememberInfiniteTransition(label = "load track")
+    // Read in the draw phase so the sweep never recomposes the panel.
     val position by transition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(1400, easing = EmphasizedEase), RepeatMode.Restart),
         label = "load track position",
     )
-    Canvas(Modifier.fillMaxWidth().height(4.dp)) {
-        val radius = CornerRadius(size.height / 2, size.height / 2)
-        drawRoundRect(track, cornerRadius = radius)
-        val segment = size.width * .28f
+    Canvas(Modifier.fillMaxWidth().height(6.dp)) {
+        drawRect(track)
+        val segment = size.width * .22f
         val start = (size.width + segment) * position - segment
         val left = start.coerceAtLeast(0f)
         val right = (start + segment).coerceAtMost(size.width)
         if (right > left) {
-            drawRoundRect(color, topLeft = Offset(left, 0f), size = Size(right - left, size.height), cornerRadius = radius)
+            drawRect(color, topLeft = Offset(left, 0f), size = Size(right - left, size.height))
         }
     }
 }
 
 @Composable
-private fun ErrorPanel(message: String) {
-    Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-        Panel(
-            Modifier.fillMaxWidth().widthIn(max = 420.dp).appear(),
-            borderColor = Mobie.signals.blocked.copy(alpha = .4f),
+private fun ErrorPanel(message: String, onBack: () -> Unit) {
+    Box(Modifier.fillMaxSize().padding(20.dp), contentAlignment = Alignment.Center) {
+        TuiWindow(
+            title = "engine error",
+            meta = "failed",
+            borderColor = Mobie.signals.blocked.copy(alpha = .5f),
+            modifier = Modifier.fillMaxWidth().widthIn(max = 420.dp).appear(),
         ) {
             Column(
                 Modifier
-                    .padding(20.dp)
+                    .padding(16.dp)
                     .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Assertive },
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    LucideIcon(LucideR.drawable.lucide_ic_circle_alert, null, Modifier.size(18.dp), tint = Mobie.signals.blocked)
-                    Text("Engine error", style = MaterialTheme.typography.titleSmall, color = Mobie.signals.blocked)
-                }
-                Text("Chat couldn't start", style = MaterialTheme.typography.titleLarge)
+                Text("[!] Chat couldn't start", style = Mobie.numeric.small, color = Mobie.signals.blocked)
                 Text(message, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Hairline()
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.End) {
+                TermButton("back", onClick = onBack, style = TermButtonStyle.Ghost)
             }
         }
     }
@@ -668,67 +692,64 @@ private fun EmptyChat(model: AiModel, imageInputReady: Boolean, onStarter: (Stri
         Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(24.dp, Alignment.CenterVertically),
+            .padding(horizontal = 18.dp, vertical = 22.dp),
+        verticalArrangement = Arrangement.spacedBy(22.dp, Alignment.CenterVertically),
     ) {
+        // Boot-log intro: each line reads like a command or a check finishing.
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(
-                Modifier.appear(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                StatusDot(Mobie.signals.ready, size = 7.dp)
-                Text("Model in memory", style = MaterialTheme.typography.titleSmall, color = Mobie.signals.ready)
-            }
+            PromptLine("mobie chat --load", Modifier.appear())
             Text(
                 model.title,
-                style = MaterialTheme.typography.headlineMedium,
+                style = MaterialTheme.typography.headlineSmall,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.appear(delayMillis = 60),
+                modifier = Modifier.padding(start = 20.dp).appear(delayMillis = 60),
             )
-            Text(
-                if (model.supportsVision && imageInputReady) {
-                    "Chat about text or an attached photo on this phone. Image generation isn't available."
-                } else if (model.supportsVision) {
-                    "This phone loaded text chat only. Photo input is unavailable for this session."
-                } else {
-                    "Chat about text on this phone. Nothing you type leaves it."
-                },
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.appear(delayMillis = 120),
-            )
+            Column(Modifier.padding(start = 20.dp).appear(delayMillis = 120), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                CheckLine("Model in memory", "✓", Mobie.signals.ready)
+                CheckLine(
+                    if (model.supportsVision && imageInputReady) {
+                        "Chat about text or an attached photo on this phone. Image generation isn't available."
+                    } else if (model.supportsVision) {
+                        "This phone loaded text chat only. Photo input is unavailable for this session."
+                    } else {
+                        "Chat about text on this phone. Nothing you type leaves it."
+                    },
+                    if (model.supportsVision && !imageInputReady) "!" else "i",
+                    if (model.supportsVision && !imageInputReady) Mobie.signals.caution else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             SectionLabel("Try", Modifier.appear(delayMillis = 160))
             starters.forEachIndexed { index, starter ->
                 val vision = starter == "Describe an image"
                 Panel(
                     Modifier.fillMaxWidth().appear(delayMillis = 200 + index * 60),
-                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    borderColor = MaterialTheme.colorScheme.outline.copy(alpha = .55f),
                     onClick = { onStarter(if (vision) "Describe this image in detail." else starter) },
                 ) {
                     Row(
-                        Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = 16.dp, vertical = 13.dp),
+                        Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
+                        Text("›", style = Mobie.numeric.medium, color = MaterialTheme.colorScheme.primary)
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(starter, style = MaterialTheme.typography.bodyLarge)
                             if (vision) {
                                 Text(
                                     "Attach a photo with the image button first",
-                                    style = MaterialTheme.typography.bodySmall,
+                                    style = Mobie.numeric.tiny,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                         }
-                        LucideIcon(
-                            if (vision) LucideR.drawable.lucide_ic_image else LucideR.drawable.lucide_ic_arrow_up_right,
-                            null,
-                            Modifier.size(18.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        Text(
+                            if (vision) "[img]" else "[run]",
+                            style = Mobie.numeric.tiny,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
@@ -740,21 +761,22 @@ private fun EmptyChat(model: AiModel, imageInputReady: Boolean, onStarter: (Stri
 // ---------------------------------------------------------------------------------------------
 // Messages
 
+/** A prompt typed at the terminal: amber `>` gutter, then the text. No bubble. */
 @Composable
 private fun UserMessage(message: ChatMessage, modifier: Modifier = Modifier) {
-    val shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 6.dp)
-    Column(modifier.fillMaxWidth(), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         message.imagePath?.let { AttachedImage(it) }
         if (message.text.isNotBlank()) {
-            Box(Modifier.fillMaxWidth(.86f), contentAlignment = Alignment.TopEnd) {
-                SelectionContainer {
+            SelectionContainer {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        ">",
+                        style = Mobie.numeric.medium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
                     Text(
                         message.text,
-                        modifier = Modifier
-                            .clip(shape)
-                            .background(MaterialTheme.colorScheme.surfaceContainerHigh, shape)
-                            .border(1.dp, Mobie.signals.hairline, shape)
-                            .padding(horizontal = 14.dp, vertical = 11.dp),
+                        modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
@@ -770,37 +792,30 @@ private fun AttachedImage(path: String) {
     var bitmap by remember(path) { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(path) { bitmap = decodeThumbnail(context, path) }
     val image = bitmap
-    val shape = RoundedCornerShape(12.dp)
     if (image != null) {
         Image(
             image,
             contentDescription = "Attached image",
             contentScale = ContentScale.Crop,
-            modifier = Modifier.size(112.dp).clip(shape).border(1.dp, Mobie.signals.hairline, shape),
+            modifier = Modifier
+                .padding(start = 20.dp)
+                .size(112.dp)
+                .border(1.dp, Mobie.signals.hairline),
         )
     } else {
-        Tag("Image attached", icon = LucideR.drawable.lucide_ic_image)
+        Tag("Image attached", icon = LucideR.drawable.lucide_ic_image, modifier = Modifier.padding(start = 20.dp))
     }
 }
 
 @Composable
 private fun AssistantMessage(message: ChatMessage, modelTitle: String, streaming: Boolean, modifier: Modifier = Modifier) {
     val waitingForAnswer = streaming && message.text.isBlank()
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    val gutter = MaterialTheme.colorScheme.outline.copy(alpha = .5f)
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Box(
-                Modifier
-                    .size(22.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(MaterialTheme.colorScheme.primaryContainer)
-                    .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .35f), RoundedCornerShape(6.dp)),
-                contentAlignment = Alignment.Center,
-            ) {
-                LucideIcon(LucideR.drawable.lucide_ic_cpu, null, Modifier.size(13.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
-            }
             Text(
-                modelTitle,
-                style = MaterialTheme.typography.labelLarge,
+                "[$modelTitle]",
+                style = Mobie.numeric.tiny,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -808,32 +823,43 @@ private fun AssistantMessage(message: ChatMessage, modelTitle: String, streaming
             )
             if (message.interrupted) Tag("Interrupted", color = Mobie.signals.caution)
         }
-        if (message.thinking.isNotBlank()) {
-            ThinkingPanel(message.thinking, active = waitingForAnswer)
-        }
-        if (message.text.isNotBlank()) {
-            // No animateContentSize here: it would fight the bucketed auto-scroll while tokens stream.
-            SelectionContainer(Modifier.widthIn(max = 680.dp)) {
-                MarkdownText(message.text)
+        // Output hangs off a dim left rule, the way terminal output sits under its command.
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .drawBehind {
+                    drawRect(gutter, topLeft = Offset.Zero, size = Size(1.dp.toPx(), size.height))
+                }
+                .padding(start = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            if (message.thinking.isNotBlank()) {
+                ThinkingPanel(message.thinking, active = waitingForAnswer)
             }
-        }
-        if (streaming) {
-            if (message.text.isBlank() && message.thinking.isBlank()) {
-                Row(
-                    Modifier
-                        .heightIn(min = 24.dp)
-                        .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    TypingIndicator(MaterialTheme.colorScheme.primary)
-                    Text("Waiting for the first token", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (message.text.isNotBlank()) {
+                // No animateContentSize here: it would fight the bucketed auto-scroll while tokens stream.
+                SelectionContainer(Modifier.widthIn(max = 680.dp)) {
+                    MarkdownText(message.text)
+                }
+            }
+            if (streaming) {
+                if (message.text.isBlank() && message.thinking.isBlank()) {
+                    Row(
+                        Modifier
+                            .heightIn(min = 24.dp)
+                            .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        TypingIndicator(MaterialTheme.colorScheme.primary)
+                        Text("Waiting for the first token", style = Mobie.numeric.small, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                } else if (message.text.isNotBlank()) {
+                    StreamingCaret()
                 }
             } else if (message.text.isNotBlank()) {
-                StreamingCaret()
+                ReplyFooter(message)
             }
-        } else if (message.text.isNotBlank()) {
-            ReplyFooter(message)
         }
     }
 }
@@ -849,80 +875,49 @@ private fun ReplyFooter(message: ChatMessage) {
             copied = false
         }
     }
-    val footer = message.stats?.let(::replyStatsLine)
+    val footer = message.stats?.let(::replyStatsLine).orEmpty()
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.appear(offsetDp = 6f)) {
-        Row(
-            Modifier.weight(1f),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            if (footer != null) {
-                LucideIcon(LucideR.drawable.lucide_ic_gauge, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(
-                    footer,
-                    style = Mobie.numeric.tiny,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-        IconButton(
+        Text(
+            footer,
+            style = Mobie.numeric.tiny,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        TermButton(
+            if (copied) "copied" else "copy",
             onClick = {
                 scope.launch {
                     clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Reply", message.text)))
                     copied = true
                 }
             },
-            modifier = Modifier.size(44.dp).semantics { if (copied) stateDescription = "Copied" },
-        ) {
-            AnimatedContent(
-                targetState = copied,
-                transitionSpec = {
-                    (fadeIn(tween(MotionShort)) + scaleIn(tween(MotionMedium, easing = EmphasizedEase), initialScale = .6f)) togetherWith
-                        (fadeOut(tween(MotionShort)) + scaleOut(tween(MotionShort), targetScale = .6f))
-                },
-                label = "copy state",
-            ) { done ->
-                LucideIcon(
-                    if (done) LucideR.drawable.lucide_ic_check else LucideR.drawable.lucide_ic_copy,
-                    "Copy reply",
-                    Modifier.size(18.dp),
-                    tint = if (done) Mobie.signals.ready else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
+            style = TermButtonStyle.Ghost,
+        )
     }
 }
 
-/** "14.2 tok/s · TTFT 380 ms · 212 tok · 4.1 s", listing only fields that were measured. */
+/** "128 tok · 18.4 tok/s · ttft 0.9 s · 4.1 s", listing only fields that were measured. */
 private fun replyStatsLine(stats: InferenceStats): String? = buildList {
+    if (stats.decodeTokenCount > 0) add("${stats.decodeTokenCount} tok")
     if (stats.tokensPerSecond > 0) add(String.format(Locale.US, "%.1f tok/s", stats.tokensPerSecond))
-    if (stats.timeToFirstTokenMs > 0) add("first token ${formatMillis(stats.timeToFirstTokenMs)}")
-    if (stats.decodeTokenCount > 0) add("${stats.decodeTokenCount} tokens")
+    if (stats.timeToFirstTokenMs > 0) add("ttft ${formatMillis(stats.timeToFirstTokenMs)}")
     if (stats.totalGenerationMs > 0) add(formatMillis(stats.totalGenerationMs))
 }.takeIf { it.isNotEmpty() }?.joinToString(" · ")
 
+/** The block cursor shown after a streaming reply. Blinks in the draw phase, not in composition. */
 @Composable
 private fun StreamingCaret() {
-    val transition = rememberInfiniteTransition(label = "caret")
-    val alpha by transition.animateFloat(
-        initialValue = 1f,
-        targetValue = .15f,
-        animationSpec = infiniteRepeatable(tween(560, easing = EmphasizedEase), RepeatMode.Reverse),
-        label = "caret alpha",
-    )
-    Box(
-        Modifier
-            .semantics { contentDescription = "Generating" }
-            .width(8.dp)
-            .height(18.dp)
-            .graphicsLayer { this.alpha = alpha }
-            .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp)),
+    BlinkingCursor(
+        Modifier.semantics { contentDescription = "Generating" },
+        color = MaterialTheme.colorScheme.primary,
+        width = 9.dp,
+        height = 18.dp,
     )
 }
 
-/** Three dots bouncing in sequence while the engine prepares its first token. */
+/** Three square cells pulsing in sequence while the engine prepares its first token. */
 @Composable
 private fun TypingIndicator(color: Color) {
     val transition = rememberInfiniteTransition(label = "typing")
@@ -943,7 +938,7 @@ private fun TypingIndicator(color: Color) {
                         translationY = -lift * 4.dp.toPx()
                         alpha = .35f + .65f * lift
                     }
-                    .background(color, CircleShape),
+                    .background(color, RectangleShape),
             )
         }
     }
@@ -953,44 +948,42 @@ private fun TypingIndicator(color: Color) {
 private fun ThinkingPanel(thinking: String, active: Boolean) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     val color = Mobie.signals.thinking
-    val shape = RoundedCornerShape(14.dp)
     val chevron by animateFloatAsState(if (expanded) 90f else 0f, tween(MotionMedium, easing = EmphasizedEase), label = "chevron")
+    // Reads like a folded block in a terminal transcript: `▸ thinking (1.2k chars)`.
+    val label = if (active) "thinking…" else "thinking (${formatChars(thinking.length)} chars)"
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(shape)
-            .background(color.copy(alpha = .06f), shape)
-            .border(1.dp, color.copy(alpha = .22f), shape),
+            .background(color.copy(alpha = .05f), RectangleShape)
+            .border(1.dp, color.copy(alpha = .3f), RectangleShape),
     ) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .heightIn(min = 48.dp)
+                .heightIn(min = 44.dp)
                 .clickable(
                     onClickLabel = if (expanded) "Hide thinking" else "Show thinking",
                     role = Role.Button,
                 ) { expanded = !expanded }
                 .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" }
-                .padding(horizontal = 14.dp),
+                .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            if (active) {
-                StatusDot(color, pulsing = true, size = 7.dp)
-            } else {
-                LucideIcon(LucideR.drawable.lucide_ic_brain, null, Modifier.size(16.dp), tint = color)
-            }
-            Text(
-                if (active) "Thinking…" else "Thought process",
-                style = MaterialTheme.typography.titleSmall,
-                color = color,
-                modifier = Modifier.weight(1f).semantics { if (active) liveRegion = LiveRegionMode.Polite },
-            )
             LucideIcon(
                 LucideR.drawable.lucide_ic_chevron_right,
                 null,
-                Modifier.size(18.dp).graphicsLayer { rotationZ = chevron },
+                Modifier.size(14.dp).graphicsLayer { rotationZ = chevron },
                 tint = color,
+            )
+            if (active) StatusDot(color, pulsing = true, size = 6.dp)
+            Text(
+                label,
+                style = Mobie.numeric.small,
+                color = color,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f).semantics { if (active) liveRegion = LiveRegionMode.Polite },
             )
         }
         AnimatedVisibility(
@@ -1001,16 +994,12 @@ private fun ThinkingPanel(thinking: String, active: Boolean) {
             SelectionContainer {
                 Text(
                     thinking,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = Mobie.numeric.small,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier
-                        .padding(start = 14.dp, end = 14.dp, bottom = 14.dp)
+                        .padding(start = 12.dp, end = 12.dp, bottom = 12.dp)
                         .drawBehind {
-                            drawRoundRect(
-                                color.copy(alpha = .6f),
-                                size = Size(2.dp.toPx(), size.height),
-                                cornerRadius = CornerRadius(1.dp.toPx()),
-                            )
+                            drawRect(color.copy(alpha = .6f), size = Size(1.dp.toPx(), size.height))
                         }
                         .padding(start = 12.dp),
                 )
@@ -1018,6 +1007,9 @@ private fun ThinkingPanel(thinking: String, active: Boolean) {
         }
     }
 }
+
+private fun formatChars(count: Int): String =
+    if (count >= 1000) String.format(Locale.US, "%.1fk", count / 1000.0) else count.toString()
 
 // ---------------------------------------------------------------------------------------------
 // Markdown. A deliberately small subset (bold, inline code, fenced code, lists, headings, rules)
@@ -1189,7 +1181,8 @@ private fun MarkdownBlock(block: MdBlock, codeStyle: SpanStyle) {
                 2 -> MaterialTheme.typography.titleLarge
                 else -> MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
             },
-            color = onSurface,
+            // Headings take the amber accent, like a man page's bold section names.
+            color = if (block.level <= 2) MaterialTheme.colorScheme.primary else onSurface,
             modifier = Modifier.semantics { heading() },
         )
         is MdBlock.ListItem -> Row(Modifier.padding(start = (block.depth * 18).dp)) {
@@ -1213,26 +1206,52 @@ private fun MarkdownBlock(block: MdBlock, codeStyle: SpanStyle) {
     }
 }
 
+/** A square code window: title bar with the language and a copy action, then the source. */
 @Composable
 private fun CodeBlock(block: MdBlock.Code) {
-    val shape = RoundedCornerShape(12.dp)
+    val clipboard = LocalClipboard.current
+    val scope = rememberCoroutineScope()
+    var copied by remember { mutableStateOf(false) }
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(1500)
+            copied = false
+        }
+    }
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(shape)
-            .background(MaterialTheme.colorScheme.surfaceContainer, shape)
-            .border(1.dp, Mobie.signals.hairline, shape),
+            .background(MaterialTheme.colorScheme.surfaceContainer, RectangleShape)
+            .border(1.dp, Mobie.signals.hairline, RectangleShape),
     ) {
-        if (block.language.isNotBlank()) {
-            Row(
-                Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 9.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                LucideIcon(LucideR.drawable.lucide_ic_code, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(block.language, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .padding(start = 12.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                block.language.ifBlank { "text" },
+                style = Mobie.numeric.tiny,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            TermButton(
+                if (copied) "copied" else "copy",
+                onClick = {
+                    scope.launch {
+                        clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Code", block.code)))
+                        copied = true
+                    }
+                },
+                style = TermButtonStyle.Ghost,
+            )
         }
+        Hairline()
         Text(
             block.code.ifEmpty { " " },
             style = MaterialTheme.typography.bodyMedium.copy(
@@ -1245,7 +1264,7 @@ private fun CodeBlock(block: MdBlock.Code) {
             softWrap = false,
             modifier = Modifier
                 .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 14.dp, vertical = 12.dp),
+                .padding(horizontal = 12.dp, vertical = 12.dp),
         )
     }
 }
@@ -1292,7 +1311,7 @@ private fun ComposerDock(
         RuntimeState.ERROR -> "Model unavailable"
         RuntimeState.IDLE -> "Model not loaded"
     }
-    val fieldShape = RoundedCornerShape(24.dp)
+    val fieldShape = RectangleShape
     val fieldInteraction = remember { MutableInteractionSource() }
     val focused by fieldInteraction.collectIsFocusedAsState()
     val fieldBorder by animateColorAsState(
@@ -1370,11 +1389,11 @@ private fun ComposerDock(
                 Row(
                     Modifier
                         .weight(1f)
-                        .heightIn(min = 50.dp)
+                        .heightIn(min = 48.dp)
                         .clip(fieldShape)
                         .background(MaterialTheme.colorScheme.surfaceContainerLow, fieldShape)
                         .border(if (ready && focused) 1.5.dp else 1.dp, fieldBorder, fieldShape)
-                        .padding(start = if (supportsVision) 0.dp else 18.dp, end = 16.dp),
+                        .padding(start = if (supportsVision) 0.dp else 12.dp, end = 12.dp),
                     verticalAlignment = Alignment.Bottom,
                 ) {
                     if (supportsVision) {
@@ -1382,6 +1401,14 @@ private fun ComposerDock(
                             LucideIcon(LucideR.drawable.lucide_ic_image, "Attach image", Modifier.size(20.dp))
                         }
                     }
+                    // The terminal prompt glyph. Amber when the engine can take input.
+                    Text(
+                        ">",
+                        style = Mobie.numeric.medium,
+                        color = if (ready) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .padding(start = if (supportsVision) 4.dp else 0.dp, end = 10.dp, bottom = 14.dp),
+                    )
                     BasicTextField(
                         value = prompt,
                         onValueChange = onPromptChange,
@@ -1396,7 +1423,7 @@ private fun ComposerDock(
                         interactionSource = fieldInteraction,
                         modifier = Modifier
                             .weight(1f)
-                            .padding(vertical = 12.5.dp)
+                            .padding(vertical = 13.dp)
                             .focusRequester(focusRequester)
                             .testTag("chat_input"),
                         decorationBox = { inner ->
@@ -1425,7 +1452,7 @@ private fun ComposerDock(
                 LucideIcon(LucideR.drawable.lucide_ic_lock, null, Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
                     "Stays on this phone · $runtimeLabel",
-                    style = MaterialTheme.typography.bodySmall,
+                    style = Mobie.numeric.tiny,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -1470,13 +1497,13 @@ private fun SendStopButton(generating: Boolean, canSubmit: Boolean, onSubmit: ()
         onClick = { if (generating) onStop() else onSubmit() },
         enabled = active,
         modifier = Modifier
-            .size(50.dp)
+            .size(48.dp)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
             }
             .pressScale(interaction, pressedScale = .9f),
-        shape = CircleShape,
+        shape = RectangleShape,
         colors = IconButtonDefaults.filledIconButtonColors(
             containerColor = container,
             contentColor = content,
