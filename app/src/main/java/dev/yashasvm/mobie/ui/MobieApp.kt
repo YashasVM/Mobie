@@ -104,6 +104,7 @@ fun MobieApp(
 
     var warningOverride by remember { mutableStateOf(false) }
     var showHistory by rememberSaveable { mutableStateOf(false) }
+    var showModelSwitcher by rememberSaveable { mutableStateOf(false) }
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) {
@@ -158,6 +159,7 @@ fun MobieApp(
                     onNewChat = viewModel::newChat,
                     onSamplerChange = viewModel::updateSampler,
                     onLoadAnyway = { viewModel.runInstalled(allowReclaim = true) },
+                    onSwitchModel = { showModelSwitcher = true },
                 )
                 "model" -> ModelScreen(
                     state = state,
@@ -179,9 +181,29 @@ fun MobieApp(
                     onSaveToken = viewModel::saveToken,
                     onOpenInstalled = viewModel::startInstalledChat,
                     onDeleteInstalled = viewModel::deleteInstalled,
+                    onReturnToChat = if (state.installedModels.any { it.model.id == state.activeInstalledId }) {
+                        viewModel::returnToChat
+                    } else {
+                        null
+                    },
                 )
             }
         }
+    }
+    if (showModelSwitcher) {
+        ModelSwitcherSheet(
+            installed = state.installedModels,
+            activeId = state.activeInstalledId,
+            onPick = {
+                showModelSwitcher = false
+                viewModel.switchModel(it)
+            },
+            onGetMore = {
+                showModelSwitcher = false
+                viewModel.openCatalog()
+            },
+            onDismiss = { showModelSwitcher = false },
+        )
     }
     if (showHistory) {
         HistorySheet(

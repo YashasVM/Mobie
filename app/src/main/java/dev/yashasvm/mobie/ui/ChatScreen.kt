@@ -158,6 +158,7 @@ internal fun ChatScreen(
     onNewChat: () -> Unit = {},
     onSamplerChange: (SamplerSettings) -> String? = { null },
     onLoadAnyway: () -> Unit = {},
+    onSwitchModel: () -> Unit = {},
 ) {
     val model = state.selected ?: return
     val context = LocalContext.current
@@ -234,6 +235,7 @@ internal fun ChatScreen(
             onBack = onBack,
             onHistory = onHistory,
             onNewChat = onNewChat,
+            onSwitchModel = onSwitchModel,
         )
         AnimatedVisibility(
             visible = state.runtimeState != RuntimeState.LOADING && state.runtimeState != RuntimeState.ERROR,
@@ -412,6 +414,7 @@ private fun ChatHeader(
     onBack: () -> Unit,
     onHistory: () -> Unit,
     onNewChat: () -> Unit,
+    onSwitchModel: () -> Unit,
 ) {
     val status = engineStatus(runtimeState, runtimeLabel)
     val dotColor by animateColorAsState(runtimeState.signal(), tween(MotionMedium), label = "engine dot")
@@ -430,13 +433,25 @@ private fun ChatHeader(
                 LucideIcon(LucideR.drawable.lucide_ic_arrow_left, "Back", Modifier.size(22.dp))
             }
             Column(Modifier.weight(1f).padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.semantics { heading() },
-                )
+                // Tappable chip: opens the model switcher sheet.
+                Row(
+                    Modifier
+                        .align(Alignment.Start)
+                        .border(1.dp, MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .4f))
+                        .clickable(role = Role.Button, onClickLabel = "Switch model", onClick = onSwitchModel)
+                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.semantics { heading() }.weight(1f, fill = false),
+                    )
+                    Text("▾", style = Mobie.numeric.small, color = MaterialTheme.colorScheme.primary)
+                }
                 Row(
                     Modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
                     verticalAlignment = Alignment.CenterVertically,
