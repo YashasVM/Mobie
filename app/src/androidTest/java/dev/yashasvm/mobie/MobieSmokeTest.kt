@@ -16,6 +16,15 @@ class MobieSmokeTest {
 
     @Test
     fun appInstallsLaunchesAndStoresTokenSecurely() {
+        // The first-run welcome waits for the user; continue past it when present.
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("continue").fetchSemanticsNodes().isNotEmpty() ||
+                composeRule.onAllNodesWithText("Connect Hugging Face").fetchSemanticsNodes().isNotEmpty() ||
+                composeRule.onAllNodesWithText("Models for this phone").fetchSemanticsNodes().isNotEmpty()
+        }
+        if (composeRule.onAllNodesWithText("continue").fetchSemanticsNodes().isNotEmpty()) {
+            composeRule.onNodeWithText("continue").performClick()
+        }
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText("Connect Hugging Face").fetchSemanticsNodes().isNotEmpty() ||
                 composeRule.onAllNodesWithText("Models for this phone").fetchSemanticsNodes().isNotEmpty()
