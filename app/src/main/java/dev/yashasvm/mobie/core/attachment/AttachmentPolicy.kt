@@ -57,6 +57,24 @@ object AttachmentPolicy {
         "yml" to "application/yaml",
     )
 
+    /**
+     * MIME filters for the document picker. Text-like types only: PDFs are not offered, and
+     * octet-stream is included because many source files are reported with that type.
+     */
+    val PICKER_MIME_TYPES: Array<String> = arrayOf(
+        "text/*",
+        "application/json",
+        "application/xml",
+        "application/yaml",
+        "application/x-yaml",
+        "application/toml",
+        "application/javascript",
+        "application/sql",
+        "application/x-sh",
+        "application/x-ndjson",
+        "application/octet-stream",
+    )
+
     enum class Kind { TEXT, PDF, UNSUPPORTED }
 
     /** Classifies by extension first, then MIME. Some providers report octet-stream for text files. */
