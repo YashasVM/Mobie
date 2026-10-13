@@ -13,6 +13,12 @@ import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.MemoryAdmissionTier
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.device.BatteryCurrentMath
+import dev.yashasvm.mobie.core.device.CpuThreadPolicy
+import dev.yashasvm.mobie.core.device.DecodeSpeed
+import dev.yashasvm.mobie.core.device.DecodeSpeedStore
+import dev.yashasvm.mobie.core.device.HardwareProfile
+import dev.yashasvm.mobie.core.device.HardwareProfileProvider
+import dev.yashasvm.mobie.core.device.modelPerformanceIdentity
 import dev.yashasvm.mobie.core.device.RunTelemetry
 import dev.yashasvm.mobie.core.runtime.GenerationConfig
 import dev.yashasvm.mobie.core.runtime.InferenceEvent
@@ -88,6 +94,9 @@ data class MobieUiState(
     val computeBackend: ComputeBackend = ComputeBackend.AUTO,
     val cpuThreads: Int? = null,
     val activeCompute: ActiveCompute? = null,
+    val hardware: HardwareProfile? = null,
+    val measuredDecodeSpeeds: Map<ComputeBackend, DecodeSpeed> = emptyMap(),
+    val memoryReliefInProgress: Boolean = false,
 )
 
 class MobieViewModel(private val container: AppContainer) : ViewModel() {
@@ -108,15 +117,22 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     private var downloadObserverJob: Job? = null
     private var inferenceJob: Job? = null
     private var telemetryJob: Job? = null
+    private var memoryRefreshJob: Job? = null
     private val runtimeLifecycle = Mutex()
     private val runtimeOperation = AtomicLong(0L)
     private val selectionRevision = AtomicLong(0L)
     private val runtimeOwnership = RuntimeModelOwnership()
+    private val decodeSpeeds = DecodeSpeedStore(container.appContext)
 
     init {
         viewModelScope.launch {
             val device = readDeviceProfile()
             mutableState.update { it.copy(device = it.device ?: device) }
+        }
+        viewModelScope.launch {
+            val hardware = HardwareProfileProvider(container.appContext).detect()
+            val threads = container.computeSettings.selectedCpuThreads(hardware.cpuCoreCount)
+            mutableState.update { it.copy(hardware = hardware, cpuThreads = threads) }
         }
         container.runtimes.all().forEach { it.configureSampler(mutableState.value.sampler) }
         refreshInstalled()
@@ -139,6 +155,63 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
 
     /** Device facts read /proc and binder, so they run on IO rather than the main thread. */
     private suspend fun readDeviceProfile(): DeviceProfile = withContext(Dispatchers.IO) { container.deviceProfile.current() }
+
+    /** Refreshes pre-flight admission from live RAM without changing the selected artifact. */
+    fun refreshMemory() {
+        if (state.value.memoryReliefInProgress) return
+        memoryRefreshJob?.cancel()
+        memoryRefreshJob = viewModelScope.launch { refreshMemorySnapshot() }
+    }
+
+    private suspend fun refreshMemorySnapshot() {
+        val device = readDeviceProfile()
+        mutableState.update { current ->
+            current.copy(
+                device = device,
+                compatibility = current.selectedArtifact?.let { artifact ->
+                    container.compatibility.resolve(artifact, device,
+                        current.selected?.supportsVision == true, admissionBackend(current.computeBackend))
+                },
+            )
+        }
+    }
+
+    /** Only idle native resources are released; generation and model loading are never interrupted. */
+    fun freeUpMemory(onReady: () -> Unit) {
+        if (state.value.memoryReliefInProgress) return
+        val revision = selectionRevision.get()
+        memoryRefreshJob?.cancel()
+        mutableState.update { it.copy(memoryReliefInProgress = true) }
+        viewModelScope.launch {
+            try {
+                runtimeLifecycle.withLock {
+                    val current = state.value
+                    if (current.chatting || current.runtimeState in setOf(RuntimeState.LOADING, RuntimeState.GENERATING, RuntimeState.STOPPING)) {
+                        return@launch
+                    }
+                    val operation = runtimeOperation.get()
+                    container.runtimes.all().forEach { it.unload() }
+                    runtimeOwnership.clear()
+                    if (isCurrentRuntimeOperation(operation)) {
+                        mutableState.update {
+                            it.copy(runtimeState = RuntimeState.IDLE, activeCompute = null, imageInputReady = false, stats = null)
+                        }
+                    }
+                }
+                withContext(Dispatchers.IO) { container.catalog.trimMemory() }
+                refreshMemorySnapshot()
+                if (selectionRevision.get() == revision && !state.value.chatting) onReady()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                mutableState.update {
+                    it.copy(error = error.message ?: "Mobie could not release its memory. Restart Mobie before loading a model.")
+                }
+            } finally {
+                mutableState.update { it.copy(memoryReliefInProgress = false) }
+            }
+        }
+    }
 
     /** Cancels generation or a load together with its telemetry sampler, so neither outlives the other. */
     private fun cancelInference() {
@@ -165,8 +238,10 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun setCpuThreads(threads: Int?) {
-        container.computeSettings.setCpuThreads(threads)
-        mutableState.update { it.copy(cpuThreads = threads) }
+        val cores = state.value.hardware?.cpuCoreCount ?: Runtime.getRuntime().availableProcessors()
+        container.computeSettings.setCpuThreads(threads, cores)
+        val sanitized = container.computeSettings.selectedCpuThreads(cores)
+        mutableState.update { it.copy(cpuThreads = sanitized) }
     }
 
     fun loadFeatured() = loadCatalog { container.catalog.featured() }
@@ -260,6 +335,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 history = sessions,
                 sessionId = currentSessionId,
                 stats = null,
+                measuredDecodeSpeeds = emptyMap(),
                 imageInputReady = false,
                 activeCompute = null,
                 error = null,
@@ -267,6 +343,14 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             )
         }
         if (presentedModel != null && artifact != null) {
+            viewModelScope.launch {
+                val measurements = decodeSpeeds.read(modelPerformanceIdentity(presentedModel.id, artifact))
+                mutableState.update {
+                    if (it.selected?.id == presentedModel.id && it.selectedArtifact == artifact) {
+                        it.copy(measuredDecodeSpeeds = measurements)
+                    } else it
+                }
+            }
             observeDownload(presentedModel, artifact)
             viewModelScope.launch(Dispatchers.IO) {
                 val downloaded = container.downloads.completedFile(presentedModel.id, artifact)?.absolutePath
@@ -396,7 +480,8 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             adapter.configureCompute(
                 ComputeOptions(
                     backend = state.value.computeBackend,
-                    cpuThreads = state.value.cpuThreads,
+                    cpuThreads = CpuThreadPolicy.clamp(state.value.cpuThreads,
+                        state.value.hardware?.cpuCoreCount ?: Runtime.getRuntime().availableProcessors()),
                     artifactIdentity = "${model.id}|${artifact.fileName}|${artifact.downloadUrl}|${artifact.sha256.orEmpty()}",
                 ),
             )
@@ -468,17 +553,27 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                     is InferenceEvent.Token -> mutableState.update { currentState ->
                         currentState.copy(messages = currentState.messages.updateLastAssistant(event.text, event.thinking))
                     }
-                    is InferenceEvent.Stats -> mutableState.update {
-                        it.copy(
-                            stats = event.value,
-                            telemetry = it.telemetry.copy(
-                                estimatedEnergyPerTokenMilliWh = BatteryCurrentMath.milliWhPerToken(
-                                    it.telemetry.estimatedEnergyMilliWh,
-                                    event.value.decodeTokenCount,
+                    is InferenceEvent.Stats -> {
+                        mutableState.update {
+                            it.copy(
+                                stats = event.value,
+                                telemetry = it.telemetry.copy(
+                                    estimatedEnergyPerTokenMilliWh = BatteryCurrentMath.milliWhPerToken(
+                                        it.telemetry.estimatedEnergyMilliWh,
+                                        event.value.decodeTokenCount,
+                                    ),
                                 ),
-                            ),
-                            messages = it.messages.attachStatsToLastAssistant(event.value),
-                        )
+                                messages = it.messages.attachStatsToLastAssistant(event.value),
+                            )
+                        }
+                        viewModelScope.launch {
+                            val measurements = decodeSpeeds.record(modelPerformanceIdentity(model.id, artifact), event.value)
+                            mutableState.update {
+                                if (it.selected?.id == model.id && it.selectedArtifact == artifact) {
+                                    it.copy(measuredDecodeSpeeds = measurements)
+                                } else it
+                            }
+                        }
                     }
                     is InferenceEvent.Progress -> mutableState.update {
                         it.copy(telemetry = it.telemetry.copy(

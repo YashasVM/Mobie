@@ -10,9 +10,20 @@ import org.junit.Assert.fail
 import org.junit.Test
 
 class ComputeBackendPolicyTest {
+    @Test fun nativeGpuInitializationFailureHasAnActionableDescription() {
+        val failure = IllegalStateException("Failed to create engine: UNKNOWN: ERROR: [native/source.cc:230]")
+        assertEquals(
+            "This model could not be loaded on GPU by LiteRT-LM. Use CPU or try another model artifact.",
+            describeBackendLoadFailure(ComputeBackend.GPU, failure),
+        )
+        assertEquals(failure.message, describeBackendLoadFailure(ComputeBackend.CPU, failure))
+        assertEquals("Not enough memory", describeBackendLoadFailure(ComputeBackend.GPU, IllegalStateException("Not enough memory")))
+    }
+
     @Test fun autoTriesGpuThenCpuAndKeepsGpuFirst() {
         assertEquals(listOf(ComputeBackend.GPU, ComputeBackend.CPU), ComputeBackendPolicy.attempts(ComputeBackend.AUTO, true, null))
         assertEquals(listOf(ComputeBackend.GPU, ComputeBackend.CPU), ComputeBackendPolicy.attempts(ComputeBackend.AUTO, true, ComputeBackend.GPU))
+        assertEquals(listOf(ComputeBackend.GPU, ComputeBackend.CPU), ComputeBackendPolicy.attempts(ComputeBackend.AUTO, true, ComputeBackend.CPU))
         assertEquals(listOf(ComputeBackend.CPU), ComputeBackendPolicy.attempts(ComputeBackend.AUTO, false, ComputeBackend.GPU))
     }
 
@@ -84,6 +95,14 @@ class ComputeBackendPolicyTest {
         val result = loadWithBackendFallback(listOf(ComputeBackend.GPU, ComputeBackend.CPU), load = { "engine" })
         assertEquals(ComputeBackend.GPU, result.backend)
         assertNull(result.fallbackReason)
+    }
+
+    @Test fun fullStopInGpuFailureDoesNotProduceDoublePeriod() {
+        val result = loadWithBackendFallback(listOf(ComputeBackend.GPU, ComputeBackend.CPU), load = {
+            if (it == ComputeBackend.GPU) throw IllegalStateException("GPU could not load this artifact.")
+            "engine"
+        })
+        assertEquals("GPU load failed: GPU could not load this artifact. Using CPU.", result.fallbackReason)
     }
 
     @Test fun explicitBackendFailureIsSurfacedWithoutCpuRetry() {

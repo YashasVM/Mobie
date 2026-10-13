@@ -73,6 +73,9 @@ class HuggingFaceCatalogRepository(
     private val json = Json { ignoreUnknownKeys = true }
     private val detailCache = ModelDetailCache<HfModel>()
 
+    /** Drops optional in-memory metadata without deleting downloaded models or optimized files. */
+    fun trimMemory() = detailCache.clear()
+
     suspend fun featured(): Result<List<AiModel>> = fetchModels(
         "https://huggingface.co/api/models?author=litert-community&sort=downloads&direction=-1&limit=60&full=true",
     )
