@@ -1,6 +1,9 @@
 package dev.yashasvm.mobie.ui
 
+import dev.yashasvm.mobie.core.device.BackendAdmission
+import dev.yashasvm.mobie.core.device.CompatibilityResolver
 import dev.yashasvm.mobie.core.device.CpuThreadPolicy
+import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.BuildConfig
 import java.security.MessageDigest
@@ -78,6 +81,25 @@ internal object AdvancedComputePolicy {
     fun compatibilityArtifact(artifact: ModelArtifact?, options: ComputeOptions, capabilities: ComputeCapabilities?): ModelArtifact? {
         val context = options.contextTokens?.takeIf { it in capabilities?.contextChoices().orEmpty() } ?: return artifact
         return artifact?.copy(contextWindowTokens = context)
+    }
+
+    /**
+     * What each backend choice would run and its RAM, through the same resolver as the load gate.
+     * Empty until the device and an artifact are known.
+     */
+    fun backendAdmissions(
+        device: DeviceProfile?,
+        artifact: ModelArtifact?,
+        visionEncoderLoaded: Boolean,
+        options: ComputeOptions,
+        capabilities: ComputeCapabilities?,
+        resolver: CompatibilityResolver,
+    ): Map<ComputeBackend, BackendAdmission> {
+        val target = device ?: return emptyMap()
+        val sized = compatibilityArtifact(artifact, options, capabilities) ?: return emptyMap()
+        return listOf(ComputeBackend.AUTO, ComputeBackend.CPU, ComputeBackend.GPU).associateWith { backend ->
+            resolver.resolveBackend(sized, target, visionEncoderLoaded, backend)
+        }
     }
 
     fun sampler(settings: SamplerSettings): SamplerSettings = SamplerSettings(

@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import dev.yashasvm.mobie.core.device.CompatibilityResolver
 import dev.yashasvm.mobie.core.device.CpuThreadPolicy
 import dev.yashasvm.mobie.core.runtime.ActivationType
 import dev.yashasvm.mobie.core.runtime.ComputeCapabilities
@@ -181,6 +182,11 @@ internal fun ComputeSettingsDialog(
     onReset: () -> Unit,
     onClose: () -> Unit,
 ) {
+    val resolver = remember { CompatibilityResolver() }
+    val backendAdmissions = remember(state.device, state.selectedArtifact, state.computeOptions, state.computeCapabilities, state.selected) {
+        AdvancedComputePolicy.backendAdmissions(state.device, state.selectedArtifact, state.selected?.supportsVision == true,
+            state.computeOptions, state.computeCapabilities, resolver)
+    }
     Dialog(onDismissRequest = onClose) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             TermButton("Close", onClick = onClose, style = TermButtonStyle.Ghost)
@@ -189,7 +195,8 @@ internal fun ComputeSettingsDialog(
                 onBackendChange = { onOptionsChange(state.computeOptions.copy(backend = it)) },
                 onCpuThreadsChange = { onOptionsChange(state.computeOptions.copy(cpuThreads = it)) },
                 hardware = state.hardware, artifactSizeBytes = state.selectedArtifact?.sizeBytes ?: 0,
-                measuredSpeeds = state.measuredDecodeSpeeds, options = state.computeOptions, sampler = state.sampler,
+                measuredSpeeds = state.measuredDecodeSpeeds, backendAdmissions = backendAdmissions,
+                options = state.computeOptions, sampler = state.sampler,
                 capabilities = state.computeCapabilities, activeCompute = state.activeCompute,
                 needsApply = state.computeNeedsApply, runtimeState = state.runtimeState, downloaded = state.downloadedPath != null,
                 onOptionsChange = onOptionsChange, onSamplerChange = onSamplerChange, onApply = onApply, onReset = onReset,

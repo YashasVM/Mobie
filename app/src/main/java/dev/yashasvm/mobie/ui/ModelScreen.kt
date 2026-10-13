@@ -66,6 +66,8 @@ import dev.yashasvm.mobie.core.model.CompatibilityResult
 import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.MemoryAdmissionTier
 import dev.yashasvm.mobie.core.model.ModelArtifact
+import dev.yashasvm.mobie.core.device.BackendAdmission
+import dev.yashasvm.mobie.core.device.CompatibilityResolver
 import dev.yashasvm.mobie.core.device.DecodeSpeed
 import dev.yashasvm.mobie.core.device.CpuThreadPolicy
 import dev.yashasvm.mobie.core.device.DecodeSpeedEstimator
@@ -103,6 +105,11 @@ internal fun ModelScreen(
     val model = state.selected ?: return
     val artifact = model.bestArtifact ?: return
     MemoryReliefResumeEffect(onMemoryRefresh)
+    val resolver = remember { CompatibilityResolver() }
+    val backendAdmissions = remember(state.device, state.selectedArtifact, state.computeOptions, state.computeCapabilities, state.selected) {
+        AdvancedComputePolicy.backendAdmissions(state.device, state.selectedArtifact, state.selected?.supportsVision == true,
+            state.computeOptions, state.computeCapabilities, resolver)
+    }
     var confirmWarning by remember { mutableStateOf(false) }
     var confirmRun by remember { mutableStateOf(false) }
     val downloading = state.download?.state in setOf(WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED, WorkInfo.State.RUNNING)
@@ -134,6 +141,7 @@ internal fun ModelScreen(
                     hardware = state.hardware,
                     artifactSizeBytes = artifact.sizeBytes,
                     measuredSpeeds = state.measuredDecodeSpeeds,
+                    backendAdmissions = backendAdmissions,
                     onBackendChange = onBackendChange,
                     onCpuThreadsChange = onCpuThreadsChange,
                     options = state.computeOptions,
@@ -531,6 +539,8 @@ internal fun ComputeSettingsPanel(
     hardware: HardwareProfile? = null,
     artifactSizeBytes: Long = 0,
     measuredSpeeds: Map<ComputeBackend, DecodeSpeed> = emptyMap(),
+    /** Per requested backend: what it would run and its RAM. Empty hides the RAM lines. */
+    backendAdmissions: Map<ComputeBackend, BackendAdmission> = emptyMap(),
     options: ComputeOptions = ComputeOptions(backend = backend, cpuThreads = cpuThreads),
     sampler: SamplerSettings = SamplerSettings(),
     capabilities: ComputeCapabilities? = null,
@@ -568,6 +578,13 @@ internal fun ComputeSettingsPanel(
                         )
                     }
                 }
+                backendAdmissions[ComputeBackend.AUTO]?.let { auto ->
+                    Column(Modifier.testTag("auto_admission"), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(autoPickLabel(auto), style = Mobie.numeric.small, color = MaterialTheme.colorScheme.onSurface)
+                        Text(auto.result.reason, style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
             }
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 FlagHeader("Generation speed", "tokens per second")
@@ -583,6 +600,12 @@ internal fun ComputeSettingsPanel(
                                 style = Mobie.numeric.small, color = MaterialTheme.colorScheme.onSurface)
                             Text(prediction.speed?.let(::decodeSpeedSourceLabel) ?: prediction.unavailableReason.orEmpty(),
                                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            backendAdmissions[choice]?.result?.let { result ->
+                                backendRamLabel(result)?.let { ram ->
+                                    Text(ram, modifier = Modifier.testTag("ram_${choice.name}"),
+                                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
                         }
                     }
                 }

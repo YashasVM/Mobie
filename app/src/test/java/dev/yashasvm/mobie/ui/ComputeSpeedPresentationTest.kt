@@ -1,11 +1,15 @@
 package dev.yashasvm.mobie.ui
 
+import dev.yashasvm.mobie.core.device.BackendAdmission
 import dev.yashasvm.mobie.core.device.CpuCluster
 import dev.yashasvm.mobie.core.device.DecodeSpeed
 import dev.yashasvm.mobie.core.device.DecodeSpeedConfidence
 import dev.yashasvm.mobie.core.device.DecodeSpeedSource
 import dev.yashasvm.mobie.core.device.GpuHardware
 import dev.yashasvm.mobie.core.device.HardwareProfile
+import dev.yashasvm.mobie.core.model.Compatibility
+import dev.yashasvm.mobie.core.model.CompatibilityResult
+import dev.yashasvm.mobie.core.runtime.ComputeBackend
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -42,4 +46,15 @@ class ComputeSpeedPresentationTest {
         assertEquals("9–12 tokens/s", decodeSpeedLabel(repeated))
         assertEquals("measured on this phone · 4 recent runs", decodeSpeedSourceLabel(repeated))
     }
+
+    @Test fun `backend RAM labels name the size and status, and stay silent for unknown size`() {
+        val gib = 1024L * 1024L * 1024L
+        assertEquals("needs ~3.0 GB RAM · Free memory first", backendRamLabel(result(Compatibility.WARNING, 3 * gib)))
+        assertEquals(null, backendRamLabel(result(Compatibility.WARNING, 0)))
+        assertEquals("Auto uses GPU · needs ~3.0 GB RAM",
+            autoPickLabel(BackendAdmission(ComputeBackend.GPU, result(Compatibility.COMPATIBLE, 3 * gib))))
+        assertEquals("Auto uses CPU", autoPickLabel(BackendAdmission(ComputeBackend.CPU, result(Compatibility.COMPATIBLE, 0))))
+    }
+
+    private fun result(status: Compatibility, ramBytes: Long) = CompatibilityResult(status, "", ramBytes)
 }

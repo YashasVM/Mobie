@@ -8,12 +8,15 @@ import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
 import dev.yashasvm.mobie.core.model.MemoryAdmissionTier
-import dev.yashasvm.mobie.core.model.estimateLiteRtRuntimeMemory
 import dev.yashasvm.mobie.core.runtime.ComputeBackend
 import dev.yashasvm.mobie.core.runtime.LiteRtContextWindowPolicy
 import dev.yashasvm.mobie.core.runtime.RuntimeLoadMemoryPolicy
 import dev.yashasvm.mobie.core.runtime.RuntimeLoadStoragePolicy
+import java.util.Locale
 import kotlin.math.max
+
+/** The backend a load would run, with its admission. For AUTO, this is the backend Auto would pick. */
+data class BackendAdmission(val backend: ComputeBackend, val result: CompatibilityResult)
 
 class CompatibilityResolver {
     fun selectBestArtifact(model: AiModel, device: DeviceProfile): ModelArtifact? = model.artifacts
@@ -50,6 +53,51 @@ class CompatibilityResolver {
         device: DeviceProfile,
         visionEncoderLoaded: Boolean = false,
         backend: ComputeBackend = ComputeBackend.CPU,
+        allowReclaim: Boolean = false,
+    ): CompatibilityResult = resolveBackend(artifact, device, visionEncoderLoaded, backend, allowReclaim).result
+
+    /**
+     * Admission for the backend a load would run. Explicit CPU and GPU are judged as requested.
+     * AUTO mirrors the native load gate: GPU runs when the device may try it and GPU is admitted
+     * now (or after reclaim, when the user has accepted it). Otherwise CPU runs and the reason says
+     * why GPU was skipped. Total RAM decides whether a backend can ever fit; current RAM decides
+     * whether it needs reclaim first.
+     */
+    fun resolveBackend(
+        artifact: ModelArtifact?,
+        device: DeviceProfile,
+        visionEncoderLoaded: Boolean = false,
+        backend: ComputeBackend = ComputeBackend.CPU,
+        allowReclaim: Boolean = false,
+    ): BackendAdmission {
+        if (backend != ComputeBackend.AUTO) {
+            return BackendAdmission(backend, resolveFor(artifact, device, visionEncoderLoaded, backend))
+        }
+        val cpu = resolveFor(artifact, device, visionEncoderLoaded, ComputeBackend.CPU)
+        if (!device.gpuAttemptable || cpu.status == Compatibility.INCOMPATIBLE) {
+            return BackendAdmission(ComputeBackend.CPU, cpu)
+        }
+        val gpu = resolveFor(artifact, device, visionEncoderLoaded, ComputeBackend.GPU)
+        val gpuAdmitted = gpu.status != Compatibility.INCOMPATIBLE && when (gpu.memoryTier) {
+            MemoryAdmissionTier.FITS_NOW -> true
+            MemoryAdmissionTier.FITS_AFTER_RECLAIM -> allowReclaim
+            MemoryAdmissionTier.IMPOSSIBLE, null -> false
+        }
+        if (gpuAdmitted) return BackendAdmission(ComputeBackend.GPU, gpu)
+        val gpuNeed = String.format(Locale.US, "%.1f GB", gpu.estimatedRamBytes.toDouble() / GIB)
+        val note = if (gpu.memoryTier == MemoryAdmissionTier.IMPOSSIBLE) {
+            "GPU needs about $gpuNeed, more than this phone can provide safely, so Auto uses CPU."
+        } else {
+            "GPU needs about $gpuNeed, more than is free now, so Auto uses CPU."
+        }
+        return BackendAdmission(ComputeBackend.CPU, cpu.copy(reason = "$note ${cpu.reason}"))
+    }
+
+    private fun resolveFor(
+        artifact: ModelArtifact?,
+        device: DeviceProfile,
+        visionEncoderLoaded: Boolean,
+        backend: ComputeBackend,
     ): CompatibilityResult {
         if (artifact == null || artifact.format != ModelFormat.LITERT_LM) {
             return CompatibilityResult(
@@ -98,9 +146,9 @@ class CompatibilityResolver {
                 contextWindowTokens = selectedContext,
             )
         }
+        // Same estimator as the native load gate, so pre-download, compute-panel and pre-load RAM agree.
         val memoryEstimate = requireNotNull(
-            estimateLiteRtRuntimeMemory(artifact.copy(contextWindowTokens = selectedContext),
-                privateWeightCopy = backend.privateWeightCopy, visionEncoderLoaded = visionEncoderLoaded),
+            RuntimeLoadMemoryPolicy.estimate(artifact.copy(contextWindowTokens = selectedContext), backend, visionEncoderLoaded),
         )
         val estimatedRam = memoryEstimate.estimatedRamBytes
         val requiredStorage = requiredStorageBytes(artifact.sizeBytes)
@@ -157,5 +205,6 @@ class CompatibilityResolver {
         const val PREFERRED_CONTEXT_TOKENS = 4_096
         const val THERMAL_STATUS_SEVERE = 3
         const val THERMAL_STATUS_CRITICAL = 4
+        const val GIB = 1024.0 * 1024.0 * 1024.0
     }
 }
