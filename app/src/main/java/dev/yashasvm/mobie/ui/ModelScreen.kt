@@ -5,7 +5,6 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -15,7 +14,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,28 +25,20 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,16 +46,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.work.WorkInfo
 import com.composables.icons.lucide.R as LucideR
@@ -72,19 +64,17 @@ import dev.yashasvm.mobie.core.model.AiModel
 import dev.yashasvm.mobie.core.model.Compatibility
 import dev.yashasvm.mobie.core.model.CompatibilityResult
 import dev.yashasvm.mobie.core.model.DeviceProfile
+import dev.yashasvm.mobie.core.model.MemoryAdmissionTier
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.runtime.ComputeBackend
-import dev.yashasvm.mobie.core.model.MemoryAdmissionTier
 import dev.yashasvm.mobie.data.download.DownloadProgress
 import dev.yashasvm.mobie.data.download.isCancellable
 import dev.yashasvm.mobie.ui.theme.Mobie
-import kotlinx.coroutines.launch
-
-private val ActionShape = RoundedCornerShape(12.dp)
+import java.util.Locale
 
 /**
- * Pre-flight spec sheet for one model: verdict, memory budget, storage, and the exact artifact
- * Mobie will download, with a sticky action dock for download / cancel / run.
+ * Pre-flight spec sheet for one model, styled as a terminal screen: a verdict box, a memory budget
+ * window, storage and artifact key/value grids, and a pinned action dock for download / cancel / run.
  */
 @Composable
 internal fun ModelScreen(
@@ -106,13 +96,13 @@ internal fun ModelScreen(
     val entrance = rememberEntranceTracker()
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        ModelTopBar(runtime = artifact.runtimeLabel, onBack = onBack)
+        ModelTopBar(path = model.id, runtime = artifact.runtimeLabel, onBack = onBack)
         LazyColumn(
             modifier = Modifier.weight(1f).fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
             contentPadding = PaddingValues(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 24.dp),
         ) {
-            item(key = "identity") { ModelIdentity(model, Modifier.entrance(entrance, "identity", 0)) }
+            item(key = "identity") { ModelIdentity(model, artifact, Modifier.entrance(entrance, "identity", 0)) }
             item(key = "verdict") { VerdictPanel(state.compatibility, Modifier.entrance(entrance, "verdict", 1)) }
             item(key = "memory") {
                 MemoryPanel(state.compatibility, state.device, Modifier.entrance(entrance, "memory", 2))
@@ -174,65 +164,28 @@ internal fun ModelScreen(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+/** Top bar: back, the model as a path (`model/<id>`), and the runtime tag. */
 @Composable
-private fun ComputeSettingsPanel(
-    backend: ComputeBackend,
-    cpuThreads: Int?,
-    onBackendChange: (ComputeBackend) -> Unit,
-    onCpuThreadsChange: (Int?) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Panel(modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            SectionLabel("Compute")
-            Text("Backend", style = MaterialTheme.typography.bodyMedium)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(ComputeBackend.AUTO, ComputeBackend.CPU, ComputeBackend.GPU).forEach { choice ->
-                    FilterChip(
-                        selected = backend == choice,
-                        onClick = { onBackendChange(choice) },
-                        label = { Text(choice.name.lowercase().replaceFirstChar(Char::uppercase)) },
-                    )
-                }
-            }
-            Text("CPU threads", style = MaterialTheme.typography.bodyMedium)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = cpuThreads == null, onClick = { onCpuThreadsChange(null) }, label = { Text("Auto") })
-                (1..8).forEach { count ->
-                    FilterChip(
-                        selected = cpuThreads == count,
-                        onClick = { onCpuThreadsChange(count) },
-                        label = { Text(count.toString()) },
-                    )
-                }
-            }
-            Text(
-                "First GPU load can be slow. Auto tries GPU on supported phones and uses CPU if loading fails. Changes apply on the next model load.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun ModelTopBar(runtime: String, onBack: () -> Unit) {
+private fun ModelTopBar(path: String, runtime: String, onBack: () -> Unit) {
+    val dim = MaterialTheme.colorScheme.onSurfaceVariant
+    val ink = MaterialTheme.colorScheme.onSurface
     Column(Modifier.fillMaxWidth().statusBarsPadding()) {
         Row(
-            Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp, top = 4.dp, bottom = 4.dp),
+            Modifier.fillMaxWidth().padding(start = 4.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
                 LucideIcon(LucideR.drawable.lucide_ic_arrow_left, "Back", Modifier.size(22.dp))
             }
             Text(
-                "Pre-flight check",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.weight(1f).padding(start = 4.dp),
+                buildAnnotatedString {
+                    withStyle(SpanStyle(color = dim)) { append("model/") }
+                    withStyle(SpanStyle(color = ink)) { append(middleEllipsis(path, 36)) }
+                },
+                style = Mobie.numeric.small,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f).padding(start = 4.dp),
             )
             Tag(runtime, icon = LucideR.drawable.lucide_ic_cpu)
         }
@@ -240,23 +193,23 @@ private fun ModelTopBar(runtime: String, onBack: () -> Unit) {
     }
 }
 
+/** Repo id as the large heading, author above it, and the facts that matter as tags. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ModelIdentity(model: AiModel, modifier: Modifier = Modifier) {
-    Column(modifier.padding(top = 12.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+private fun ModelIdentity(model: AiModel, artifact: ModelArtifact, modifier: Modifier = Modifier) {
+    Column(modifier.padding(top = 14.dp, bottom = 2.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (model.author.isNotBlank()) {
+            Text("by ${model.author}", style = Mobie.numeric.small, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         Text(
-            model.title,
-            style = MaterialTheme.typography.headlineSmall,
+            model.id,
+            style = Mobie.numeric.large,
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.semantics { heading() },
         )
-        Text(
-            model.id,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        if (model.title.isNotBlank() && model.title != model.id.substringAfter('/')) {
+            Text(model.title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+        }
         if (model.description.isNotBlank()) {
             Text(
                 model.description,
@@ -275,79 +228,58 @@ private fun ModelIdentity(model: AiModel, modifier: Modifier = Modifier) {
             Tag(
                 if (model.gated) "Gated" else "Public",
                 icon = if (model.gated) LucideR.drawable.lucide_ic_lock else LucideR.drawable.lucide_ic_globe,
+                color = if (model.gated) Mobie.signals.caution else null,
             )
             Tag(
                 if (model.supportsVision) "Vision" else "Text",
                 icon = if (model.supportsVision) LucideR.drawable.lucide_ic_eye else LucideR.drawable.lucide_ic_type,
             )
+            artifact.quantization?.let { Tag(it) }
+            model.license?.let { Tag("License: $it") }
         }
     }
 }
 
+/** A bordered verdict box in the signal color, with a `[✓]` / `[!]` / `[x]` mark and the reason. */
 @Composable
 private fun VerdictPanel(result: CompatibilityResult?, modifier: Modifier = Modifier) {
     val status = result?.status
     val target = if (status == null) MaterialTheme.colorScheme.onSurfaceVariant else status.signalColor()
     val color by animateColorAsState(target, tween(MotionMedium + 120, easing = EmphasizedEase), label = "verdict color")
-    Panel(modifier.fillMaxWidth(), borderColor = color.copy(alpha = .35f)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            SectionLabel("Verdict")
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                VerdictDot(color, status)
-                AnimatedContent(
-                    targetState = when (status) {
-                        Compatibility.COMPATIBLE -> "Runs on this phone"
-                        Compatibility.WARNING -> if (result.memoryTier == MemoryAdmissionTier.FITS_AFTER_RECLAIM) "Fits after freeing memory" else "Check before running"
-                        Compatibility.INCOMPATIBLE -> "Won't fit on this phone"
-                        Compatibility.CONVERSION_REQUIRED -> "Not directly runnable"
-                        null -> "Checking this phone"
-                    },
-                    transitionSpec = { fadeIn(tween(MotionMedium)) togetherWith fadeOut(tween(MotionShort)) },
-                    label = "verdict text",
-                ) { verdict ->
-                    Text(verdict, style = MaterialTheme.typography.headlineSmall, color = color)
-                }
-            }
-            result?.reason?.takeIf { it.isNotBlank() }?.let {
-                Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    val mark = when (status) {
+        Compatibility.COMPATIBLE -> "✓"
+        Compatibility.WARNING -> "!"
+        Compatibility.INCOMPATIBLE, Compatibility.CONVERSION_REQUIRED -> "x"
+        null -> "…"
+    }
+    Column(
+        modifier
+            .fillMaxWidth()
+            .border(1.dp, color)
+            .background(color.copy(alpha = .06f))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("[$mark]", style = Mobie.numeric.large, color = color)
+            AnimatedContent(
+                targetState = when (status) {
+                    Compatibility.COMPATIBLE -> "Runs on this phone"
+                    Compatibility.WARNING ->
+                        if (result?.memoryTier == MemoryAdmissionTier.FITS_AFTER_RECLAIM) "Fits after freeing memory" else "Check before running"
+                    Compatibility.INCOMPATIBLE -> "Won't fit on this phone"
+                    Compatibility.CONVERSION_REQUIRED -> "Not directly runnable"
+                    null -> "Checking this phone"
+                },
+                transitionSpec = { fadeIn(tween(MotionMedium)) togetherWith fadeOut(tween(MotionShort)) },
+                label = "verdict text",
+            ) { verdict ->
+                Text(verdict, style = MaterialTheme.typography.titleMedium, color = color)
             }
         }
-    }
-}
-
-/**
- * Status dot that sends out one soft ring when a verdict lands (and again if it changes).
- * While the check is still running it falls back to the shared breathing dot.
- */
-@Composable
-private fun VerdictDot(color: Color, status: Compatibility?) {
-    val ring = remember { Animatable(1f) }
-    val pop = remember { Animatable(1f) }
-    LaunchedEffect(status) {
-        if (status == null) return@LaunchedEffect
-        ring.snapTo(0f)
-        pop.snapTo(.6f)
-        launch { pop.animateTo(1f, tween(MotionMedium, easing = EmphasizedEase)) }
-        ring.animateTo(1f, tween(MotionLong - 80, easing = EmphasizedEase))
-    }
-    Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) {
-        Box(
-            Modifier
-                .size(12.dp)
-                .graphicsLayer {
-                    val scale = 1f + ring.value * .9f
-                    scaleX = scale
-                    scaleY = scale
-                    alpha = (1f - ring.value) * .45f
-                }
-                .background(color, CircleShape),
-        )
-        StatusDot(
-            color,
-            size = 12.dp,
-            pulsing = status == null,
-            modifier = Modifier.graphicsLayer { scaleX = pop.value; scaleY = pop.value },
-        )
+        result?.reason?.takeIf { it.isNotBlank() }?.let {
+            Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
@@ -363,9 +295,9 @@ private fun MemoryPanel(result: CompatibilityResult?, device: DeviceProfile?, mo
     val hasBreakdown = weights + kv + overhead > 0
     val segments = if (hasBreakdown) {
         listOf(
-            MemorySegment("Active model pages", weights, weightsColor),
+            MemorySegment("Model weights", weights, weightsColor),
             MemorySegment("KV cache", kv, kvColor),
-            MemorySegment("Runtime overhead", overhead, overheadColor),
+            MemorySegment("Runtime", overhead, overheadColor),
         )
     } else {
         listOf(MemorySegment("Estimated peak", peak, weightsColor))
@@ -373,71 +305,56 @@ private fun MemoryPanel(result: CompatibilityResult?, device: DeviceProfile?, mo
     val total = device?.totalRamBytes ?: 0L
     val available = device?.availableRamBytes ?: 0L
 
-    Panel(modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            SectionLabel("Memory budget") {
-                LucideIcon(
-                    LucideR.drawable.lucide_ic_memory_stick,
-                    null,
-                    Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            MetricRow {
-                val (peakValue, peakUnit) = splitBytes(peak)
-                Metric("Est. peak", peakValue, Modifier.weight(1f), unit = peakUnit, valueStyle = Mobie.numeric.large)
-                VerticalHairline(40.dp)
-                val (totalValue, totalUnit) = splitBytes(total)
-                Metric("Total RAM", totalValue, Modifier.weight(1f), unit = totalUnit, valueStyle = Mobie.numeric.large)
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                MemoryBar(
-                    segments = segments,
-                    capacityBytes = total,
-                    markerBytes = available.takeIf { it > 0 },
-                    height = 12.dp,
-                )
-                Row(Modifier.fillMaxWidth()) {
-                    Text("0", style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.weight(1f))
-                    Text(formatBytes(total), style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+    TuiWindow("memory budget", modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            MemoryBar(
+                segments = segments,
+                capacityBytes = total,
+                markerBytes = available.takeIf { it > 0 },
+                height = 14.dp,
+            )
+            Row(Modifier.fillMaxWidth()) {
+                Text("0", style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.weight(1f))
+                Text(formatBytes(total), style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             // Legend rows land just after the bar finishes sweeping in.
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                KvRow("Est. peak", formatBytes(peak), valueColor = MaterialTheme.colorScheme.onSurface)
                 segments.forEachIndexed { index, segment ->
-                    LegendRow(
+                    KvRow(
                         segment.label,
                         formatBytes(segment.bytes),
-                        segment.color,
+                        swatch = segment.color,
                         modifier = Modifier.appear(delayMillis = 320 + index * 50, offsetDp = 6f),
                     )
                 }
-                LegendRow(
+                KvRow(
                     "Free now",
                     formatBytes(available),
-                    MaterialTheme.colorScheme.onSurface,
-                    marker = true,
+                    swatch = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.appear(delayMillis = 320 + segments.size * 50, offsetDp = 6f),
                 )
             }
             Hairline()
-            SpecRow(
-                "Context window",
-                result?.contextWindowTokens?.takeIf { it > 0 }?.let { "${formatTokens(it)} tokens" } ?: "Unknown",
-                numeric = true,
-            )
-            SpecRow("File-backed weights", formatBytes(result?.modelWeightsBytes ?: 0L), numeric = true)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                KvRow("Total RAM", formatBytes(total))
+                KvRow(
+                    "Context window",
+                    result?.contextWindowTokens?.takeIf { it > 0 }?.let { "${formatTokens(it)} tokens" } ?: "Unknown",
+                )
+                KvRow("File-backed weights", formatBytes(result?.modelWeightsBytes ?: 0L))
+            }
             Text(
-                "App RAM ${formatBytes(device?.appPssBytes ?: 0L)} · Now ${formatBytes(available)} · " +
-                    "After reclaim ${formatBytes(device?.availableAfterReclaimBytes ?: available)} · " +
-                    "Swap ${formatBytes(device?.swapFreeBytes ?: 0L)} free / ${formatBytes(device?.swapTotalBytes ?: 0L)}",
+                "Needs about ${formatBytes(peak)} at peak. This phone has ${formatBytes(total)} in total, " +
+                    "${formatBytes(available)} free right now.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                "Needs about ${formatBytes(peak)} at peak. This phone has ${formatBytes(total)} in total, " +
-                    "${formatBytes(available)} free right now.",
+                "App RAM ${formatBytes(device?.appPssBytes ?: 0L)} · Now ${formatBytes(available)} · " +
+                    "After reclaim ${formatBytes(device?.availableAfterReclaimBytes ?: available)} · " +
+                    "Swap ${formatBytes(device?.swapFreeBytes ?: 0L)} free / ${formatBytes(device?.swapTotalBytes ?: 0L)}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -453,24 +370,43 @@ private fun MemoryPanel(result: CompatibilityResult?, device: DeviceProfile?, mo
     }
 }
 
+/**
+ * One terminal key/value row: dim key on the left, value on the right. Use [stacked] for values
+ * too long to share a line (such as file names), which puts the value under the key.
+ */
 @Composable
-private fun LegendRow(label: String, value: String, color: Color, modifier: Modifier = Modifier, marker: Boolean = false) {
-    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        // Fixed-width swatch column keeps every label aligned.
-        Box(Modifier.width(24.dp), contentAlignment = Alignment.CenterStart) {
-            Box(
-                Modifier
-                    .size(width = if (marker) 3.dp else 12.dp, height = 12.dp)
-                    .background(color, RoundedCornerShape(if (marker) 1.dp else 3.dp)),
+private fun KvRow(
+    key: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    swatch: Color? = null,
+    valueColor: Color? = null,
+    stacked: Boolean = false,
+) {
+    val dim = MaterialTheme.colorScheme.onSurfaceVariant
+    val ink = valueColor ?: MaterialTheme.colorScheme.onSurface
+    if (stacked) {
+        Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(key, style = Mobie.numeric.small, color = dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(value, style = Mobie.numeric.small, color = ink)
+        }
+    } else {
+        Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.weight(.42f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // The swatch column is always reserved so keys line up whether or not they have one.
+                Box(Modifier.size(8.dp).background(swatch ?: Color.Transparent))
+                Text(key, style = Mobie.numeric.small, color = dim, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            Text(
+                value,
+                style = Mobie.numeric.small,
+                color = ink,
+                modifier = Modifier.weight(.58f),
+                textAlign = TextAlign.End,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
         }
-        Text(
-            label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(1f),
-        )
-        RollingText(value, style = Mobie.numeric.small, color = MaterialTheme.colorScheme.onSurface)
     }
 }
 
@@ -489,31 +425,16 @@ private fun StoragePanel(
         fits -> MaterialTheme.colorScheme.primary
         else -> Mobie.signals.blocked
     }
-    Panel(modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            SectionLabel("Storage") {
-                LucideIcon(
-                    LucideR.drawable.lucide_ic_hard_drive,
-                    null,
-                    Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            MetricRow {
-                val (neededValue, neededUnit) = splitBytes(needed)
-                Metric("Needs", neededValue, Modifier.weight(1f), unit = neededUnit)
-                VerticalHairline(36.dp)
-                val (freeValue, freeUnit) = splitBytes(free)
-                Metric("Free", freeValue, Modifier.weight(1f), unit = freeUnit)
-                VerticalHairline(36.dp)
-                val after = if (needed > 0 && free > 0) free - needed else 0L
-                val (afterValue, afterUnit) = if (after < 0) "Short" to null else splitBytes(after)
-                Metric(
+    val after = if (needed > 0 && free > 0) free - needed else 0L
+    TuiWindow("storage", modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                KvRow("Needs", formatBytes(needed))
+                KvRow("Free", formatBytes(free))
+                KvRow(
                     "After",
-                    afterValue,
-                    Modifier.weight(1f),
-                    unit = afterUnit,
-                    valueColor = if (after < 0) Mobie.signals.blocked else MaterialTheme.colorScheme.onSurface,
+                    if (after < 0) "Short by ${formatBytes(-after)}" else formatBytes(after),
+                    valueColor = if (after < 0) Mobie.signals.blocked else null,
                 )
             }
             ProgressTrack(
@@ -529,7 +450,7 @@ private fun ArtifactPanel(artifact: ModelArtifact, model: AiModel, modifier: Mod
     val rows = buildList {
         add(SpecLine("Runtime", artifact.runtimeLabel))
         add(SpecLine("File", middleEllipsis(artifact.fileName.substringAfterLast('/'))))
-        add(SpecLine("Download size", formatBytes(artifact.sizeBytes), numeric = true))
+        add(SpecLine("Download size", formatBytes(artifact.sizeBytes)))
         add(SpecLine("Quantization", artifact.quantization ?: "Publisher default"))
         add(
             if (artifact.sha256.isNullOrBlank()) {
@@ -542,23 +463,14 @@ private fun ArtifactPanel(artifact: ModelArtifact, model: AiModel, modifier: Mod
         add(SpecLine("License", model.license ?: "Check model card"))
         add(SpecLine("Access", if (model.gated) "Hugging Face approval required" else "Public"))
     }
-    Panel(modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            SectionLabel("Artifact") {
-                LucideIcon(
-                    LucideR.drawable.lucide_ic_file_text,
-                    null,
-                    Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            rows.forEachIndexed { index, line ->
-                if (index > 0) Hairline()
-                SpecRow(
+    TuiWindow("artifact", modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            rows.forEach { line ->
+                KvRow(
                     line.label,
                     line.value,
                     valueColor = if (line.highlight) Mobie.signals.ready else null,
-                    numeric = line.numeric,
+                    stacked = line.value.length > 24,
                 )
             }
         }
@@ -568,35 +480,8 @@ private fun ArtifactPanel(artifact: ModelArtifact, model: AiModel, modifier: Mod
 private data class SpecLine(
     val label: String,
     val value: String,
-    val numeric: Boolean = false,
     val highlight: Boolean = false,
 )
-
-/** Label on the left, value right-aligned. Numbers use tabular figures; words use semibold body text. */
-@Composable
-private fun SpecRow(label: String, value: String, valueColor: Color? = null, numeric: Boolean = false) {
-    Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        verticalAlignment = Alignment.Top,
-    ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(0.4f),
-        )
-        Text(
-            value,
-            style = if (numeric) Mobie.numeric.small else MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-            color = valueColor ?: MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(0.6f),
-            textAlign = TextAlign.End,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
 
 /** Shortens long file names in the middle so the distinctive suffix (quantization, extension) stays visible. */
 private fun middleEllipsis(text: String, maxChars: Int = 44): String {
@@ -606,8 +491,84 @@ private fun middleEllipsis(text: String, maxChars: Int = 44): String {
     return text.take(head) + "…" + text.takeLast(tail)
 }
 
+@Composable
+private fun ComputeSettingsPanel(
+    backend: ComputeBackend,
+    cpuThreads: Int?,
+    onBackendChange: (ComputeBackend) -> Unit,
+    onCpuThreadsChange: (Int?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    TuiWindow("compute", modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlagHeader("--backend", "where the model runs")
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(ComputeBackend.AUTO, ComputeBackend.CPU, ComputeBackend.GPU).forEach { choice ->
+                        FlagChoice(
+                            label = choice.name.lowercase(Locale.US),
+                            selected = backend == choice,
+                            onClick = { onBackendChange(choice) },
+                        )
+                    }
+                }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlagHeader("--threads", "cpu threads")
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlagChoice("auto", selected = cpuThreads == null, onClick = { onCpuThreadsChange(null) })
+                    (1..8).forEach { count ->
+                        FlagChoice(
+                            label = count.toString(),
+                            selected = cpuThreads == count,
+                            onClick = { onCpuThreadsChange(count) },
+                        )
+                    }
+                }
+            }
+            Text(
+                "First GPU load can be slow. Auto tries GPU on supported phones and uses CPU if loading fails. Changes apply on the next model load.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** A terminal flag name followed by a plain-language hint, e.g. `--backend  where the model runs`. */
+@Composable
+private fun FlagHeader(flag: String, hint: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(flag, style = Mobie.numeric.small, color = MaterialTheme.colorScheme.primary)
+        Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** A square option button. The selected option is filled, like an inverted tmux cursor. */
+@Composable
+private fun FlagChoice(label: String, selected: Boolean, onClick: () -> Unit) {
+    val accent = MaterialTheme.colorScheme.primary
+    Box(
+        Modifier
+            .heightIn(min = 44.dp)
+            .widthIn(min = 44.dp)
+            .background(if (selected) accent else Color.Transparent)
+            .border(1.dp, if (selected) accent else MaterialTheme.colorScheme.outline)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .padding(horizontal = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            style = Mobie.numeric.small,
+            color = if (selected) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
 private data class PrimaryAction(@DrawableRes val icon: Int, val label: String)
 
+/** Pinned bottom bar: download status, the primary action, and cancel while a download runs. */
 @Composable
 private fun ActionDock(
     state: MobieUiState,
@@ -620,7 +581,8 @@ private fun ActionDock(
     onCancelDownload: () -> Unit,
 ) {
     val downloaded = state.downloadedPath != null
-    val showPrimary = !(downloaded && downloading)
+    // While a download runs, its progress line and Cancel say everything; a disabled button would not.
+    val showPrimary = !downloading
     val primary = when {
         downloaded -> PrimaryAction(LucideR.drawable.lucide_ic_play, "Run locally")
         downloading -> PrimaryAction(LucideR.drawable.lucide_ic_download, "Downloading…")
@@ -630,6 +592,7 @@ private fun ActionDock(
             if (artifact.sizeBytes > 0) "Download model · ${formatBytes(artifact.sizeBytes)}" else "Download model",
         )
     }
+    val primaryEnabled = (downloaded && state.compatibility?.status != Compatibility.INCOMPATIBLE) || canDownload
     // Keep the last download visible while its block collapses away.
     var lastDownload by remember { mutableStateOf(state.download) }
     if (state.download != null) lastDownload = state.download
@@ -640,7 +603,7 @@ private fun ActionDock(
             Modifier
                 .navigationBarsPadding()
                 .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             AnimatedVisibility(
                 visible = state.download != null,
@@ -654,60 +617,30 @@ private fun ActionDock(
                 enter = expandVertically(tween(MotionMedium, easing = EmphasizedEase)) + fadeIn(tween(MotionMedium)),
                 exit = shrinkVertically(tween(MotionMedium, easing = EmphasizedEase)) + fadeOut(tween(MotionShort)),
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    LucideIcon(
-                        LucideR.drawable.lucide_ic_lock,
-                        null,
-                        Modifier.padding(top = 2.dp).size(18.dp),
-                        tint = Mobie.signals.caution,
-                    )
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text("Hugging Face access required", style = MaterialTheme.typography.titleSmall)
-                        Text(
-                            "Add a token in Settings to download this gated model.",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    }
-                }
+                AccessNotice()
             }
             AnimatedVisibility(
                 visible = showPrimary,
                 enter = expandVertically(tween(MotionMedium, easing = EmphasizedEase)) + fadeIn(tween(MotionMedium)),
                 exit = shrinkVertically(tween(MotionMedium, easing = EmphasizedEase)) + fadeOut(tween(MotionShort)),
             ) {
-                val interaction = remember { MutableInteractionSource() }
-                Button(
-                    onClick = if (downloaded) onRun else onDownloadClick,
-                    enabled = (downloaded && state.compatibility?.status != Compatibility.INCOMPATIBLE) || canDownload,
-                    shape = ActionShape,
-                    interactionSource = interaction,
-                    colors = ButtonDefaults.buttonColors(
-                        disabledContainerColor = Mobie.signals.track,
-                        disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 52.dp)
-                        .pressScale(interaction)
-                        .testTag("model_primary_action"),
-                ) {
-                    AnimatedContent(
-                        targetState = primary,
-                        transitionSpec = {
-                            (slideInVertically(tween(MotionMedium, easing = EmphasizedEase)) { it / 2 } + fadeIn(tween(MotionMedium))) togetherWith
-                                (slideOutVertically(tween(MotionShort)) { -it / 2 } + fadeOut(tween(MotionShort))) using
-                                SizeTransform(clip = false)
-                        },
-                        contentAlignment = Alignment.Center,
-                        label = "primary action",
-                    ) { action ->
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            LucideIcon(action.icon, null, Modifier.size(18.dp))
-                            Spacer(Modifier.size(8.dp))
-                            Text(action.label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
-                        }
-                    }
+                AnimatedContent(
+                    targetState = primary,
+                    transitionSpec = {
+                        (slideInVertically(tween(MotionMedium, easing = EmphasizedEase)) { it / 2 } + fadeIn(tween(MotionMedium))) togetherWith
+                            (slideOutVertically(tween(MotionShort)) { -it / 2 } + fadeOut(tween(MotionShort))) using
+                            SizeTransform(clip = false)
+                    },
+                    label = "primary action",
+                ) { action ->
+                    TermButton(
+                        text = action.label,
+                        onClick = if (downloaded) onRun else onDownloadClick,
+                        modifier = Modifier.fillMaxWidth().testTag("model_primary_action"),
+                        style = TermButtonStyle.Primary,
+                        enabled = primaryEnabled,
+                        icon = action.icon,
+                    )
                 }
             }
             AnimatedVisibility(
@@ -715,21 +648,13 @@ private fun ActionDock(
                 enter = expandVertically(tween(MotionMedium, easing = EmphasizedEase)) + fadeIn(tween(MotionMedium)),
                 exit = shrinkVertically(tween(MotionMedium, easing = EmphasizedEase)) + fadeOut(tween(MotionShort)),
             ) {
-                val interaction = remember { MutableInteractionSource() }
-                OutlinedButton(
+                TermButton(
+                    text = "Cancel download",
                     onClick = onCancelDownload,
-                    shape = ActionShape,
-                    interactionSource = interaction,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 48.dp)
-                        .pressScale(interaction)
-                        .testTag("cancel_download"),
-                ) {
-                    LucideIcon(LucideR.drawable.lucide_ic_x, null, Modifier.size(18.dp))
-                    Spacer(Modifier.size(8.dp))
-                    Text("Cancel download", style = MaterialTheme.typography.labelLarge)
-                }
+                    modifier = Modifier.fillMaxWidth().testTag("cancel_download"),
+                    style = TermButtonStyle.Ghost,
+                    icon = LucideR.drawable.lucide_ic_x,
+                )
             }
             state.error?.let {
                 Text(
@@ -743,56 +668,82 @@ private fun ActionDock(
     }
 }
 
+/** Shown in the dock when a gated model has no token. Explains the next step without a dead end. */
 @Composable
-private fun DownloadStatus(download: DownloadProgress) {
-    val progress = if (download.totalBytes > 0) {
-        (download.downloadedBytes.toFloat() / download.totalBytes).coerceIn(0f, 1f)
-    } else 0f
-    val active = !download.state.isFinished
-    val label = downloadProgressLabel(download)
-    // "42% · 1.2 GB of 3 GB · 8 MB/s" → the percentage rolls, the rest stays steady.
-    val percent = label.substringBefore(" · ").takeIf { it.endsWith("%") }
-    val detail = if (percent != null) label.substringAfter(" · ") else label
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (active && download.totalBytes > 0) {
-            ProgressTrack(progress)
-        } else if (active) {
-            LinearProgressIndicator(
-                modifier = Modifier.fillMaxWidth().height(4.dp),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = Mobie.signals.track,
-                strokeCap = StrokeCap.Round,
+private fun AccessNotice() {
+    val caution = Mobie.signals.caution
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .border(1.dp, caution.copy(alpha = .5f))
+            .padding(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        LucideIcon(LucideR.drawable.lucide_ic_lock, null, Modifier.padding(top = 2.dp).size(18.dp), tint = caution)
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text("Hugging Face access required", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "Add a token in Settings to download this gated model.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
             )
         }
+    }
+}
+
+/**
+ * Download readout in one mono line, `42% · 512 MB / 1.2 GB · 8.1 MB/s · 1m 4s left`, above a
+ * block-cell progress meter. The percentage rolls; the rest stays steady.
+ */
+@Composable
+private fun DownloadStatus(download: DownloadProgress) {
+    val known = download.totalBytes > 0
+    val active = !download.state.isFinished
+    val progress = if (known) (download.downloadedBytes.toFloat() / download.totalBytes).coerceIn(0f, 1f) else 0f
+    val percent = if (known) (download.downloadedBytes.toDouble() / download.totalBytes * 100).toInt().coerceIn(0, 100) else 0
+    val error = download.error
+    val dim = MaterialTheme.colorScheme.onSurfaceVariant
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (active && known) ProgressTrack(progress)
         Row(
             Modifier.fillMaxWidth().semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (download.error != null) {
-                Text(
-                    download.error,
+            when {
+                error != null -> Text(
+                    error,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.weight(1f),
                 )
-            } else {
-                if (active) StatusDot(MaterialTheme.colorScheme.primary, pulsing = true, size = 8.dp)
-                if (percent != null) {
-                    RollingText(percent, style = Mobie.numeric.medium, color = MaterialTheme.colorScheme.onSurface)
-                }
-                Text(
-                    detail,
+                download.state == WorkInfo.State.CANCELLED -> Text(
+                    "Download cancelled",
                     style = Mobie.numeric.small,
-                    color = if (percent != null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                    color = dim,
                     modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
                 )
-                if (active) {
-                    downloadEta(download)?.let {
-                        Text(it, style = Mobie.numeric.small, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+                !known -> {
+                    if (active) StatusDot(MaterialTheme.colorScheme.primary, pulsing = true, size = 8.dp)
+                    Text("Starting download…", style = Mobie.numeric.small, color = MaterialTheme.colorScheme.onSurface)
+                    if (active) BlinkingCursor(width = 7.dp, height = 13.dp)
+                }
+                else -> {
+                    if (active) StatusDot(MaterialTheme.colorScheme.primary, pulsing = true, size = 8.dp)
+                    RollingText("$percent%", style = Mobie.numeric.medium, color = MaterialTheme.colorScheme.onSurface)
+                    val rest = buildList {
+                        add("${formatBytes(download.downloadedBytes)} / ${formatBytes(download.totalBytes)}")
+                        if (active && download.bytesPerSecond > 0) add("${formatBytes(download.bytesPerSecond)}/s")
+                        if (active) downloadEta(download)?.let { add(it) }
+                    }.joinToString(" · ")
+                    Text(
+                        " · $rest",
+                        style = Mobie.numeric.small,
+                        color = dim,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
         }

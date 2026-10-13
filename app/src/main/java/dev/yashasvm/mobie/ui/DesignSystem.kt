@@ -5,6 +5,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
@@ -30,7 +31,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -58,12 +63,16 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -81,8 +90,9 @@ import kotlinx.coroutines.delay
 // Shared visual building blocks. Screens compose these instead of styling raw Surfaces so that
 // panels, telemetry, and status colors read as one system.
 
-internal val PanelShape = RoundedCornerShape(20.dp)
-internal val PillShape = RoundedCornerShape(100)
+// Terminal windows are square. The names stay so call sites read the same as before.
+internal val PanelShape: Shape = RectangleShape
+internal val PillShape: Shape = RectangleShape
 
 /** Flat surface with a hairline border. The base container for every grouped block. */
 @Composable
@@ -117,13 +127,28 @@ internal fun SectionLabel(
     color: Color = MaterialTheme.colorScheme.onSurfaceVariant,
     trailing: (@Composable RowScope.() -> Unit)? = null,
 ) {
-    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    // Reads like a man-page section: NAME followed by a dashed rule to the edge.
+    val rule = Mobie.signals.hairline
+    Row(
+        modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
         Text(
             text.uppercase(Locale.US),
             style = MaterialTheme.typography.labelMedium,
             color = color,
-            modifier = Modifier.weight(1f),
+            maxLines = 1,
         )
+        Canvas(Modifier.weight(1f).height(1.dp)) {
+            drawLine(
+                rule,
+                Offset(0f, 0f),
+                Offset(size.width, 0f),
+                strokeWidth = size.height,
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx())),
+            )
+        }
         trailing?.invoke(this)
     }
 }
@@ -181,21 +206,44 @@ internal fun Hairline(modifier: Modifier = Modifier) {
     Box(modifier.fillMaxWidth().height(1.dp).background(Mobie.signals.hairline))
 }
 
-/** Status dot. When [pulsing], it breathes to show live work (loading, generating). */
+/** Square status block. When [pulsing], it blinks like a cursor to show live work. */
 @Composable
 internal fun StatusDot(color: Color, modifier: Modifier = Modifier, pulsing: Boolean = false, size: Dp = 7.dp) {
-    val alpha = if (pulsing) {
-        val transition = rememberInfiniteTransition(label = "status pulse")
-        val value by transition.animateFloat(
-            initialValue = 1f,
-            targetValue = .25f,
-            animationSpec = infiniteRepeatable(tween(700, easing = LinearEasing), RepeatMode.Reverse),
-            label = "status pulse alpha",
-        )
-        value
-    } else 1f
-    Box(modifier.size(size).alpha(alpha).background(color, CircleShape))
+    if (!pulsing) {
+        Box(modifier.size(size).background(color))
+        return
+    }
+    val transition = rememberInfiniteTransition(label = "status blink")
+    // Read in the draw phase so a blinking dot never recomposes its parent.
+    val alpha = transition.animateFloat(
+        initialValue = 1f,
+        targetValue = .2f,
+        animationSpec = infiniteRepeatable(tween(530, easing = StepEasing), RepeatMode.Reverse),
+        label = "status blink alpha",
+    )
+    Box(modifier.size(size).graphicsLayer { this.alpha = alpha.value }.background(color))
 }
+
+/** A block cursor that blinks at terminal cadence. Place it after streaming or prompt text. */
+@Composable
+internal fun BlinkingCursor(
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.primary,
+    width: Dp = 8.dp,
+    height: Dp = 16.dp,
+) {
+    val transition = rememberInfiniteTransition(label = "cursor")
+    val alpha = transition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(tween(530, easing = StepEasing), RepeatMode.Reverse),
+        label = "cursor alpha",
+    )
+    Box(modifier.size(width, height).graphicsLayer { this.alpha = alpha.value }.background(color))
+}
+
+/** Jumps between start and end values, like a terminal cursor, instead of fading. */
+internal val StepEasing = Easing { fraction -> if (fraction < .5f) 0f else 1f }
 
 /** Compact bordered tag. Use [color] to tint for status; defaults to neutral. */
 @Composable
@@ -209,17 +257,16 @@ internal fun Tag(
     val tint = color ?: MaterialTheme.colorScheme.onSurfaceVariant
     Row(
         modifier
-            .clip(PillShape)
-            .background(color?.copy(alpha = .10f) ?: Color.Transparent, PillShape)
-            .border(1.dp, color?.copy(alpha = .28f) ?: Mobie.signals.hairline, PillShape)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .background(color?.copy(alpha = .08f) ?: Color.Transparent)
+            .border(1.dp, color?.copy(alpha = .45f) ?: Mobie.signals.hairline)
+            .padding(horizontal = 6.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         if (icon != null) LucideIcon(icon, null, Modifier.size(12.dp), tint = tint)
         Text(
             text,
-            style = if (mono) Mobie.numeric.tiny else MaterialTheme.typography.labelSmall,
+            style = Mobie.numeric.tiny,
             color = tint,
             maxLines = 1,
         )
@@ -231,15 +278,13 @@ internal fun Tag(
 internal fun SignalTag(text: String, color: Color, modifier: Modifier = Modifier, pulsing: Boolean = false) {
     Row(
         modifier
-            .clip(PillShape)
-            .background(color.copy(alpha = .10f), PillShape)
-            .border(1.dp, color.copy(alpha = .28f), PillShape)
-            .padding(horizontal = 9.dp, vertical = 4.dp),
+            .border(1.dp, color.copy(alpha = .7f))
+            .padding(horizontal = 7.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         StatusDot(color, pulsing = pulsing, size = 6.dp)
-        Text(text, style = MaterialTheme.typography.labelSmall, color = color, maxLines = 1)
+        Text(text, style = Mobie.numeric.tiny, color = color, maxLines = 1)
     }
 }
 
@@ -271,22 +316,27 @@ internal fun MemoryBar(
             .height(height)
             .semantics { contentDescription = description },
     ) {
-        val radius = CornerRadius(size.height / 2, size.height / 2)
-        drawRoundRect(track, cornerRadius = radius)
-        if (capacityBytes <= 0) return@Canvas
-        var x = 0f
-        val gap = 2.dp.toPx()
-        segments.filter { it.bytes > 0 }.forEach { segment ->
-            val width = (segment.bytes.toFloat() / capacityBytes * size.width * reveal.value).coerceAtMost(size.width - x)
-            if (width <= 0f) return@forEach
-            drawRoundRect(
-                segment.color,
-                topLeft = Offset(x, 0f),
-                size = Size((width - gap).coerceAtLeast(2f), size.height),
-                cornerRadius = radius,
-            )
-            x += width
+        // A row of block cells, like a `█████░░░░` meter. Each cell takes the color of the segment
+        // covering most of it, so the bar stays crisp at any width.
+        val cell = 5.dp.toPx()
+        val gap = 1.5.dp.toPx()
+        val count = ((size.width + gap) / (cell + gap)).toInt().coerceAtLeast(1)
+        val pitch = (size.width + gap) / count
+        val visible = segments.filter { it.bytes > 0 }
+        val total = if (capacityBytes > 0) capacityBytes.toFloat() else 1f
+        for (i in 0 until count) {
+            val mid = (i + .5f) / count
+            var acc = 0f
+            var fill = track
+            if (capacityBytes > 0 && mid <= reveal.value) {
+                for (segment in visible) {
+                    acc += segment.bytes / total
+                    if (mid <= acc) { fill = segment.color; break }
+                }
+            }
+            drawRect(fill, topLeft = Offset(i * pitch, 0f), size = Size(pitch - gap, size.height))
         }
+        if (capacityBytes <= 0) return@Canvas
         markerBytes?.takeIf { it in 1..capacityBytes }?.let { marker ->
             val mx = marker.toFloat() / capacityBytes * size.width
             drawRect(markerColor.copy(alpha = reveal.value), topLeft = Offset(mx - 1f, -2f), size = Size(2.dp.toPx(), size.height + 4f))
@@ -299,27 +349,184 @@ internal fun MemoryBar(
 internal fun ProgressTrack(progress: Float, modifier: Modifier = Modifier, color: Color = MaterialTheme.colorScheme.primary) {
     val track = Mobie.signals.track
     val animated by animateFloatAsState(progress.coerceIn(0f, 1f), tween(MotionMedium, easing = EmphasizedEase), label = "progress")
-    val sheen = rememberInfiniteTransition(label = "progress sheen")
-    val sheenX by sheen.animateFloat(0f, 1f, infiniteRepeatable(tween(1600, easing = LinearEasing)), label = "progress sheen x")
-    Canvas(modifier.fillMaxWidth().height(4.dp)) {
-        val radius = CornerRadius(size.height / 2, size.height / 2)
-        drawRoundRect(track, cornerRadius = radius)
-        val filled = size.width * animated
-        drawRoundRect(color, size = Size(filled, size.height), cornerRadius = radius)
-        // A soft highlight travelling along the filled part signals that work is ongoing.
-        if (filled > 0f && animated < 1f) {
-            val band = size.height * 12
-            val cx = filled * sheenX
-            drawRect(
-                Brush.horizontalGradient(
-                    listOf(Color.Transparent, Color.White.copy(alpha = .35f), Color.Transparent),
-                    startX = cx - band,
-                    endX = cx + band,
-                ),
-                topLeft = Offset((cx - band).coerceAtLeast(0f), 0f),
-                size = Size((band * 2).coerceAtMost(filled - (cx - band).coerceAtLeast(0f)).coerceAtLeast(0f), size.height),
+    val blink = rememberInfiniteTransition(label = "progress head")
+    val head = blink.animateFloat(1f, .25f, infiniteRepeatable(tween(530, easing = StepEasing), RepeatMode.Reverse), label = "progress head alpha")
+    Canvas(modifier.fillMaxWidth().height(8.dp)) {
+        // `[██████▒░░░░░]`: filled cells, a blinking head cell while work is ongoing, empty track.
+        val cell = 4.dp.toPx()
+        val gap = 1.5.dp.toPx()
+        val count = ((size.width + gap) / (cell + gap)).toInt().coerceAtLeast(1)
+        val pitch = (size.width + gap) / count
+        val filled = (animated * count).toInt().coerceIn(0, count)
+        for (i in 0 until count) {
+            val fill = when {
+                i < filled -> color
+                i == filled && animated in 0.0001f..0.9999f -> color.copy(alpha = head.value)
+                else -> track
+            }
+            drawRect(fill, topLeft = Offset(i * pitch, 0f), size = Size(pitch - gap, size.height))
+        }
+    }
+}
+
+/**
+ * A terminal window: hairline frame with a title bar (`title` left, `meta` right). Use for any
+ * grouped block that benefits from a name, such as the device panel or a pre-flight check.
+ */
+@Composable
+internal fun TuiWindow(
+    title: String,
+    modifier: Modifier = Modifier,
+    meta: String? = null,
+    metaColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    borderColor: Color = MaterialTheme.colorScheme.outline.copy(alpha = .55f),
+    onClick: (() -> Unit)? = null,
+    content: @Composable () -> Unit,
+) {
+    Panel(modifier, color = MaterialTheme.colorScheme.surfaceContainer, borderColor = borderColor, onClick = onClick) {
+        Column {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    title,
+                    style = Mobie.numeric.tiny,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (meta != null) Text(meta, style = Mobie.numeric.tiny, color = metaColor, maxLines = 1)
+            }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(borderColor))
+            content()
+        }
+    }
+}
+
+/** Visual weight of a [TermButton]. */
+internal enum class TermButtonStyle { Primary, Ghost, Danger }
+
+/**
+ * The website's `[ download apk ]` button: a bordered label that inverts while pressed. Primary is
+ * filled amber because it is the one action we want on a screen; Ghost and Danger stay outlined.
+ */
+@Composable
+internal fun TermButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    style: TermButtonStyle = TermButtonStyle.Primary,
+    enabled: Boolean = true,
+    @DrawableRes icon: Int? = null,
+    hint: String? = null,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val accent = when (style) {
+        TermButtonStyle.Primary -> MaterialTheme.colorScheme.primary
+        TermButtonStyle.Ghost -> MaterialTheme.colorScheme.onSurface
+        TermButtonStyle.Danger -> Mobie.signals.blocked
+    }
+    val filled = enabled && (style == TermButtonStyle.Primary) != pressed
+    val content = when {
+        !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .6f)
+        filled -> MaterialTheme.colorScheme.background
+        else -> accent
+    }
+    val border = when {
+        !enabled -> Mobie.signals.hairline
+        style == TermButtonStyle.Ghost && !pressed -> MaterialTheme.colorScheme.outline
+        else -> accent
+    }
+    Row(
+        modifier
+            .heightIn(min = 44.dp)
+            .background(if (filled) accent else Color.Transparent)
+            .border(1.dp, border)
+            .clickable(interactionSource = interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+    ) {
+        if (icon != null) LucideIcon(icon, null, Modifier.size(16.dp), tint = content)
+        // Brackets are separate glyphs so the label keeps its exact text for accessibility and tests.
+        Text("[", style = MaterialTheme.typography.labelLarge, color = content.copy(alpha = .7f))
+        Text(text, style = MaterialTheme.typography.labelLarge, color = content, maxLines = 1)
+        Text("]", style = MaterialTheme.typography.labelLarge, color = content.copy(alpha = .7f))
+        if (hint != null) Text(hint, style = Mobie.numeric.tiny, color = content.copy(alpha = .7f), maxLines = 1)
+    }
+}
+
+/**
+ * tmux-like status line: an amber bar holding [segments]. The [selected] segment is shown inverted,
+ * the way tmux marks the current window. Purely informational unless a segment has an action.
+ */
+internal data class StatusSegment(val text: String, val onClick: (() -> Unit)? = null)
+
+@Composable
+internal fun StatusLine(
+    segments: List<StatusSegment>,
+    modifier: Modifier = Modifier,
+    selected: Int = 0,
+    trailing: String? = null,
+) {
+    val bar = MaterialTheme.colorScheme.primary
+    val ink = MaterialTheme.colorScheme.background
+    Row(modifier.fillMaxWidth().height(26.dp).background(bar), verticalAlignment = Alignment.CenterVertically) {
+        segments.forEachIndexed { index, segment ->
+            val on = index == selected
+            Text(
+                segment.text,
+                style = Mobie.numeric.tiny.copy(fontWeight = FontWeight.Medium),
+                color = if (on) bar else ink,
+                maxLines = 1,
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .background(if (on) ink else Color.Transparent)
+                    .then(if (segment.onClick != null) Modifier.clickable(onClick = segment.onClick) else Modifier)
+                    .wrapContentHeight(Alignment.CenterVertically)
+                    .padding(horizontal = 9.dp),
             )
         }
+        Spacer(Modifier.weight(1f))
+        if (trailing != null) {
+            Text(
+                trailing,
+                style = Mobie.numeric.tiny.copy(fontWeight = FontWeight.Medium),
+                color = ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 9.dp),
+            )
+        }
+    }
+}
+
+/** A `$ command` line: dim prompt glyph then text. Use for empty states and screen intros. */
+@Composable
+internal fun PromptLine(
+    text: String,
+    modifier: Modifier = Modifier,
+    prompt: String = "$",
+    color: Color = MaterialTheme.colorScheme.onSurface,
+    cursor: Boolean = false,
+) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(prompt, style = Mobie.numeric.small, color = MaterialTheme.colorScheme.primary)
+        Text(text, style = Mobie.numeric.small, color = color)
+        if (cursor) BlinkingCursor(width = 7.dp, height = 14.dp)
+    }
+}
+
+/** A `[✓] text` / `[!] text` / `[x] text` checklist line in the matching signal color. */
+@Composable
+internal fun CheckLine(text: String, mark: String, color: Color, modifier: Modifier = Modifier) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("[$mark]", style = Mobie.numeric.small, color = color)
+        Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
     }
 }
 
@@ -391,14 +598,20 @@ internal fun Modifier.shimmer(): Modifier = composed {
     val base = Mobie.signals.track
     val highlight = MaterialTheme.colorScheme.onSurface.copy(alpha = .07f)
     val transition = rememberInfiniteTransition(label = "shimmer")
-    val x by transition.animateFloat(-1f, 2f, infiniteRepeatable(tween(1300, easing = LinearEasing)), label = "shimmer x")
+    // Read the animated value in the draw phase only; reading it during composition would
+    // recompose the skeleton on every animation frame.
+    val x = transition.animateFloat(-1f, 2f, infiniteRepeatable(tween(1300, easing = LinearEasing)), label = "shimmer x")
     drawWithCache {
-        val brush = Brush.linearGradient(
-            listOf(base, highlight, base),
-            start = Offset(size.width * x - size.width / 2, 0f),
-            end = Offset(size.width * x + size.width / 2, size.height),
-        )
-        onDrawBehind { drawRect(base); drawRect(brush) }
+        onDrawBehind {
+            val offset = x.value
+            val brush = Brush.linearGradient(
+                listOf(base, highlight, base),
+                start = Offset(size.width * offset - size.width / 2, 0f),
+                end = Offset(size.width * offset + size.width / 2, size.height),
+            )
+            drawRect(base)
+            drawRect(brush)
+        }
     }
 }
 
