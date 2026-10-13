@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=1920, height=1080">
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js" integrity="sha384-sG0Hv1tP1lZCk9KQmrIbY/XNwi+OY84GQqhMscbnsoBFqAz8KNCil1kvfL3Hbbk2" crossorigin="anonymous"></script>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: #000;
+      }
+      #root {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: #0C0C0B;
+      }
+      .scene {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div data-hf-id="hf-b2vm" id="root" data-composition-id="main" data-start="0" data-duration="47.302" data-width="1920" data-height="1080" data-fx-chain="{&quot;version&quot;:1,&quot;nodes&quot;:[{&quot;type&quot;:&quot;truepeak&quot;,&quot;id&quot;:&quot;delivery-ceiling&quot;,&quot;label&quot;:&quot;Final mix peak ceiling&quot;,&quot;params&quot;:{&quot;ceiling&quot;:-3,&quot;lookahead&quot;:3,&quot;release&quot;:100}}]}">
+      <hf-audio-group id="narration" data-label="Narration" data-volume="1" data-fx-chain="{&quot;version&quot;:1,&quot;nodes&quot;:[{&quot;type&quot;:&quot;compressor&quot;,&quot;id&quot;:&quot;evenness&quot;,&quot;label&quot;:&quot;Gentle voice levelling&quot;,&quot;params&quot;:{&quot;threshold&quot;:-18,&quot;ratio&quot;:2.5,&quot;attack&quot;:6,&quot;release&quot;:130,&quot;knee&quot;:4,&quot;makeup&quot;:1.5,&quot;mix&quot;:1}},{&quot;type&quot;:&quot;truepeak&quot;,&quot;id&quot;:&quot;voice-peaks&quot;,&quot;label&quot;:&quot;Control voice spikes&quot;,&quot;params&quot;:{&quot;ceiling&quot;:-4,&quot;lookahead&quot;:3,&quot;release&quot;:100}}]}"></hf-audio-group>
+      <div data-hf-id="hf-zxxc" id="el-01-hook" class="clip scene scene-01" data-composition-id="01-hook" data-composition-src="compositions/frames/01-hook.html" data-start="0" data-duration="5.009" data-track-index="0" data-track-kind="graphics"></div>
+      <audio data-hf-id="hf-ehoo" id="el-01-hook-voice" src="assets/voice/01-cloud.wav" data-start="0" data-duration="4.729" data-track-index="10" data-volume="1" data-audio-group="narration" data-fx-chain="{&quot;version&quot;:1,&quot;nodes&quot;:[{&quot;type&quot;:&quot;gain&quot;,&quot;id&quot;:&quot;level&quot;,&quot;label&quot;:&quot;Match narration loudness&quot;,&quot;params&quot;:{&quot;gain&quot;:1.05}}]}"></audio>
+
+      <div data-hf-id="hf-c1m2" id="el-02-not-anymore" class="clip scene scene-02" data-composition-id="02-not-anymore" data-composition-src="compositions/frames/02-not-anymore.html" data-start="4.729" data-duration="1.403" data-track-index="1" data-track-kind="graphics"></div>
+      <audio data-hf-id="hf-6skl" id="el-02-not-anymore-voice" src="assets/voice/02.wav" data-start="4.729" data-duration="1.123" data-track-index="10" data-volume="1" data-audio-group="narration" data-fx-chain="{&quot;version&quot;:1,&quot;nodes&quot;:[{&quot;type&quot;:&quot;gain&quot;,&quot;id&quot;:&quot;level&quot;,&quot;label&quot;:&quot;Match narration loudness&quot;,&quot;params&quot;:{&quot;gain&quot;:-1.85}}]}"></audio>
+
+      <div data-hf-id="hf-e371" id="el-03-meet-mobie" class="clip scene scene-03" data-composition-id="03-meet-mobie" data-composition-src="compositions/frames/03-meet-mobie.html" data-start="5.852" data-duration="4.512" data-track-index="0" data-track-kind="graphics"></div>
+      <audio data-hf-id="hf-9icp" id="el-03-meet-mobie-voice" src="assets/voice/03.wav" data-start="5.852" data-duration="4.232" data-track-index="10" data-volume="1" data-audio-group="narration" data-fx-chain="{&quot;version&quot;:1,&quot;nodes&quot;:[{&quot;type&quot;:&quot;gain&quot;,&quot;id&quot;:&quot;level&quot;,&quot;label&quot;:&quot;Match narration loudness&quot;,&quot;params&quot;:{&quot;gain&quot;:-1.95}}]}"></audio>
+
+      <div data-hf-id="hf-q45l" id="el-04-browse" class="clip scene scene-04" data-composition-id="04-browse" data-composition-src="compositions/frames/04-browse.html" data-start="10.084" data-duration="3.859" data-track-index="1" data-track-kind="graphics"></div>
+      <audio data-hf-id="hf-fvhs" id="el-04-browse-voice" src="assets/voice/04.wav" data-start="10.084" data-duration="3.579" data-track-index="10" data-volume="1" data-audio-group="narration" data-fx-chain="{&quot;version&quot;:1,&quot;nodes&quot;:[{&quot;type&quot;:&quot;gain&quot;,&quot;id&quot;:&quot;level&quot;,&quot;label&quot;:&quot;Match narration loudness&quot;,&quot;params&quot;:{&quot;gain&quot;:-0.65}}]}"></audio>
+
+      <div data-hf-id="hf-ty9w" id="el-05-fit-check" class="clip scene scene-05" data-composition-id="05-fit-check" data-composition-src="compositions/frames/05-fit-check.html" data-start="13.663" data-duration="5.008" data-track-index="0" data-track-kind="graphics"></div>
+      <audio data-hf-id="hf-rs7j" id="el-05-fit-check-voice" src="assets/voice/05.wav" data-start="13.663" data-duration="4.728" data-track-index="10" data-volume="1" data-audio-group="narration" data-fx-chain="{&quot;version&quot;:1,&quot;nodes&quot;:[{&quot;type&quot;:&quot;gain&quot;,&quot;id&quot;:&quot;level&quot;,&quot;label&quot;:&quot;Match narration loudness&quot;,&quot;params&quot;:{&quot;gain&quot;:0.45}}]}"></audio>
+
+      <div data-hf-id="hf-nb7s" id="el-06-download" class="clip scene scene-06" data-composition-id="06-download" data-composition-src="compositions/frames/06-download.html" data-start="18.391" data-duration="3.728" data-track-index="1" data-track-kind="graphics"></div>
+      <audio data-hf-id="hf-58fw" id="el-06-download-voice" src="assets/voice/06.wav" data-start="18.391" data-duration="3.4479" data-track-index="10" data-volume="1" data-audio-group="narration" data-fx-chain="{&quot;version&quot;:1,&quot;nodes&quot;:[{&quot;type&quot;:&quot;gain&quot;,&quot;id&quot;:&quot;level&quot;,&quot;label&quot;:&quot;Match narration loudness&quot;,&quot;params&quot;:{&quot;gain&quot;:1.35}}]}"></audio>
+
+      <div data-hf-id="hf-rgdn" id="el-07-chat" class="clip scene scene-07" data-composition-id="07-chat" data-composition-src="compositions/frames/07-chat.html" data-start="21.839" data-duration="5.269" data-track-index="0" data-track-kind="graphics"></div>
+      <audio data-hf-id="hf-w2m1" id="el-07-chat-voice" src="assets/voice/07.wav" data-start="21.839" data-duration="4.989" data-track-index="10" data-volume="1" data-audio-group="narration" data-fx-chain="{&quot;version&quot;:1,&quot;nodes&quot;:[{&quot;type&quot;:&quot;gain&quot;,&quot;id&quot;:&quot;level&quot;,&quot;label&quot;:&quot;Match narration loudness&quot;,&quot;params&quot;:{&quot;gain&quot;:0.15}}]}"></audio>
+
+      <div data-hf-id="hf-kjgm" id="el-08-private" class="clip scene scene-08" data-composition-id="08-private" data-composition-src="compositions/frames/08-private.html" data-start="26.828" data-duration="6.027" data-track-index="1" data-track-kind="graphics"></div>
+      <audio data-hf-id="hf-tjvo" id="el-08-private-voice" src="assets/voice/08.wav" data-start="26.828" data-duration="5.747" data-track-index="10" data-volume="1" data-audio-group="narration" data-fx-chain="{&quot;version&quot;:1,&quot;nodes&quot;:[{&quot;type&quot;:&quot;gain&quot;,&quot;id&quot;:&quot;level&quot;,&quot;label&quot;:&quot;Match narration loudness&quot;,&quot;params&quot;:{&quot;gain&quot;:1.95}}]}"></audio>
+
+      <div data-hf-id="hf-m1vc" id="el-09-cta" class="clip scene scene-09" data-composition-id="09-cta" data-composition-src="compositions/frames/09-cta.html" data-start="32.575" data-duration="7.58" data-track-index="0" data-track-kind="graphics"></div>
+      <audio data-hf-id="hf-bri3" id="el-09-cta-voice" src="assets/voice/09.wav" data-start="32.575" data-duration="5.799184" data-track-index="10" data-volume="1" data-audio-group="narration" data-fx-chain="{&quot;version&quot;:1,&quot;nodes&quot;:[{&quot;type&quot;:&quot;gain&quot;,&quot;id&quot;:&quot;level&quot;,&quot;label&quot;:&quot;Match narration loudness&quot;,&quot;params&quot;:{&quot;gain&quot;:-0.45}}]}"></audio>
+
+      <div id="el-10-beta" class="clip scene scene-10" data-composition-id="10-beta" data-composition-src="compositions/frames/10-beta.html" data-start="39.875" data-duration="7.427" data-track-index="1" data-track-kind="graphics"></div>
+      <audio id="el-10-beta-voice" src="assets/voice/10-beta.wav" data-start="39.875" data-duration="6.426122" data-track-index="10" data-volume="1" data-audio-group="narration" data-fx-chain="{&quot;version&quot;:1,&quot;nodes&quot;:[{&quot;type&quot;:&quot;gain&quot;,&quot;id&quot;:&quot;level&quot;,&quot;label&quot;:&quot;Match narration loudness&quot;,&quot;params&quot;:{&quot;gain&quot;:-0.15}}]}"></audio>
+      <audio id="keyboard-10" src="assets/sfx/keyboard-10.wav" data-start="39.875" data-duration="7.427" data-track-index="12" data-volume="0.24"></audio>
+
+      <!-- BGM -->
+      <audio data-hf-id="hf-ppv9" id="el-bgm" src="assets/bgm/hype63.wav" data-start="0" data-duration="47.302" data-track-index="11" data-volume="0.13" data-automation="{&quot;version&quot;: 1, &quot;lanes&quot;: [{&quot;target&quot;: &quot;volume&quot;, &quot;points&quot;: [{&quot;t&quot;: 0, &quot;v&quot;: 0}, {&quot;t&quot;: 0.25, &quot;v&quot;: 0.13}, {&quot;t&quot;: 44.802, &quot;v&quot;: 0.13}, {&quot;t&quot;: 47.302, &quot;v&quot;: 0}]}]}"></audio>
+
+      <!-- SFX: short, timed keyboard cues. -->
+      <audio id="keyboard-01" src="assets/sfx/keyboard-01.wav" data-start="0" data-duration="3.84" data-track-index="12" data-volume="0.24"></audio>
+      <audio id="keyboard-03" src="assets/sfx/keyboard-03.wav" data-start="5.852" data-duration="4.232" data-track-index="12" data-volume="0.24"></audio>
+      <audio id="keyboard-05" src="assets/sfx/keyboard-05.wav" data-start="13.663" data-duration="4.728" data-track-index="12" data-volume="0.24"></audio>
+      <audio id="keyboard-06" src="assets/sfx/keyboard-06.wav" data-start="18.391" data-duration="3.4479" data-track-index="12" data-volume="0.24"></audio>
+      <audio id="keyboard-07" src="assets/sfx/keyboard-07.wav" data-start="21.839" data-duration="4.989" data-track-index="12" data-volume="0.24"></audio>
+      <audio id="keyboard-08" src="assets/sfx/keyboard-08.wav" data-start="26.828" data-duration="5.747" data-track-index="12" data-volume="0.24"></audio>
+      <audio id="keyboard-09" src="assets/sfx/keyboard-09.wav" data-start="32.575" data-duration="7.3" data-track-index="12" data-volume="0.24"></audio>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      window.__timelines["main"] = gsap.timeline({ paused: true });
+
+      const master = window.__timelines["main"];
+      // Keep the outgoing plane under the incoming fade so the background stays steady.
+      master.to(".scene-01", { filter: "blur(4px)", duration: 0.28, ease: "sine.inOut" }, 4.729);
+      master.fromTo(".scene-02", { opacity: 0, filter: "blur(4px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.28, ease: "sine.inOut", immediateRender: false }, 4.729);
+      master.to(".scene-02", { filter: "blur(4px)", duration: 0.28, ease: "sine.inOut" }, 5.852);
+      master.fromTo(".scene-03", { opacity: 0, filter: "blur(4px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.28, ease: "sine.inOut", immediateRender: false }, 5.852);
+      master.to(".scene-03", { filter: "blur(4px)", duration: 0.28, ease: "sine.inOut" }, 10.084);
+      master.fromTo(".scene-04", { opacity: 0, filter: "blur(4px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.28, ease: "sine.inOut", immediateRender: false }, 10.084);
+      master.to(".scene-04", { filter: "blur(4px)", duration: 0.28, ease: "sine.inOut" }, 13.663);
+      master.fromTo(".scene-05", { opacity: 0, filter: "blur(4px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.28, ease: "sine.inOut", immediateRender: false }, 13.663);
+      master.to(".scene-05", { filter: "blur(4px)", duration: 0.28, ease: "sine.inOut" }, 18.391);
+      master.fromTo(".scene-06", { opacity: 0, filter: "blur(4px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.28, ease: "sine.inOut", immediateRender: false }, 18.391);
+      master.to(".scene-06", { filter: "blur(4px)", duration: 0.28, ease: "sine.inOut" }, 21.839);
+      master.fromTo(".scene-07", { opacity: 0, filter: "blur(4px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.28, ease: "sine.inOut", immediateRender: false }, 21.839);
+      master.to(".scene-07", { filter: "blur(4px)", duration: 0.28, ease: "sine.inOut" }, 26.828);
+      master.fromTo(".scene-08", { opacity: 0, filter: "blur(4px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.28, ease: "sine.inOut", immediateRender: false }, 26.828);
+      master.to(".scene-08", { filter: "blur(4px)", duration: 0.28, ease: "sine.inOut" }, 32.575);
+      master.fromTo(".scene-09", { opacity: 0, filter: "blur(4px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.28, ease: "sine.inOut", immediateRender: false }, 32.575);
+      master.to(".scene-09", { filter: "blur(4px)", duration: 0.28, ease: "sine.inOut" }, 39.875);
+      master.fromTo(".scene-10", { opacity: 0, filter: "blur(4px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.28, ease: "sine.inOut", immediateRender: false }, 39.875);
+      window.__timelines["main"].to({}, { duration: 47.302 }, 0);
+    </script>
+  </body>
+</html>

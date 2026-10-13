@@ -1,0 +1,16 @@
+· tts: heygen · voice 7bb4df56d7714d33bb88ed1dde8128f6 · 9 line(s)
+  voice 01: assets/voice/01.wav (3.84s, 12 words)
+  voice 02: assets/voice/02.wav (1.123s, 2 words)
+  voice 03: assets/voice/03.wav (4.232s, 10 words)
+  voice 04: assets/voice/04.wav (3.579s, 7 words)
+  voice 05: assets/voice/05.wav (4.728s, 15 words)
+  voice 06: assets/voice/06.wav (3.448s, 12 words)
+  voice 07: assets/voice/07.wav (4.989s, 12 words)
+  voice 08: assets/voice/08.wav (5.747s, 14 words)
+  voice 09: assets/voice/09.wav (5.799s, 12 words)
+  bgm: assets/bgm/track.mp3 (retrieve "upbeat energetic electronic synthwave pop, driving beat, bright and modern, tech promo")
+✓ audio engine → /home/yvm/code/Mobie/videos/mobie-promo/audio_engine_meta.json
+  heygen: yes  ·  ran: tts,bgm
+  voices: 9  ·  bgm: heygen  ·  sfx: 0
+  total voice duration: 37.485s
+✓ audio generate: 9 voice + 1 bgm → /home/yvm/code/Mobie/videos/mobie-promo/audio_meta.json

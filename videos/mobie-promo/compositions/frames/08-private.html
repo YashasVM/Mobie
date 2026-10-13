@@ -1,0 +1,128 @@
+<template>
+  <div id="f08-root" data-composition-id="08-private" data-start="0" data-duration="6.027" data-width="1920" data-height="1080">
+    <style>
+      @font-face { font-family: "IBM Plex Mono"; src: url("assets/fonts/plex_mono_regular.ttf"); font-weight: 400; }
+      @font-face { font-family: "IBM Plex Mono"; src: url("assets/fonts/plex_mono_medium.ttf"); font-weight: 500; }
+      @font-face { font-family: "IBM Plex Mono"; src: url("assets/fonts/plex_mono_semibold.ttf"); font-weight: 600; }
+      @font-face { font-family: "IBM Plex Mono"; src: url("assets/fonts/plex_mono_bold.ttf"); font-weight: 700; }
+      #f08-root { position: relative; width: 100%; height: 100%; overflow: hidden; font-family: "IBM Plex Mono", monospace; color: #D6D3C8; }
+      #f08-root .clip { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+      .f08-ground { background: #0C0C0B; }
+      .f08-scan { pointer-events: none; background: repeating-linear-gradient(0deg, rgba(0,0,0,.09) 0 1px, transparent 1px 3px); }
+      .f08-bar { position: absolute; left: 0; top: 0; width: 1920px; height: 48px; background: #FFB547; color: #0C0C0B; font-weight: 500; font-size: 22px; line-height: 48px; }
+      .f08-bar .f08-l { position: absolute; left: 200px; top: 0; display: flex; white-space: pre; }
+      .f08-bar .f08-r { position: absolute; right: 200px; top: 0; display: flex; white-space: pre; }
+      .f08-bar span { padding: 0 14px; }
+      .f08-bar span.f08-on { background: #0C0C0B; color: #FFB547; }
+      .f08-hdr { position: absolute; left: 200px; top: 112px; width: 1520px; display: flex; align-items: center; }
+      .f08-hdr b { font-weight: 600; font-size: 30px; line-height: 36px; letter-spacing: .04em; color: #FFB547; text-transform: uppercase; white-space: pre; }
+      .f08-hdr i { flex: 1; height: 0; margin-left: 20px; border-top: 1px dashed #2A2925; }
+      .f08-line { position: absolute; left: 200px; white-space: pre; font-weight: 600; font-size: 72px; line-height: 86px; letter-spacing: -0.01em; color: #D6D3C8; }
+      .f08-line .f08-g { color: #8FD16A; }
+      .f08-big { position: absolute; left: 200px; white-space: pre; font-weight: 700; font-size: 96px; line-height: 120px; letter-spacing: -0.01em; color: #D6D3C8; }
+      .f08-line span, .f08-big span { display: none; }
+      .f08-line span.f08-cur, .f08-big span.f08-cur { display: none; }
+      .f08-cur { display: none; width: .6em; height: 1.1em; background: #FFB547; vertical-align: -.18em; margin-left: 4px; }
+      .f08-sel { background: #FFB547; color: #0C0C0B; }
+    </style>
+
+    <div id="f08-layer-1" class="clip f08-ground" data-start="0" data-duration="6.027" data-track-index="0"></div>
+
+    <div id="f08-layer-2" class="clip" data-start="0" data-duration="6.027" data-track-index="1">
+      <div class="f08-hdr"><b>PRIVACY</b><i></i></div>
+      <div class="f08-line" id="f08-l1" style="top:220px"></div>
+      <div class="f08-line" id="f08-l2" style="top:330px"></div>
+      <div class="f08-line" id="f08-l3" style="top:440px"></div>
+      <div class="f08-big" id="f08-b1" style="top:600px"></div>
+      <div class="f08-big" id="f08-b2" style="top:720px"></div>
+    </div>
+
+    <div id="f08-layer-3" class="clip" data-start="0" data-duration="6.027" data-track-index="2">
+      <div class="f08-bar">
+        <div class="f08-l"><span>0:mobie</span><span>1:about</span><span>2:browse</span><span>3:pull</span><span>4:chat</span><span class="f08-on">5:privacy</span></div>
+        <div class="f08-r"><span>github</span><span>download</span></div>
+      </div>
+    </div>
+
+    <div id="f08-layer-4" class="clip f08-scan" data-start="0" data-duration="6.027" data-track-index="3"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+    <script>
+      (function () {
+        window.__timelines = window.__timelines || {};
+        var tl = gsap.timeline({ paused: true });
+        var END = 5.747;
+
+        // build spans: items = [{t: text, at: [start,end], cls}] ; chars spread linearly in [start,end]
+        function build(el, parts) {
+          var chars = [];
+          parts.forEach(function (p) {
+            var n = p.t.length;
+            for (var i = 0; i < n; i++) {
+              var s = document.createElement("span");
+              s.textContent = p.t.charAt(i);
+              if (p.cls) s.className = p.cls;
+              el.appendChild(s);
+              var time = n === 1 ? p.a : p.a + (p.b - p.a) * (i / n);
+              chars.push({ s: s, time: time, sel: p.sel || 0 });
+            }
+          });
+          chars.forEach(function (c) { tl.set(c.s, { display: "inline" }, c.time); });
+          return chars;
+        }
+        function cursor(el, from, to) {
+          var c = document.createElement("span");
+          c.className = "f08-cur";
+          el.appendChild(c);
+          var on = true;
+          tl.set(c, { display: "inline-block", opacity: 1 }, from);
+          for (var t = from + 0.5, k = 0; t < to - 0.001; t += 0.5, k++) {
+            tl.set(c, { opacity: k % 2 === 0 ? 0 : 1 }, t);
+          }
+          tl.set(c, { display: "none" }, to);
+        }
+        function check(id, start, tEnd, text, nextStart) {
+          var el = document.getElementById(id);
+          build(el, [
+            { t: "[", a: start, cls: "f08-g" },
+            { t: "✓", a: start + 0.1, cls: "f08-g" },
+            { t: "]", a: start + 0.1, cls: "f08-g" },
+            { t: " " + text, a: start + 0.12, b: tEnd }
+          ]);
+          cursor(el, start, nextStart);
+        }
+        check("f08-l1", 0.30, 0.94, "no account.", 1.20);
+        check("f08-l2", 1.20, 1.92, "no cloud.", 2.18);
+        check("f08-l3", 2.18, 3.52, "works in airplane mode.", 3.84);
+
+        // final statement, two lines
+        var b1 = document.getElementById("f08-b1");
+        var b2 = document.getElementById("f08-b2");
+        build(b1, [
+          { t: "your", a: 3.84, b: 3.92 },
+          { t: " ", a: 3.95 },
+          { t: "prompts", a: 3.97, b: 4.31 },
+          { t: " ", a: 4.36 },
+          { t: "never", a: 4.39, b: 4.74, cls: "f08-n" },
+          { t: " ", a: 4.82, cls: "f08-n" },
+          { t: "leave", a: 4.86, b: 5.03, cls: "f08-n" }
+        ]);
+        build(b2, [
+          { t: "your", a: 5.08, b: 5.16 },
+          { t: " ", a: 5.18 },
+          { t: "phone.", a: 5.21, b: 5.52 }
+        ]);
+        // amber selection snaps over "never leave": never at 4.39, the rest as it prints
+        var ns = b1.querySelectorAll(".f08-n");
+        for (var i = 0; i < ns.length; i++) {
+          var when = i < 5 ? 4.39 : (i === 5 ? 4.82 : 4.86);
+          tl.set(ns[i], { backgroundColor: "#FFB547", color: "#0C0C0B" }, when);
+        }
+        cursor(b1, 3.84, 5.08);
+        cursor(b2, 5.08, END);
+
+        window.__timelines["08-private"] = tl;
+      })();
+    </script>
+  </div>
+</template>

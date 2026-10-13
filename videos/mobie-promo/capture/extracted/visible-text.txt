@@ -1,0 +1,39 @@
+ 
+ mobie(1) — run AI models on your Android phone 
+ ">
+ 0:mobie 1:about 2:browse 3:privacy github download 
+ ███╗ ███╗ ██████╗ ██████╗ ██╗███████╗ ████╗ ████║██╔═══██╗██╔══██╗██║██╔════╝ ██╔████╔██║██║ ██║██████╔╝██║█████╗ ██║╚██╔╝██║██║ ██║██╔══██╗██║██╔══╝ ██║ ╚═╝ ██║╚██████╔╝██████╔╝██║███████╗ ╚═╝ ╚═╝ ╚═════╝ ╚═════╝ ╚═╝╚══════╝ 
+ Run AI models on your phone , offline. 
+ An Android app that finds models on Hugging Face, checks whether your phone can actually run them, downloads them, and lets you chat with no connection at all. 
+ [ download apk ] d 
+ [ source ] g 
+ DESCRIPTION 
+ Most model apps let you download a 3 GB file and find out afterwards that it doesn't fit. mobie checks first. 
+ Before anything downloads it reads the file size, estimates memory, and compares both against your phone's RAM, free storage, and chip. Models that can't run are blocked. Models that only fit after you close a few apps get a warning. 
+ Once a model is on the phone, chatting needs no network at all. 
+ BROWSE 
+ This is roughly what picking a model feels like. Try it: ↑ ↓ or j k , or click a row. 
+ mobie › browse litert-community 
+ ↑↓ move ⏎ details / search q quit 
+ demo data on an imaginary 8 GB phone — not measurements. 
+ DOWNLOAD 
+ Big files are fetched in the background, resume after a dropped connection or a reboot, and are checked against their published hash before they're used. 
+ CHAT 
+ Replies stream in as they're generated, using Google's LiteRT-LM runtime on the phone's own hardware. Conversations are saved on the device, per model. 
+ PRIVACY 
+ prompts and replies never leave the phone 
+ models are kept in app-private storage 
+ your Hugging Face token is encrypted with Android Keystore 
+ code inside model repos is never run 
+ no account, no analytics on your chats 
+ REQUIREMENTS 
+ android 8.0 or newer 
+ cpu 64-bit ARM (arm64-v8a) 
+ format .litertlm models from litert-community 
+ license open source — see the repo 
+ $ that's it. go try it. 
+ [ download apk ] d 
+ [ star on github ] g 
+ mobie(1) · made by yashas 
+ EOF 
+

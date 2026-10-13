@@ -1,0 +1,202 @@
+<template>
+  <div data-hf-id="hf-1akf" id="root" data-composition-id="03-meet-mobie" data-width="1920" data-height="1080" data-start="0" data-duration="4.732">
+    <style>
+      @font-face { font-family: "Unbounded"; src: url("assets/fonts/Unbounded-Variable.ttf") format("truetype"); font-weight: 200 900; }
+      @font-face { font-family: "IBM Plex Mono"; src: url("assets/fonts/plex_mono_regular.ttf") format("truetype"); font-weight: 400; }
+      @font-face { font-family: "IBM Plex Mono"; src: url("assets/fonts/plex_mono_medium.ttf") format("truetype"); font-weight: 500; }
+      @font-face { font-family: "IBM Plex Mono"; src: url("assets/fonts/plex_mono_semibold.ttf") format("truetype"); font-weight: 600; }
+      @font-face { font-family: "IBM Plex Mono"; src: url("assets/fonts/plex_mono_bold.ttf") format("truetype"); font-weight: 700; }
+
+      #root { position: relative; width: 1920px; height: 1080px; overflow: hidden; }
+      #root .clip { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+
+      .m03-bg { position: absolute; inset: 0; background: #0C0C0B; overflow: hidden; }
+      .m03-blob { position: absolute; border-radius: 50%; }
+      .m03-blob-amber { left: 380px; top: 60px; width: 1000px; height: 760px;
+        background: radial-gradient(closest-side, rgba(255,181,71,0.42), rgba(255,181,71,0) 100%); }
+      .m03-blob-mag { left: 1000px; top: 380px; width: 900px; height: 700px;
+        background: radial-gradient(closest-side, rgba(255,61,203,0.30), rgba(255,61,203,0) 100%); }
+      .m03-scan { position: absolute; inset: 0;
+        background: repeating-linear-gradient(0deg, rgba(255,255,255,0.035) 0px, rgba(255,255,255,0.035) 1px, rgba(0,0,0,0) 1px, rgba(0,0,0,0) 4px); }
+      .m03-vig { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 45%, rgba(12,12,11,0) 45%, rgba(12,12,11,0.75) 100%); }
+
+      .m03-stage { position: absolute; inset: 0; perspective: 1500px; }
+      .m03-slot { position: absolute; left: 0; width: 1920px; top: 280px; height: 300px; display: flex; align-items: center; justify-content: center; }
+
+      .m03-ascii { position: relative; }
+      .m03-pre { margin: 0; font-family: "IBM Plex Mono", monospace; font-weight: 700; font-size: 48px; line-height: 1; white-space: pre; letter-spacing: 0; }
+      .m03-pre-main { color: #FFB547; text-shadow: 0 0 22px rgba(255,181,71,0.65), 0 0 60px rgba(255,181,71,0.35); position: relative; }
+      .m03-pre-m, .m03-pre-c { position: absolute; left: 0; top: 0; opacity: 0; mix-blend-mode: screen; }
+      .m03-pre-m { color: #FF3DCB; }
+      .m03-pre-c { color: #2EF2FF; }
+
+      .m03-lock { gap: 56px; }
+      .m03-icon { position: relative; width: 220px; height: 220px; border-radius: 50px; background: #111827;
+        display: flex; align-items: center; justify-content: center;
+        box-shadow: 0 0 0 4px #FFB547, 0 0 46px 6px rgba(255,181,71,0.7), inset 0 0 40px rgba(255,181,71,0.18); }
+      .m03-icon-m { font-family: "Unbounded", sans-serif; font-weight: 800; font-size: 150px; line-height: 1; color: #fff; letter-spacing: -0.03em; margin-top: -6px; }
+      .m03-word { font-family: "Unbounded", sans-serif; font-weight: 800; font-size: 211px; line-height: 1; color: #D6D3C8; letter-spacing: -0.03em; text-transform: lowercase;
+        text-shadow: 0 0 40px rgba(255,181,71,0.28); padding-bottom: 14px; }
+
+      .m03-tag { position: absolute; left: 0; width: 1920px; top: 650px; display: flex; justify-content: center; }
+      .m03-tag-wrap { width: 930px; white-space: nowrap; font-family: "IBM Plex Mono", monospace; font-weight: 500; font-size: 52px; line-height: 1.3; color: #D6D3C8; }
+      .m03-tag-a { color: #D6D3C8; }
+      .m03-tag-b { color: #FFB547; text-shadow: 0 0 24px rgba(255,181,71,0.6); }
+      .m03-caret { display: inline-block; width: 28px; height: 52px; margin-left: 6px; vertical-align: -8px; background: #FFB547; box-shadow: 0 0 22px rgba(255,181,71,0.8); }
+    </style>
+
+    <div data-hf-id="hf-3iiy" class="clip m03-bg" id="m03-bg" data-start="0" data-duration="4.732" data-track-index="0">
+      <div data-hf-id="hf-a7z0" class="m03-blob m03-blob-amber" id="m03-blob-a"></div>
+      <div data-hf-id="hf-33z4" class="m03-blob m03-blob-mag" id="m03-blob-m"></div>
+      <div data-hf-id="hf-koco" class="m03-scan"></div>
+      <div data-hf-id="hf-yqxj" class="m03-vig"></div>
+    </div>
+
+    <div data-hf-id="hf-gqev" class="clip m03-stage" id="m03-stage" data-start="0" data-duration="4.732" data-track-index="1">
+      <div data-hf-id="hf-tgp8" class="m03-slot" id="m03-slot-ascii">
+        <div data-hf-id="hf-ud3a" class="m03-ascii" id="m03-ascii">
+          <pre data-hf-id="hf-qo2y" class="m03-pre m03-pre-main" id="m03-pre-main"></pre>
+          <pre data-hf-id="hf-88xe" class="m03-pre m03-pre-m" id="m03-pre-m"></pre>
+          <pre data-hf-id="hf-mclu" class="m03-pre m03-pre-c" id="m03-pre-c"></pre>
+        </div>
+      </div>
+
+      <div data-hf-id="hf-tup3" class="m03-slot m03-lock" id="m03-lock">
+        <div data-hf-id="hf-gki6" class="m03-icon" id="m03-icon"><span data-hf-id="hf-jdci" class="m03-icon-m">M</span></div>
+        <div data-hf-id="hf-n5o2" class="m03-word" id="m03-word">mobie</div>
+      </div>
+
+      <div data-hf-id="hf-xpc9" class="m03-tag">
+        <div data-hf-id="hf-x0b6" class="m03-tag-wrap" id="m03-tag-wrap"><span data-hf-id="hf-c3cx" class="m03-tag-a" id="m03-tag-a"></span><span data-hf-id="hf-gg9f" class="m03-tag-b" id="m03-tag-b"></span><span data-hf-id="hf-0f3f" class="m03-caret" id="m03-caret"></span></div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <script>
+      (function () {
+        window.__timelines = window.__timelines || {};
+        var DUR = 4.232;
+        var tl = gsap.timeline({ paused: true });
+        window.__timelines["03-meet-mobie"] = tl;
+        tl.to({}, { duration: DUR }, 0);
+
+        // ---------- ASCII decode (pure function of time) ----------
+        var LINES = [
+          "███╗   ███╗ ██████╗ ██████╗ ██╗███████╗",
+          "████╗ ████║██╔═══██╗██╔══██╗██║██╔════╝",
+          "██╔████╔██║██║   ██║██████╔╝██║█████╗",
+          "██║╚██╔╝██║██║   ██║██╔══██╗██║██╔══╝",
+          "██║ ╚═╝ ██║╚██████╔╝██████╔╝██║███████╗",
+          "╚═╝     ╚═╝ ╚═════╝ ╚═════╝ ╚═╝╚══════╝"
+        ];
+        var W = 0;
+        LINES.forEach(function (l) { W = Math.max(W, l.length); });
+        var GL = ["█", "╗", "═", "║", "╔", "╝", "╚", "╬", "╦", "╩", "╠", "╣"];
+        var DEC_START = 0.0, DEC_END = 1.1, TAIL = 7;
+        function glyph(seed) {
+          var h = ((seed * 9301 + 49297) % 233280) / 233280;
+          return GL[Math.floor(h * GL.length)];
+        }
+        function asciiAt(t) {
+          var p = Math.min(1, Math.max(0, (t - DEC_START) / (DEC_END - DEC_START)));
+          var q = Math.floor(t * 24);
+          var out = [];
+          for (var r = 0; r < LINES.length; r++) {
+            var front = 4 + p * (W + TAIL + 4) - r * 1.2;
+            var line = LINES[r], s = "";
+            for (var c = 0; c < W; c++) {
+              var ch = c < line.length ? line.charAt(c) : " ";
+              if (ch === " ") { s += " "; continue; }
+              if (c < front - TAIL) s += ch;
+              else if (c < front) s += glyph(r * 131 + c * 17 + q * 7919);
+              else s += " ";
+            }
+            out.push(s);
+          }
+          return out.join("\n");
+        }
+        var preMain = document.getElementById("m03-pre-main");
+        var preM = document.getElementById("m03-pre-m");
+        var preC = document.getElementById("m03-pre-c");
+        var finalText = LINES.map(function (l) { while (l.length < W) l += " "; return l; }).join("\n");
+        preM.textContent = finalText;
+        preC.textContent = finalText;
+        preMain.textContent = asciiAt(0);
+
+        // ---------- tagline typing (discrete states) + caret ----------
+        var WHOLE = "real ai models. on your phone.";
+        var SPLIT = 16;
+        var A_START = 1.72, A_STEP = 0.055, B_START = 3.3, B_STEP = 0.048;
+        function countAt(t) {
+          if (t < A_START) return 0;
+          if (t < B_START) return Math.min(15, Math.floor((t - A_START) / A_STEP) + 1);
+          var nb = Math.floor((t - B_START) / B_STEP) + 1;
+          return Math.min(WHOLE.length, 15 + nb);
+        }
+        var elA = document.getElementById("m03-tag-a");
+        var elB = document.getElementById("m03-tag-b");
+        var caret = document.getElementById("m03-caret");
+        var typeDone = B_START + B_STEP * 15;
+        var drv = { t: 0 };
+        tl.to(drv, {
+          t: DUR, duration: DUR, ease: "none",
+          onUpdate: function () {
+            var t = drv.t;
+            if (t < 1.16) preMain.textContent = asciiAt(t);
+            else if (preMain.textContent !== finalText) preMain.textContent = finalText;
+            var n = countAt(t);
+            var txt = WHOLE.slice(0, n);
+            elA.textContent = txt.slice(0, SPLIT);
+            elB.textContent = txt.slice(SPLIT);
+            var vis;
+            if (t < 1.65) vis = 0;
+            else if (t < typeDone) vis = 1;
+            else vis = Math.sin((t - typeDone) * Math.PI * 2 / 0.64 + 1.2) > -0.2 ? 1 : 0;
+            caret.style.opacity = vis ? "1" : "0";
+          }
+        }, 0);
+        // make sure the t=0 state is deterministic before first seek
+        caret.style.opacity = "0";
+
+        // ---------- scene 1: flip-in nod + glow ----------
+        tl.fromTo("#m03-ascii", { rotateX: 55, opacity: 0, transformOrigin: "50% 100%", y: 24 },
+          { rotateX: 0, opacity: 1, y: 0, duration: 0.55, ease: "power3.out" }, 0);
+        tl.fromTo("#m03-pre-main", { filter: "brightness(1.8)" },
+          { filter: "brightness(1)", duration: 0.7, ease: "power2.out" }, 1.0);
+
+        // RGB-split flicker on resolve (stepped sets, deterministic)
+        var fl = [
+          [1.10, 0.9, -9, 9, 3],
+          [1.15, 0.0, 0, 0, 0],
+          [1.19, 0.85, 7, -7, -2],
+          [1.24, 0.0, 0, 0, 0],
+          [1.28, 0.8, -5, 5, 1],
+          [1.34, 0.55, 3, -3, 0],
+          [1.40, 0.0, 0, 0, 0]
+        ];
+        fl.forEach(function (f) {
+          tl.set("#m03-pre-m", { opacity: f[1], x: f[2], y: f[4] }, f[0]);
+          tl.set("#m03-pre-c", { opacity: f[1], x: f[3], y: -f[4] }, f[0]);
+          tl.set("#m03-pre-main", { x: f[1] > 0 ? f[2] * -0.3 : 0 }, f[0]);
+        });
+
+        // ---------- scene 2: scale-swap ascii -> lockup ----------
+        tl.to("#m03-ascii", { scale: 0.72, opacity: 0, duration: 0.32, ease: "power2.in" }, 1.46);
+        tl.fromTo("#m03-lock", { scale: 0.72, opacity: 0 },
+          { scale: 1, opacity: 1, duration: 0.6, ease: "back.out(1.8)" }, 1.58);
+        tl.fromTo("#m03-word", { x: -40 }, { x: 0, duration: 0.6, ease: "power3.out" }, 1.62);
+        tl.fromTo("#m03-icon", { rotation: -8, boxShadow: "0 0 0 4px #FFB547, 0 0 110px 30px rgba(255,181,71,0.95), inset 0 0 40px rgba(255,181,71,0.18)" },
+          { rotation: 0, boxShadow: "0 0 0 4px #FFB547, 0 0 46px 6px rgba(255,181,71,0.7), inset 0 0 40px rgba(255,181,71,0.18)", duration: 0.9, ease: "back.out(1.8)" }, 1.58);
+        // slow settle push through the hold
+        tl.fromTo("#m03-lock", { scale: 1 }, { scale: 1.035, duration: 2.0, ease: "none", immediateRender: false }, 2.2);
+
+        // ---------- scene 3: tagline entrance + bloom drift ----------
+        tl.fromTo("#m03-tag-wrap", { y: 14, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35, ease: "power3.out" }, 1.62);
+
+        tl.fromTo("#m03-blob-a", { x: -80, scale: 0.9 }, { x: 60, scale: 1.12, duration: DUR, ease: "sine.inOut" }, 0);
+        tl.fromTo("#m03-blob-m", { x: 90, scale: 0.95 }, { x: -60, scale: 1.1, duration: DUR, ease: "sine.inOut" }, 0);
+        tl.fromTo("#m03-blob-m", { opacity: 0.35 }, { opacity: 1, duration: 1.4, ease: "power2.out", immediateRender: false }, 0);
+      })();
+    </script>
+  </div>
+</template>

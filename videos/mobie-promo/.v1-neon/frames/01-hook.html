@@ -1,0 +1,258 @@
+<template id="01-hook-template">
+  <div data-hf-id="hf-wr2k" id="root" data-composition-id="01-hook" data-start="0" data-duration="4.24" data-width="1920" data-height="1080">
+    <style>
+      @font-face { font-family: "IBM Plex Mono"; font-weight: 400; src: url("assets/fonts/plex_mono_regular.ttf") format("truetype"); }
+      @font-face { font-family: "IBM Plex Mono"; font-weight: 500; src: url("assets/fonts/plex_mono_medium.ttf") format("truetype"); }
+      @font-face { font-family: "IBM Plex Mono"; font-weight: 600; src: url("assets/fonts/plex_mono_semibold.ttf") format("truetype"); }
+      @font-face { font-family: "IBM Plex Mono"; font-weight: 700; src: url("assets/fonts/plex_mono_bold.ttf") format("truetype"); }
+
+      #root { position: relative; width: 1920px; height: 1080px; overflow: hidden; font-family: "IBM Plex Mono", monospace; color: #D6D3C8; }
+      #root * { box-sizing: border-box; }
+      .h01-layer { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+
+      /* ground */
+      .h01-ground { background: #0C0C0B; overflow: hidden; }
+      .h01-blob { position: absolute; border-radius: 50%; filter: blur(90px); }
+      .h01-blob-cyan { left: 40px; top: 520px; width: 760px; height: 640px; background: radial-gradient(circle, #2EF2FF 0%, rgba(46,242,255,0) 70%); opacity: 0.26; }
+      .h01-blob-mag { left: 1060px; top: 40px; width: 860px; height: 700px; background: radial-gradient(circle, #FF3DCB 0%, rgba(255,61,203,0) 70%); opacity: 0.28; }
+      .h01-scan { position: absolute; inset: 0; background: repeating-linear-gradient(0deg, rgba(255,255,255,0.035) 0px, rgba(255,255,255,0.035) 1px, transparent 1px, transparent 4px); }
+      .h01-vig { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 45%, rgba(12,12,11,0) 55%, rgba(12,12,11,0.65) 100%); }
+
+      /* kicker */
+      .h01-kicker { position: absolute; left: 110px; top: 84px; font-size: 30px; font-weight: 500; letter-spacing: 0.04em; color: #2EF2FF; text-shadow: 0 0 18px rgba(46,242,255,0.6); white-space: pre; }
+      .h01-kch { opacity: 0; }
+      .h01-cursor { display: inline-block; width: 16px; height: 28px; background: #2EF2FF; vertical-align: -4px; margin-left: 4px; opacity: 0; box-shadow: 0 0 16px rgba(46,242,255,0.8); }
+
+      /* phone */
+      .h01-phone { position: absolute; left: 560px; top: 700px; width: 120px; height: 200px; border: 3px solid #D6D3C8; border-radius: 26px; box-shadow: 0 0 28px rgba(46,242,255,0.25); background: rgba(12,12,11,0.8); }
+      .h01-phone-notch { position: absolute; left: 38px; top: 10px; width: 36px; height: 5px; border-radius: 3px; background: #504D48; }
+      .h01-phone-screen { position: absolute; left: 10px; right: 10px; top: 28px; bottom: 14px; border-radius: 12px; background: radial-gradient(circle at 50% 30%, rgba(46,242,255,0.35), rgba(46,242,255,0.04) 70%); border: 1px solid rgba(46,242,255,0.45); }
+
+      /* bubble */
+      .h01-bubble-wrap { position: absolute; left: 0; top: 0; width: 500px; height: 96px; margin-left: -250px; margin-top: -48px; }
+      .h01-bubble { width: 100%; height: 100%; border: 3px solid #2EF2FF; border-radius: 48px 48px 48px 12px; background: rgba(12,12,11,0.92); display: flex; align-items: center; justify-content: center; font-size: 32px; font-weight: 600; color: #D6D3C8; box-shadow: 0 0 34px rgba(46,242,255,0.5), inset 0 0 22px rgba(46,242,255,0.18); white-space: nowrap; }
+      .h01-ghost { position: absolute; left: 0; top: 0; width: 500px; height: 96px; margin-left: -250px; margin-top: -48px; border: 3px solid #2EF2FF; border-radius: 48px 48px 48px 12px; background: rgba(46,242,255,0.14); opacity: 0; }
+
+      /* svg overlay */
+      .h01-svg { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; overflow: visible; }
+      .h01-packet { position: absolute; left: 0; top: 0; width: 18px; height: 10px; margin-left: -9px; margin-top: -5px; border-radius: 2px; opacity: 0; }
+      .h01-packet-c { background: #2EF2FF; box-shadow: 0 0 12px #2EF2FF; }
+      .h01-packet-m { background: #FF3DCB; box-shadow: 0 0 12px #FF3DCB; }
+
+      /* cloud */
+      .h01-cloud { position: absolute; left: 1110px; top: 190px; width: 640px; height: 380px; transform-origin: 50% 55%; }
+      .h01-cloud svg { width: 640px; height: 380px; overflow: visible; display: block; }
+      .h01-ring { position: absolute; left: 1440px; top: 390px; width: 220px; height: 220px; margin-left: -110px; margin-top: -110px; border: 4px solid #FF3DCB; border-radius: 50%; opacity: 0; box-shadow: 0 0 30px rgba(255,61,203,0.7); }
+
+      /* labels */
+      .h01-chip { position: absolute; height: 58px; padding: 0 22px 0 16px; display: flex; align-items: center; gap: 14px; border: 2px solid #FF3DCB; background: rgba(12,12,11,0.94); color: #FF3DCB; font-size: 28px; font-weight: 600; letter-spacing: 0.01em; white-space: nowrap; box-shadow: 0 0 24px rgba(255,61,203,0.45); text-shadow: 0 0 12px rgba(255,61,203,0.6); opacity: 0; }
+      .h01-mini { width: 30px; height: 20px; border: 2px solid #2EF2FF; border-radius: 10px 10px 10px 3px; box-shadow: 0 0 10px rgba(46,242,255,0.7); }
+    </style>
+
+    <!-- ground (full-bleed clip layer) -->
+    <div data-hf-id="hf-9w2r" id="h01-ground" class="clip h01-layer h01-ground" data-start="0" data-duration="4.24" data-track-index="0">
+      <div data-hf-id="hf-rk2h" class="h01-blob h01-blob-cyan" id="h01-blob-cyan"></div>
+      <div data-hf-id="hf-85cv" class="h01-blob h01-blob-mag" id="h01-blob-mag"></div>
+      <div data-hf-id="hf-ilkt" class="h01-scan"></div>
+      <div data-hf-id="hf-5afc" class="h01-vig"></div>
+    </div>
+
+    <!-- content -->
+    <div data-hf-id="hf-cxp3" id="h01-content" class="clip h01-layer" data-start="0" data-duration="4.24" data-track-index="1">
+      <div data-hf-id="hf-zlai" class="h01-kicker" id="h01-kicker"></div>
+
+      <div data-hf-id="hf-ctl6" class="h01-phone" id="h01-phone">
+        <div data-hf-id="hf-u01n" class="h01-phone-notch"></div>
+        <div data-hf-id="hf-mnom" class="h01-phone-screen" id="h01-phone-screen"></div>
+      </div>
+
+      <svg data-hf-id="hf-0zto" class="h01-svg" viewBox="0 0 1920 1080" aria-hidden="true">
+        <defs data-hf-id="hf-mh0t">
+          <mask data-hf-id="hf-qi1y" id="h01-trailmask" maskUnits="userSpaceOnUse" x="0" y="0" width="1920" height="1080">
+            <path data-hf-id="hf-yn8n" id="h01-maskpath" d="M 620 560 Q 940 110 1440 390" fill="none" stroke="#fff" stroke-width="16" stroke-linecap="round" />
+          </mask>
+        </defs>
+        <path data-hf-id="hf-0w0i" id="h01-arc" d="M 620 560 Q 940 110 1440 390" fill="none" stroke="none" />
+        <path data-hf-id="hf-oj52" id="h01-trail" d="M 620 560 Q 940 110 1440 390" fill="none" stroke="#2EF2FF" stroke-width="5" stroke-linecap="round" stroke-dasharray="1 17" mask="url(#h01-trailmask)" style="filter: drop-shadow(0 0 8px rgba(46,242,255,0.9))" />
+      </svg>
+
+      <div data-hf-id="hf-6hp4" class="h01-cloud" id="h01-cloud">
+        <svg data-hf-id="hf-zy25" viewBox="0 0 640 380" aria-hidden="true">
+          <path data-hf-id="hf-c2sx" id="h01-cloudpath" d="M 150 320 C 60 320 30 250 80 210 C 50 140 130 90 195 120 C 220 40 340 20 400 80 C 450 40 560 70 560 150 C 620 170 630 270 560 300 C 540 330 500 330 480 320 Z" fill="rgba(255,61,203,0.07)" fill-opacity="0" stroke="#FF3DCB" stroke-width="6" stroke-linejoin="round" style="filter: drop-shadow(0 0 16px rgba(255,61,203,0.85))" />
+          <g data-hf-id="hf-n8dz" id="h01-racks">
+            <g data-hf-id="hf-hckx" class="h01-rack"><rect data-hf-id="hf-yoq3" x="165" y="150" width="310" height="32" fill="#FF3DCB" fill-opacity="0.14" stroke="#FF3DCB" stroke-opacity="0.5" stroke-width="2" /><circle data-hf-id="hf-fw9v" class="h01-led" cx="185" cy="166" r="6" fill="#2EF2FF" /><rect data-hf-id="hf-2aej" x="215" y="162" width="90" height="8" fill="#FF3DCB" fill-opacity="0.35" /></g>
+            <g data-hf-id="hf-kcf9" class="h01-rack"><rect data-hf-id="hf-45jh" x="165" y="192" width="310" height="32" fill="#FF3DCB" fill-opacity="0.14" stroke="#FF3DCB" stroke-opacity="0.5" stroke-width="2" /><circle data-hf-id="hf-3sdq" class="h01-led" cx="185" cy="208" r="6" fill="#2EF2FF" /><rect data-hf-id="hf-yn7n" x="215" y="204" width="130" height="8" fill="#FF3DCB" fill-opacity="0.35" /></g>
+            <g data-hf-id="hf-ljcc" class="h01-rack"><rect data-hf-id="hf-f8lq" x="165" y="234" width="310" height="32" fill="#FF3DCB" fill-opacity="0.14" stroke="#FF3DCB" stroke-opacity="0.5" stroke-width="2" /><circle data-hf-id="hf-xx2f" class="h01-led" cx="185" cy="250" r="6" fill="#2EF2FF" /><rect data-hf-id="hf-rr30" x="215" y="246" width="70" height="8" fill="#FF3DCB" fill-opacity="0.35" /></g>
+            <g data-hf-id="hf-l51b" class="h01-rack"><rect data-hf-id="hf-u3k0" x="165" y="276" width="310" height="32" fill="#FF3DCB" fill-opacity="0.14" stroke="#FF3DCB" stroke-opacity="0.5" stroke-width="2" /><circle data-hf-id="hf-8dp5" class="h01-led" cx="185" cy="292" r="6" fill="#2EF2FF" /><rect data-hf-id="hf-7wv9" x="215" y="288" width="110" height="8" fill="#FF3DCB" fill-opacity="0.35" /></g>
+          </g>
+        </svg>
+      </div>
+      <div data-hf-id="hf-1mgq" class="h01-ring" id="h01-ring"></div>
+
+      <div data-hf-id="hf-iow5" class="h01-packet h01-packet-c" data-k="0"></div>
+      <div data-hf-id="hf-2w6q" class="h01-packet h01-packet-m" data-k="1"></div>
+      <div data-hf-id="hf-sspz" class="h01-packet h01-packet-c" data-k="2"></div>
+      <div data-hf-id="hf-y6ew" class="h01-packet h01-packet-m" data-k="3"></div>
+      <div data-hf-id="hf-xiht" class="h01-packet h01-packet-c" data-k="4"></div>
+      <div data-hf-id="hf-qa6u" class="h01-packet h01-packet-m" data-k="5"></div>
+      <div data-hf-id="hf-5epv" class="h01-packet h01-packet-c" data-k="6"></div>
+      <div data-hf-id="hf-lkf0" class="h01-packet h01-packet-m" data-k="7"></div>
+
+      <div data-hf-id="hf-3g7b" class="h01-chip" id="h01-chip1" style="left: 1262px; top: 292px;"><span data-hf-id="hf-x82e" class="h01-mini"></span>logged</div>
+      <div data-hf-id="hf-y8kp" class="h01-chip" id="h01-chip2" style="left: 1334px; top: 362px;"><span data-hf-id="hf-5iii" class="h01-mini"></span>stored</div>
+      <div data-hf-id="hf-z7wo" class="h01-chip" id="h01-chip3" style="left: 1284px; top: 432px;"><span data-hf-id="hf-5wtj" class="h01-mini"></span>trained on?</div>
+
+      <div data-hf-id="hf-xwk7" class="h01-ghost" id="h01-g1"></div>
+      <div data-hf-id="hf-n12k" class="h01-ghost" id="h01-g2"></div>
+      <div data-hf-id="hf-nsqd" class="h01-ghost" id="h01-g3"></div>
+      <div data-hf-id="hf-4rgn" class="h01-bubble-wrap" id="h01-bubble">
+        <div data-hf-id="hf-itm9" class="h01-bubble" id="h01-bubble-in">is this mole normal?</div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <script>
+      (function () {
+        window.__timelines = window.__timelines || {};
+        var tl = gsap.timeline({ paused: true });
+        var $ = function (id) { return document.getElementById(id); };
+
+        /* ---------- setup ---------- */
+        var arc = $("h01-arc");
+        var ARC_LEN = arc.getTotalLength();
+        var maskPath = $("h01-maskpath");
+        maskPath.style.strokeDasharray = ARC_LEN + "";
+        maskPath.style.strokeDashoffset = ARC_LEN + "";
+        var cloudPath = $("h01-cloudpath");
+        var CLOUD_LEN = cloudPath.getTotalLength();
+        cloudPath.style.strokeDasharray = CLOUD_LEN + "";
+        cloudPath.style.strokeDashoffset = CLOUD_LEN + "";
+
+        var bubble = $("h01-bubble");
+        var ghosts = [$("h01-g1"), $("h01-g2"), $("h01-g3")];
+        var packets = Array.prototype.slice.call(document.querySelectorAll(".h01-packet"));
+        var leds = Array.prototype.slice.call(document.querySelectorAll(".h01-led"));
+        var racks = Array.prototype.slice.call(document.querySelectorAll(".h01-rack"));
+
+        gsap.set(bubble, { x: 620, y: 560, scale: 1 });
+        gsap.set(ghosts, { x: 620, y: 560, opacity: 0 });
+        gsap.set(leds, { opacity: 0.15 });
+        gsap.set(packets, { opacity: 0 });
+
+        /* kicker text, typed */
+        var kicker = $("h01-kicker");
+        var KTXT = "> sending prompt…";
+        var kch = [];
+        for (var i = 0; i < KTXT.length; i++) {
+          var s = document.createElement("span");
+          s.className = "h01-kch";
+          s.textContent = KTXT.charAt(i);
+          kicker.appendChild(s);
+          kch.push(s);
+        }
+        var cur = document.createElement("span");
+        cur.className = "h01-cursor";
+        cur.id = "h01-cursor";
+        kicker.appendChild(cur);
+
+        /* ---------- Scene 1 (0 - 1.9): quiet setup, bubble pops ---------- */
+        tl.fromTo("#h01-phone", { opacity: 0, y: 40, scale: 0.85 }, { opacity: 1, y: 0, scale: 1, duration: 0.55, ease: "expo.out" }, 0.0);
+        tl.fromTo("#h01-bubble-in", { scale: 0, opacity: 0, y: 70 }, { scale: 1, opacity: 1, y: 0, duration: 0.55, ease: "expo.out" }, 0.08);
+        tl.fromTo("#h01-phone-screen", { opacity: 0.4 }, { opacity: 1, duration: 0.4, ease: "power2.out" }, 0.2);
+        tl.set(cur, { opacity: 1 }, 0.2);
+        kch.forEach(function (c, idx) { tl.set(c, { opacity: 1 }, 0.2 + idx * 0.045); });
+        /* cursor blink (deterministic sets) */
+        for (var b = 0; b < 8; b++) { tl.set(cur, { opacity: b % 2 ? 1 : 0 }, 1.0 + b * 0.18); }
+        tl.set(cur, { opacity: 1 }, 2.44);
+        /* waiting tension: bubble breathes, phone glows */
+        tl.to("#h01-bubble-in", { scale: 1.03, duration: 0.7, ease: "sine.inOut" }, 0.7);
+        tl.to("#h01-bubble-in", { scale: 1.0, duration: 0.5, ease: "sine.inOut" }, 1.4);
+        tl.to("#h01-phone-screen", { opacity: 0.55, duration: 0.45, ease: "sine.inOut" }, 1.0);
+        tl.to("#h01-phone-screen", { opacity: 1, duration: 0.45, ease: "sine.inOut" }, 1.45);
+
+        /* ---------- cloud arrives (1.35 - 2.15) ---------- */
+        tl.fromTo("#h01-blob-mag", { opacity: 0.12 }, { opacity: 0.32, duration: 0.8, ease: "power2.out" }, 1.35);
+        tl.to(cloudPath, { strokeDashoffset: 0, duration: 0.8, ease: "power2.out" }, 1.35);
+        tl.to(cloudPath, { fillOpacity: 1, duration: 0.4, ease: "power1.out" }, 1.95);
+        racks.forEach(function (r, idx) {
+          tl.fromTo(r, { opacity: 0, x: -24 }, { opacity: 1, x: 0, duration: 0.3, ease: "power3.out" }, 1.75 + idx * 0.08);
+        });
+        /* servers blink (deterministic pattern) */
+        for (var k = 0; k < 10; k++) {
+          var row = (k * 3 + 1) % 4;
+          var at = 1.85 + k * 0.1;
+          tl.set(leds[row], { opacity: 1 }, at);
+          tl.set(leds[row], { opacity: 0.15 }, at + 0.09);
+        }
+
+        /* ---------- anticipation (1.95 - 2.18) ---------- */
+        tl.to("#h01-bubble-in", { scale: 0.93, duration: 0.23, ease: "power2.inOut" }, 1.95);
+        tl.to("#h01-phone-screen", { opacity: 1, duration: 0.08, ease: "power2.out" }, 2.1);
+
+        /* ---------- Scene 2: launch (2.18 -> 3.0) ---------- */
+        var FLY_AT = 2.18, FLY_DUR = 0.82;
+        var fly = { p: 0 };
+        var LAG = [0.05, 0.1, 0.15];
+        function pt(p) { return arc.getPointAtLength(Math.max(0, Math.min(1, p)) * ARC_LEN); }
+        function apply() {
+          var p = fly.p;
+          var q = pt(p);
+          var sc = 1 - 0.72 * p;
+          gsap.set(bubble, { x: q.x, y: q.y, scale: sc, rotation: -10 * Math.sin(Math.PI * p) });
+          var vel = (1 - p);
+          ghosts.forEach(function (g, gi) {
+            var gp = Math.max(0, p - LAG[gi] * (0.4 + vel));
+            var gq = pt(gp);
+            var op = p <= 0.001 || p >= 0.995 ? 0 : 0.42 * vel / (gi + 1);
+            gsap.set(g, { x: gq.x, y: gq.y, scale: 1 - 0.72 * gp, opacity: op, rotation: -10 * Math.sin(Math.PI * gp) });
+          });
+          maskPath.style.strokeDashoffset = (ARC_LEN * (1 - Math.min(1, p + 0.04))) + "";
+          if (p >= 0.995) { gsap.set(bubble, { opacity: 0 }); } else { gsap.set(bubble, { opacity: 1 }); }
+        }
+        tl.to(fly, { p: 1, duration: FLY_DUR, ease: "power3.out", onUpdate: apply }, FLY_AT);
+        tl.fromTo("#h01-bubble-in", { scale: 0.93 }, { scale: 1.12, duration: 0.15, ease: "power2.out", immediateRender: false }, FLY_AT);
+        tl.fromTo("#h01-phone-screen", { opacity: 1 }, { opacity: 0.3, duration: 0.5, ease: "power2.out", immediateRender: false }, FLY_AT);
+
+        /* data packets stream along the arc */
+        var pk = { t: 0 };
+        function applyPackets() {
+          var tt = pk.t;
+          packets.forEach(function (el, i) {
+            var f = (tt * 1.3 + i / packets.length) % 1;
+            var q = pt(f);
+            var fade = Math.min(1, f / 0.1) * Math.min(1, (1 - f) / 0.1);
+            gsap.set(el, { x: q.x, y: q.y, opacity: 0.95 * fade, rotation: (f - 0.5) * 70 });
+          });
+        }
+        tl.to(pk, { t: 1, duration: 1.66, ease: "none", onUpdate: applyPackets }, 2.18);
+
+        /* ---------- Scene 3: landing (3.0 -> 3.84) ---------- */
+        tl.fromTo("#h01-cloud", { scale: 1 }, { scale: 1.07, duration: 0.12, ease: "power2.out", immediateRender: false }, 2.98);
+        tl.to("#h01-cloud", { scale: 1.0, duration: 0.5, ease: "power3.out" }, 3.1);
+        tl.fromTo("#h01-ring", { opacity: 0.9, scale: 0.3 }, { opacity: 0, scale: 1.9, duration: 0.6, ease: "power3.out", immediateRender: false }, 2.98);
+        tl.fromTo("#h01-blob-mag", { opacity: 0.32 }, { opacity: 0.5, duration: 0.15, ease: "power2.out", immediateRender: false }, 2.98);
+        tl.to("#h01-blob-mag", { opacity: 0.34, duration: 0.6, ease: "power2.out" }, 3.13);
+        /* servers light up */
+        leds.forEach(function (l, idx) {
+          tl.set(l, { opacity: 1, fill: "#FF3DCB" }, 3.0 + idx * 0.06);
+        });
+
+        /* waterfall-entry labels: binary reveal, rise from below, shrinking gaps */
+        var F = 1 / 60;
+        var chipTimes = [3.0, 3.2, 3.4];
+        var chipIds = ["#h01-chip1", "#h01-chip2", "#h01-chip3"];
+        var chipY = [60, 52, 48];
+        var chipDur = [0.2, 0.17, 0.16];
+        chipIds.forEach(function (id, i) {
+          tl.set(id, { opacity: 1, y: chipY[i], scale: 0.96 }, chipTimes[i]);
+          tl.to(id, { y: 0, scale: 1, duration: chipDur[i], ease: "power4.out" }, chipTimes[i]);
+        });
+        /* final-beat life: last chip pulses glow, cloud breathes (settled hold) */
+        tl.to("#h01-chip3", { boxShadow: "0 0 40px rgba(255,61,203,0.85)", duration: 0.3, ease: "sine.inOut" }, 3.5);
+        tl.to("#h01-cloud", { scale: 1.015, duration: 0.3, ease: "sine.inOut" }, 3.6);
+
+        window.__timelines["01-hook"] = tl;
+      })();
+    </script>
+  </div>
+</template>

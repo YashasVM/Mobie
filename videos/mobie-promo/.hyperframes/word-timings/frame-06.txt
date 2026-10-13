@@ -1,0 +1,13 @@
+# voice starts at frame t=0; seconds are frame-local
+0.30-0.68  Downloads
+0.72-1.02  resume
+1.11-1.15  if
+1.20-1.24  you
+1.28-1.36  drop
+1.45-1.83  signal,
+1.96-2.13  and
+2.18-2.26  get
+2.30-2.52  verified
+2.69-2.82  before
+2.94-3.03  they
+3.07-3.22  run.

@@ -1,0 +1,123 @@
+<template>
+  <style>
+    @font-face { font-family: "Unbounded"; src: url("assets/fonts/Unbounded-Variable.ttf"); font-weight: 200 900; }
+    @font-face { font-family: "IBM Plex Mono"; src: url("assets/fonts/plex_mono_regular.ttf"); font-weight: 400; }
+    @font-face { font-family: "IBM Plex Mono"; src: url("assets/fonts/plex_mono_medium.ttf"); font-weight: 500; }
+    @font-face { font-family: "IBM Plex Mono"; src: url("assets/fonts/plex_mono_semibold.ttf"); font-weight: 600; }
+    @font-face { font-family: "IBM Plex Mono"; src: url("assets/fonts/plex_mono_bold.ttf"); font-weight: 700; }
+
+    #root { position: relative; width: 1920px; height: 1080px; overflow: hidden; font-family: "IBM Plex Mono", monospace; color: #D6D3C8; }
+    #root .clip { position: absolute; inset: 0; }
+    .b04-ground { background: #0C0C0B; }
+    .b04-blob { position: absolute; border-radius: 50%; filter: blur(110px); }
+    .b04-blob.a { left: 900px; top: 60px; width: 700px; height: 700px; background: #9BFF5A; opacity: 0.22; }
+    .b04-blob.b { left: -120px; top: 520px; width: 640px; height: 520px; background: #FFB547; opacity: 0.16; }
+    .b04-scan { position: absolute; inset: 0; background: repeating-linear-gradient(0deg, rgba(214,211,200,0.035) 0 1px, transparent 1px 4px); }
+
+    .b04-left { position: absolute; left: 130px; top: 280px; width: 760px; }
+    .b04-kicker { font-weight: 500; font-size: 22px; letter-spacing: 0.14em; color: #FFB547; text-transform: uppercase; display: flex; align-items: center; gap: 18px; }
+    .b04-kicker i { display: block; width: 36px; height: 2px; background: #FFB547; }
+    .b04-h { margin-top: 34px; font-family: "Unbounded", sans-serif; font-weight: 800; font-size: 118px; line-height: 1.02; letter-spacing: -0.03em; text-transform: lowercase; color: #D6D3C8; }
+    .b04-h span { display: block; }
+    .b04-h .acc { color: #9BFF5A; text-shadow: 0 0 36px rgba(155,255,90,0.55); }
+    .b04-src { margin-top: 52px; font-weight: 500; font-size: 24px; color: #2EF2FF; text-shadow: 0 0 22px rgba(46,242,255,0.5); display: flex; align-items: center; gap: 14px; }
+    .b04-src .dot { width: 12px; height: 12px; border-radius: 50%; background: #2EF2FF; box-shadow: 0 0 14px #2EF2FF; }
+
+    .b04-stage { position: absolute; left: 1045px; top: 90px; width: 430px; height: 900px; }
+    .b04-phone { position: absolute; inset: 0; border-radius: 64px; background: #111214; padding: 10px; box-sizing: border-box;
+      box-shadow: 0 0 0 2px rgba(155,255,90,0.55), 0 0 70px rgba(155,255,90,0.38), 0 0 160px rgba(155,255,90,0.18), 0 40px 90px rgba(0,0,0,0.6); }
+    .b04-screen { position: relative; width: 410px; height: 880px; border-radius: 54px; background: #0B0C0E; overflow: hidden; }
+    .b04-status { position: absolute; left: 34px; right: 34px; top: 22px; display: flex; justify-content: space-between; font-size: 14px; font-weight: 600; color: #8b8d92; }
+    .b04-cam { position: absolute; left: 185px; top: 18px; width: 40px; height: 14px; border-radius: 8px; background: #050506; }
+    .b04-head { position: absolute; left: 0; right: 0; top: 70px; height: 70px; border-bottom: 1px solid #23262b; padding: 0 26px; box-sizing: border-box; }
+    .b04-brand { font-weight: 700; font-size: 20px; color: #D6D3C8; margin-top: 12px; }
+    .b04-brand em { font-style: normal; color: #FFB547; padding: 0 4px; }
+    .b04-brand b { color: #D6D3C8; font-weight: 700; }
+    .b04-org { margin-top: 6px; font-size: 13px; color: #9BFF5A; display: flex; align-items: center; gap: 8px; }
+    .b04-org .dot { width: 8px; height: 8px; border-radius: 50%; background: #9BFF5A; box-shadow: 0 0 8px #9BFF5A; }
+    .b04-sub { position: absolute; left: 26px; top: 158px; font-size: 12px; letter-spacing: 0.14em; color: #6d7076; text-transform: uppercase; }
+
+    .b04-list { position: absolute; left: 22px; right: 22px; top: 192px; }
+    .b04-row { position: absolute; left: 0; right: 0; height: 142px; border-radius: 24px; background: #121316; border: 1px solid #25282d; box-sizing: border-box; padding: 20px 22px; }
+    .b04-name { font-weight: 700; font-size: 17px; color: #ECE9DD; }
+    .b04-meta { margin-top: 10px; font-size: 14px; color: #9a9ca2; }
+    .b04-ext { margin-top: 10px; font-size: 12px; color: #5f6268; letter-spacing: 0.04em; }
+    .b04-pill { position: absolute; right: 18px; top: 18px; font-weight: 700; font-size: 13px; padding: 5px 13px; border-radius: 999px; display: flex; align-items: center; gap: 7px; }
+    .b04-pill i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: block; }
+    .b04-pill.fit { color: #9BFF5A; background: rgba(155,255,90,0.12); border: 1px solid rgba(155,255,90,0.5); box-shadow: 0 0 16px rgba(155,255,90,0.25); }
+    .b04-pill.tight { color: #FFB547; background: rgba(255,181,71,0.12); border: 1px solid rgba(255,181,71,0.5); box-shadow: 0 0 16px rgba(255,181,71,0.22); }
+    .b04-sel { position: absolute; left: -5px; right: -5px; top: -5px; height: 152px; border-radius: 28px; border: 2px solid #FFB547; box-shadow: 0 0 26px rgba(255,181,71,0.65), inset 0 0 22px rgba(255,181,71,0.16); opacity: 0; }
+    .b04-home { position: absolute; left: 135px; bottom: 14px; width: 140px; height: 5px; border-radius: 3px; background: #4a4c51; }
+    .b04-foot { position: absolute; left: 0; right: 0; bottom: 36px; text-align: center; font-size: 12px; color: #6d7076; }
+  </style>
+
+  <div data-hf-id="hf-v0km" id="root" data-composition-id="04-browse" data-start="0" data-duration="4.079" data-width="1920" data-height="1080">
+    <div data-hf-id="hf-p57y" id="b04-ground" class="clip b04-ground" data-start="0" data-duration="4.079" data-track-index="0">
+      <div data-hf-id="hf-e5i4" class="b04-blob a" id="b04-blobA"></div>
+      <div data-hf-id="hf-c3du" class="b04-blob b" id="b04-blobB"></div>
+      <div data-hf-id="hf-ldiw" class="b04-scan"></div>
+    </div>
+
+    <div data-hf-id="hf-agqm" id="b04-content" class="clip" data-start="0" data-duration="4.079" data-track-index="1" style="pointer-events:none">
+      <div data-hf-id="hf-ai60" class="b04-left">
+        <div data-hf-id="hf-801m" class="b04-kicker" id="b04-kicker"><i data-hf-id="hf-wt6k"></i><span data-hf-id="hf-24fr">01 / browse</span></div>
+        <div data-hf-id="hf-3td8" class="b04-h" id="b04-h"><span data-hf-id="hf-wann" class="b04-w">pick a</span><span data-hf-id="hf-vthb" class="b04-w acc">model.</span></div>
+        <div data-hf-id="hf-mkig" class="b04-src" id="b04-src"><span data-hf-id="hf-9gry" class="dot"></span><span data-hf-id="hf-t1p0">from huggingface.co/litert-community</span></div>
+      </div>
+
+      <div data-hf-id="hf-k7sw" class="b04-stage" id="b04-stage">
+        <div data-hf-id="hf-19j1" class="b04-phone">
+          <div data-hf-id="hf-vmlv" class="b04-screen">
+            <div data-hf-id="hf-uo5g" class="b04-cam"></div>
+            <div data-hf-id="hf-a479" class="b04-status"><span data-hf-id="hf-zwmt">9:41</span><span data-hf-id="hf-xvxd">5G</span></div>
+            <div data-hf-id="hf-irw1" class="b04-head">
+              <div data-hf-id="hf-y2rq" class="b04-brand">mobie<em data-hf-id="hf-g2vr">›</em><b data-hf-id="hf-8ykn">browse</b></div>
+              <div data-hf-id="hf-94fd" class="b04-org"><span data-hf-id="hf-zcc2" class="dot"></span>litert-community</div>
+            </div>
+            <div data-hf-id="hf-6xa6" class="b04-sub">ready for phones</div>
+            <div data-hf-id="hf-nb7m" class="b04-list" id="b04-list">
+              <div data-hf-id="hf-07ue" class="b04-row" style="top:0px"><div data-hf-id="hf-lgfq" class="b04-name">Gemma3-1B-IT</div><div data-hf-id="hf-c2qh" class="b04-meta">int4 · text</div><div data-hf-id="hf-du33" class="b04-ext">.litertlm</div><div data-hf-id="hf-qj9z" class="b04-pill fit"><i data-hf-id="hf-zeb8"></i>fits</div>
+                <div data-hf-id="hf-taio" class="b04-sel" id="b04-sel"></div></div>
+              <div data-hf-id="hf-7dra" class="b04-row" style="top:156px"><div data-hf-id="hf-ep1s" class="b04-name">Qwen2.5-1.5B-Instruct</div><div data-hf-id="hf-noz1" class="b04-meta">int8 · text</div><div data-hf-id="hf-32y7" class="b04-ext">.litertlm</div><div data-hf-id="hf-lvdj" class="b04-pill fit"><i data-hf-id="hf-y7e5"></i>fits</div></div>
+              <div data-hf-id="hf-ttko" class="b04-row" style="top:312px"><div data-hf-id="hf-178t" class="b04-name">gemma-3n-E2B-it</div><div data-hf-id="hf-wreg" class="b04-meta">int4 · text + vision</div><div data-hf-id="hf-2on6" class="b04-ext">.litertlm</div><div data-hf-id="hf-lh2i" class="b04-pill fit"><i data-hf-id="hf-ylp6"></i>fits</div></div>
+              <div data-hf-id="hf-dn5k" class="b04-row" style="top:468px"><div data-hf-id="hf-4627" class="b04-name">gemma-3n-E4B-it</div><div data-hf-id="hf-fcls" class="b04-meta">int4 · text + vision</div><div data-hf-id="hf-2ac5" class="b04-ext">.litertlm</div><div data-hf-id="hf-q7j6" class="b04-pill tight"><i data-hf-id="hf-0l8b"></i>tight</div></div>
+            </div>
+            <div data-hf-id="hf-ifng" class="b04-foot">stays on this phone</div>
+            <div data-hf-id="hf-2oyq" class="b04-home"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+  <script>
+    window.__timelines = window.__timelines || {};
+    const tl = gsap.timeline({ paused: true });
+
+    // ground bloom drift
+    tl.fromTo("#b04-blobA", { x: 0, y: 0 }, { x: -60, y: 40, duration: 3.579, ease: "none" }, 0);
+    tl.fromTo("#b04-blobB", { x: 0, y: 0 }, { x: 70, y: -30, duration: 3.579, ease: "none" }, 0);
+
+    // Scene 1: phone rises with 3D tilt, left copy enters
+    tl.fromTo("#b04-stage", { y: 760, rotationX: 32, transformPerspective: 1400, transformOrigin: "50% 100%", opacity: 0 },
+      { y: 0, rotationX: 0, opacity: 1, duration: 0.9, ease: "back.out(1.15)" }, 0);
+    tl.fromTo("#b04-kicker", { x: -50, opacity: 0 }, { x: 0, opacity: 1, duration: 0.5, ease: "power3.out" }, 0.1);
+    tl.fromTo(".b04-w", { y: 70, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: "expo.out", stagger: 0.14 }, 0.22);
+
+    // Scene 2: rows waterfall in, paced to "straight from Hugging Face"
+    const rows = document.querySelectorAll(".b04-row");
+    const rowTimes = [1.05, 1.5, 1.95, 2.4];
+    rows.forEach((r, i) => {
+      tl.fromTo(r, { y: 90, opacity: 0, scale: 0.94 }, { y: 0, opacity: 1, scale: 1, duration: 0.5, ease: "expo.out" }, rowTimes[i]);
+      const pill = r.querySelector(".b04-pill");
+      tl.fromTo(pill, { scale: 0.4, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.35, ease: "back.out(2.2)" }, rowTimes[i] + 0.22);
+    });
+    tl.fromTo("#b04-src", { x: -40, opacity: 0 }, { x: 0, opacity: 1, duration: 0.55, ease: "power3.out" }, 1.92);
+
+    // Scene 3: highlight bar lands on row 1
+    tl.fromTo("#b04-sel", { opacity: 0, scaleX: 0.9, scaleY: 0.85 }, { opacity: 1, scaleX: 1, scaleY: 1, duration: 0.4, ease: "power3.out" }, 3.0);
+
+    window.__timelines["04-browse"] = tl;
+  </script>
+</template>

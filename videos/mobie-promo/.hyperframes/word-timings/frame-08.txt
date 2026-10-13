@@ -1,0 +1,15 @@
+# voice starts at frame t=0; seconds are frame-local
+0.30-0.43  No
+0.51-0.94  account.
+1.20-1.36  No
+1.45-1.92  cloud.
+2.18-2.52  Works
+2.60-2.69  in
+2.73-3.03  airplane
+3.07-3.52  mode.
+3.84-3.92  Your
+3.97-4.31  prompts
+4.39-4.74  never
+4.86-5.03  leave
+5.08-5.16  your
+5.21-5.52  phone.

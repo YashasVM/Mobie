@@ -1,0 +1,132 @@
+<template>
+  <div id="f03-root" data-composition-id="03-meet-mobie" data-width="1920" data-height="1080" data-start="0" data-duration="4.512">
+    <style>
+      @font-face { font-family: "IBM Plex Mono"; src: url("assets/fonts/plex_mono_regular.ttf") format("truetype"); font-weight: 400; }
+      @font-face { font-family: "IBM Plex Mono"; src: url("assets/fonts/plex_mono_medium.ttf") format("truetype"); font-weight: 500; }
+      @font-face { font-family: "IBM Plex Mono"; src: url("assets/fonts/plex_mono_semibold.ttf") format("truetype"); font-weight: 600; }
+      @font-face { font-family: "IBM Plex Mono"; src: url("assets/fonts/plex_mono_bold.ttf") format("truetype"); font-weight: 700; }
+
+      #f03-root { position: relative; width: 100%; height: 100%; overflow: hidden; font-family: "IBM Plex Mono", monospace; color: #D6D3C8; }
+      #f03-root .clip { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+
+      .f03-ground { background: #0C0C0B; }
+
+      .f03-bar { position: absolute; left: 0; top: 0; width: 1920px; height: 48px; background: #FFB547; color: #0C0C0B;
+        font-family: "IBM Plex Mono", monospace; font-weight: 500; font-size: 22px; line-height: 48px; white-space: pre; }
+      .f03-bar-l { position: absolute; left: 200px; top: 0; display: flex; }
+      .f03-bar-r { position: absolute; right: 200px; top: 0; display: flex; }
+      .f03-bar span { display: block; padding: 0 14px; height: 48px; }
+      .f03-bar .f03-on { background: #0C0C0B; color: #FFB547; }
+
+      .f03-boot { position: absolute; left: 200px; top: 104px; width: 1520px; font-weight: 400; font-size: 34px; line-height: 51px; color: #AAA79D; white-space: normal; }
+      .f03-boot div { height: 51px; white-space: pre; }
+      .f03-a { color: #FFB547; }
+      .f03-g { color: #8FD16A; }
+
+      .f03-logo { position: absolute; left: 200px; top: 340px; margin: 0; font-family: "IBM Plex Mono", monospace; font-weight: 500;
+        font-size: 36px; line-height: 50px; color: #FFB547; white-space: pre; letter-spacing: 0; }
+      .f03-ln { display: block; height: 50px; clip-path: inset(0 100% 0 0); }
+
+      .f03-lead { position: absolute; left: 200px; top: 700px; width: 1520px; font-weight: 500; font-size: 64px; line-height: 90px; color: #D6D3C8; white-space: pre; }
+      .f03-lead .f03-amb { color: #FFB547; font-weight: 600; }
+      .f03-cur { display: none; width: .6em; height: 1.1em; background: #FFB547; vertical-align: -.18em; }
+      .f03-cur.f03-boxed { display: inline-block; }
+
+      .f03-scan { background: repeating-linear-gradient(0deg, rgba(0,0,0,.09) 0 1px, transparent 1px 3px); pointer-events: none; }
+    </style>
+
+    <div id="f03-layer-1" class="clip f03-ground" data-start="0" data-duration="4.512" data-track-index="0"></div>
+
+    <div id="f03-layer-2" class="clip" data-start="0" data-duration="4.512" data-track-index="1">
+      <div class="f03-bar">
+        <div class="f03-bar-l"><span class="f03-on">0:mobie</span><span>1:about</span><span>2:browse</span><span>3:pull</span><span>4:chat</span><span>5:privacy</span></div>
+        <div class="f03-bar-r"><span>github</span><span>download</span></div>
+      </div>
+
+      <div class="f03-boot">
+        <div id="f03-b0"></div>
+        <div id="f03-b1"></div>
+        <div id="f03-b2"></div>
+        <div id="f03-b3"></div>
+      </div>
+
+      <pre class="f03-logo"><span class="f03-ln">███╗   ███╗ ██████╗ ██████╗ ██╗███████╗</span><span class="f03-ln">████╗ ████║██╔═══██╗██╔══██╗██║██╔════╝</span><span class="f03-ln">██╔████╔██║██║   ██║██████╔╝██║█████╗  </span><span class="f03-ln">██║╚██╔╝██║██║   ██║██╔══██╗██║██╔══╝  </span><span class="f03-ln">██║ ╚═╝ ██║╚██████╔╝██████╔╝██║███████╗</span><span class="f03-ln">╚═╝     ╚═╝ ╚═════╝ ╚═════╝ ╚═╝╚══════╝</span></pre>
+
+      <div class="f03-lead" id="f03-lead"><span id="f03-l1"></span><span id="f03-l2" class="f03-amb"></span><span id="f03-l3"></span><span class="f03-cur" id="f03-cur"></span></div>
+    </div>
+
+    <div id="f03-layer-3" class="clip f03-scan" data-start="0" data-duration="4.512" data-track-index="2"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <script>
+      (function () {
+        window.__timelines = window.__timelines || {};
+        var tl = gsap.timeline({ paused: true });
+
+        // Build per-character spans (hidden until cued) inside a container; returns span array.
+        function chars(el, text, cls) {
+          var out = [];
+          for (var i = 0; i < text.length; i++) {
+            var s = document.createElement("span");
+            s.textContent = text.charAt(i);
+            s.style.display = "none";
+            if (cls) s.className = cls;
+            el.appendChild(s);
+            out.push(s);
+          }
+          return out;
+        }
+        // Reveal chars one by one from t0 across dur seconds.
+        function type(list, t0, dur) {
+          var n = list.length;
+          for (var i = 0; i < n; i++) {
+            tl.set(list[i], { display: "inline" }, t0 + (n > 1 ? (dur * i) / (n - 1) : 0));
+          }
+        }
+
+        // Scene 1: boot lines
+        var b0 = document.getElementById("f03-b0");
+        var prompt = chars(b0, "$", "f03-a");
+        var cmd = chars(b0, " mobie --version");
+        type(prompt.concat(cmd), 0.02, 0.36);
+
+        var b1 = document.getElementById("f03-b1");
+        var l1 = chars(b1, "mobie 0.2.0 · android · litert-lm");
+        type(l1, 0.42, 0.001);
+        var b2 = document.getElementById("f03-b2");
+        var c2 = chars(b2, "✓", "f03-g");
+        var t2 = chars(b2, " runtime ready");
+        type(c2.concat(t2), 0.54, 0.001);
+        var b3 = document.getElementById("f03-b3");
+        var c3 = chars(b3, "✓", "f03-g");
+        var t3 = chars(b3, " network not required for chat");
+        type(c3.concat(t3), 0.66, 0.001);
+
+        // Scene 2: logo line wipes, on "Mobie." (0.51)
+        var lns = document.querySelectorAll(".f03-ln");
+        for (var i = 0; i < lns.length; i++) {
+          tl.fromTo(lns[i], { clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)", duration: 0.26, ease: "steps(20)" }, 0.51 + i * 0.07);
+        }
+
+        // Scene 3: lead line, word-cued
+        var cur = document.getElementById("f03-cur");
+        var k1 = chars(document.getElementById("f03-l1"), "Run AI models");
+        var k2 = chars(document.getElementById("f03-l2"), " on your phone,");
+        var k3 = chars(document.getElementById("f03-l3"), " offline.");
+        type(k1, 1.41, 0.7);   // "Real AI models"
+        type(k2, 3.46, 0.5);   // "on your phone"
+        type(k3, 3.98, 0.2);   // trailing beat
+
+        // Block cursor: appears with the lead, blinks on/off every 0.5s (discrete)
+        tl.set(cur, { display: "inline-block", opacity: 1 }, 1.41);
+        var on = true;
+        for (var t = 1.91; t < 4.232; t += 0.5) {
+          on = !on;
+          tl.set(cur, { opacity: on ? 1 : 0 }, t);
+        }
+
+        window.__timelines["03-meet-mobie"] = tl;
+      })();
+    </script>
+  </div>
+</template>

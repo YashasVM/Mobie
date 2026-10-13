@@ -1,0 +1,200 @@
+<template>
+  <style>
+    @font-face { font-family: "Unbounded"; src: url("assets/fonts/Unbounded-Variable.ttf"); font-weight: 200 900; }
+    @font-face { font-family: "IBM Plex Mono"; src: url("assets/fonts/plex_mono_regular.ttf"); font-weight: 400; }
+    @font-face { font-family: "IBM Plex Mono"; src: url("assets/fonts/plex_mono_medium.ttf"); font-weight: 500; }
+    @font-face { font-family: "IBM Plex Mono"; src: url("assets/fonts/plex_mono_semibold.ttf"); font-weight: 600; }
+    @font-face { font-family: "IBM Plex Mono"; src: url("assets/fonts/plex_mono_bold.ttf"); font-weight: 700; }
+    #root { position: relative; width: 1920px; height: 1080px; overflow: hidden; font-family: "IBM Plex Mono", monospace; color: #D6D3C8; }
+    #root * { box-sizing: border-box; }
+    .fc-bg { position: absolute; inset: 0; background: #0C0C0B; overflow: hidden; }
+    .fc-blob { position: absolute; border-radius: 50%; filter: blur(110px); }
+    .fc-scan { position: absolute; inset: 0; background: repeating-linear-gradient(0deg, rgba(255,255,255,0.035) 0 1px, transparent 1px 4px); }
+    .fc-grid { position: absolute; inset: 0; background-image: linear-gradient(rgba(155,255,90,0.045) 1px, transparent 1px), linear-gradient(90deg, rgba(155,255,90,0.045) 1px, transparent 1px); background-size: 80px 80px; }
+
+    /* left type */
+    #fc-kicker { position: absolute; left: 120px; top: 250px; font-size: 22px; font-weight: 600; letter-spacing: 0.14em; color: #9BFF5A; display: flex; align-items: center; gap: 16px; text-shadow: 0 0 18px rgba(155,255,90,0.6); }
+    #fc-kicker i { display: block; width: 36px; height: 2px; background: #9BFF5A; }
+    .fc-h { position: absolute; left: 112px; font-family: "Unbounded", sans-serif; font-weight: 800; font-size: 150px; letter-spacing: -0.03em; line-height: 1; color: #fff; text-transform: lowercase; white-space: nowrap; }
+    #fc-h1 { top: 310px; }
+    #fc-h2 { top: 470px; color: #9BFF5A; text-shadow: 0 0 40px rgba(155,255,90,0.55); }
+    .fc-chips { position: absolute; left: 120px; top: 700px; display: flex; gap: 16px; }
+    .fc-chip { display: flex; align-items: center; gap: 12px; padding: 12px 22px; border-radius: 999px; font-size: 22px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; border: 1.5px solid; }
+    .fc-chip.ok { color: #9BFF5A; border-color: rgba(155,255,90,0.6); background: rgba(155,255,90,0.08); box-shadow: 0 0 24px rgba(155,255,90,0.25); }
+    .fc-chip.bad { color: #FF6B57; border-color: rgba(255,107,87,0.7); background: rgba(255,107,87,0.09); box-shadow: 0 0 24px rgba(255,107,87,0.3); position: absolute; left: 0; top: 66px; white-space: nowrap; }
+    .fc-chip svg { width: 18px; height: 18px; flex: none; }
+
+    /* camera + phone */
+    #fc-cam { position: absolute; inset: 0; transform-origin: 1260px 400px; }
+    #fc-phone { position: absolute; left: 1045px; top: 90px; width: 430px; height: 900px; border-radius: 64px; background: #111214; padding: 10px; box-shadow: 0 0 0 2px rgba(155,255,90,0.55), 0 0 60px rgba(155,255,90,0.45), 0 0 140px rgba(155,255,90,0.22); }
+    #fc-rim-bad { position: absolute; left: 1045px; top: 90px; width: 430px; height: 900px; border-radius: 64px; box-shadow: 0 0 0 2px rgba(255,107,87,0.8), 0 0 70px rgba(255,107,87,0.55), 0 0 150px rgba(255,107,87,0.3); opacity: 0; pointer-events: none; }
+    #fc-screen { position: relative; width: 410px; height: 880px; border-radius: 54px; background: #0B0C0E; overflow: hidden; }
+    #fc-head { position: absolute; left: 28px; top: 56px; right: 28px; }
+    #fc-head .t { font-size: 24px; font-weight: 700; color: #fff; }
+    #fc-head .s { margin-top: 8px; font-size: 14px; color: #8a8f98; display: flex; align-items: center; gap: 8px; }
+    .fc-dot { width: 9px; height: 9px; border-radius: 50%; background: #9BFF5A; box-shadow: 0 0 10px #9BFF5A; }
+    #fc-sep { position: absolute; left: 0; right: 0; top: 130px; height: 1px; background: #1d2026; }
+    .fc-card { position: absolute; left: 18px; width: 374px; height: 336px; border-radius: 24px; background: #121418; border: 1.5px solid #272b33; padding: 20px 20px; overflow: visible; }
+    #fc-card1 { top: 160px; border-color: rgba(155,255,90,0.35); box-shadow: 0 0 40px rgba(155,255,90,0.12); }
+    #fc-card2 { top: 215px; background: #14110f; border-color: rgba(255,107,87,0.55); box-shadow: 0 0 50px rgba(255,107,87,0.22), 0 24px 60px rgba(0,0,0,0.7); }
+    .fc-ct { font-size: 19px; font-weight: 700; color: #fff; line-height: 1.25; }
+    .fc-cs { margin-top: 6px; font-size: 13px; color: #8a8f98; letter-spacing: 0.04em; }
+    .fc-row { margin-top: 24px; }
+    .fc-lab { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #8a8f98; }
+    .fc-val { margin-top: 8px; font-size: 24px; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; white-space: nowrap; }
+    .fc-val small { font-size: 15px; font-weight: 500; color: #8a8f98; letter-spacing: 0; }
+    .fc-track { position: relative; margin-top: 10px; height: 14px; border-radius: 7px; background: #1e2128; }
+    .fc-fill { position: absolute; left: 0; top: 0; height: 14px; width: 100%; border-radius: 7px; transform-origin: left center; background: linear-gradient(90deg, #5ec43a, #9BFF5A); box-shadow: 0 0 18px rgba(155,255,90,0.7); transform: scaleX(0); }
+    .fc-fill.bad { background: linear-gradient(90deg, #d9452f, #FF6B57); box-shadow: 0 0 18px rgba(255,107,87,0.8); }
+    .fc-over { position: absolute; left: 100%; top: 0; height: 14px; width: 40px; border-radius: 0 7px 7px 0; background: repeating-linear-gradient(135deg, #FF6B57 0 6px, #8d2c1e 6px 12px); box-shadow: 0 0 20px rgba(255,107,87,0.9); transform-origin: left center; transform: scaleX(0); }
+    .fc-cap { position: absolute; right: 0; top: -22px; font-size: 11px; font-weight: 700; color: #FF6B57; letter-spacing: 0.1em; opacity: 0; }
+    .fc-stamp { position: absolute; left: 50%; bottom: 14px; margin-left: -150px; width: 300px; padding: 12px 0; text-align: center; border-radius: 14px; border: 3px solid; font-weight: 700; letter-spacing: 0.08em; transform-origin: center; }
+    #fc-stamp1 { color: #9BFF5A; border-color: #9BFF5A; background: rgba(12,20,8,0.92); font-size: 22px; box-shadow: 0 0 36px rgba(155,255,90,0.7), inset 0 0 24px rgba(155,255,90,0.2); text-shadow: 0 0 14px rgba(155,255,90,0.8); }
+    #fc-stamp2 { color: #FF6B57; border-color: #FF6B57; background: rgba(26,10,8,0.94); font-size: 22px; box-shadow: 0 0 36px rgba(255,107,87,0.7), inset 0 0 24px rgba(255,107,87,0.2); text-shadow: 0 0 14px rgba(255,107,87,0.8); bottom: 12px; }
+    #fc-stamp2 .a { display: flex; align-items: center; justify-content: center; gap: 10px; }
+    #fc-stamp2 .a svg { width: 20px; height: 20px; }
+    #fc-stamp2 .b { margin-top: 4px; font-size: 13px; font-weight: 500; letter-spacing: 0.04em; color: #ffb3a8; text-shadow: none; }
+    #fc-ring { position: absolute; left: 50%; top: 50%; width: 300px; height: 70px; margin: -35px 0 0 -150px; border-radius: 18px; border: 3px solid #9BFF5A; box-shadow: 0 0 30px rgba(155,255,90,0.8); opacity: 0; }
+    .fc-ghost { position: absolute; left: 18px; width: 374px; height: 56px; border-radius: 16px; background: #101216; border: 1px solid #1d2026; }
+  </style>
+
+  <div data-hf-id="hf-uhay" id="root" data-composition-id="05-fit-check" data-width="1920" data-height="1080" data-start="0" data-duration="5.228">
+    <div data-hf-id="hf-k5hh" id="fc-bg" class="fc-bg clip" data-start="0" data-duration="5.228" data-track-index="0">
+      <div data-hf-id="hf-e85i" class="fc-blob" id="fc-blob1" style="left:-200px; top:80px; width:900px; height:700px; background:#9BFF5A; opacity:0.17;"></div>
+      <div data-hf-id="hf-2y8i" class="fc-blob" id="fc-blob2" style="left:1000px; top:150px; width:760px; height:760px; background:#2EF2FF; opacity:0.10;"></div>
+      <div data-hf-id="hf-epd0" class="fc-blob" id="fc-blob3" style="left:1100px; top:400px; width:640px; height:600px; background:#FF6B57; opacity:0;"></div>
+      <div data-hf-id="hf-6g32" class="fc-grid"></div>
+      <div data-hf-id="hf-c6xh" class="fc-scan"></div>
+    </div>
+
+    <div data-hf-id="hf-nx2i" id="fc-kicker"><i data-hf-id="hf-wt6k"></i><span data-hf-id="hf-zhyx">02 / FIT CHECK</span></div>
+    <div data-hf-id="hf-wiry" class="fc-h" id="fc-h1">checks</div>
+    <div data-hf-id="hf-1kqc" class="fc-h" id="fc-h2">first.</div>
+    <div data-hf-id="hf-9jxn" class="fc-chips">
+      <div data-hf-id="hf-9yvv" class="fc-chip ok" id="fc-chip1"><svg data-hf-id="hf-pok3" viewBox="0 0 18 18"><path data-hf-id="hf-ukb8" d="M3 9.5 7.5 14 15 4.5" fill="none" stroke="#9BFF5A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" /></svg>ram</div>
+      <div data-hf-id="hf-dd0b" class="fc-chip ok" id="fc-chip2"><svg data-hf-id="hf-uinn" viewBox="0 0 18 18"><path data-hf-id="hf-tn58" d="M3 9.5 7.5 14 15 4.5" fill="none" stroke="#9BFF5A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" /></svg>storage</div>
+      <div data-hf-id="hf-dnhv" class="fc-chip bad" id="fc-chip3"><svg data-hf-id="hf-u4cm" viewBox="0 0 18 18"><path data-hf-id="hf-jmt9" d="M4 4 14 14M14 4 4 14" fill="none" stroke="#FF6B57" stroke-width="3" stroke-linecap="round" /></svg>8b model</div>
+    </div>
+
+    <div data-hf-id="hf-7z3e" id="fc-cam">
+      <div data-hf-id="hf-u44v" id="fc-phone">
+        <div data-hf-id="hf-9u8x" id="fc-screen">
+          <div data-hf-id="hf-shnr" id="fc-head">
+            <div data-hf-id="hf-ypjf" class="t">Fit check</div>
+            <div data-hf-id="hf-dh3w" class="s"><span data-hf-id="hf-scfa" class="fc-dot"></span>This phone · 8 GB RAM · 41 GB free</div>
+          </div>
+          <div data-hf-id="hf-ngqz" id="fc-sep"></div>
+
+          <div data-hf-id="hf-tvkj" class="fc-ghost" style="top:530px;"></div>
+          <div data-hf-id="hf-jyhn" class="fc-ghost" style="top:600px; opacity:0.6;"></div>
+
+          <div data-hf-id="hf-kxmf" class="fc-card" id="fc-card1">
+            <div data-hf-id="hf-1yo2" class="fc-ct">Gemma3-1B-IT · 555 MB</div>
+            <div data-hf-id="hf-g9tg" class="fc-cs">LITERT-LM · .LITERTLM</div>
+            <div data-hf-id="hf-7b9m" class="fc-row">
+              <div data-hf-id="hf-1sh7" class="fc-lab"><span data-hf-id="hf-0tu7">RAM</span><span data-hf-id="hf-galr">est.</span></div>
+              <div data-hf-id="hf-z3yj" class="fc-val"><span data-hf-id="hf-pv2n" id="fc-n1">0.0</span> <small data-hf-id="hf-3e8x">GB / 8 GB</small></div>
+              <div data-hf-id="hf-apfn" class="fc-track"><div data-hf-id="hf-8lk4" class="fc-fill" id="fc-f1"></div></div>
+            </div>
+            <div data-hf-id="hf-ha8x" class="fc-row" style="margin-top:20px;">
+              <div data-hf-id="hf-06rv" class="fc-lab"><span data-hf-id="hf-7b6y">STORAGE</span><span data-hf-id="hf-zuy7">free</span></div>
+              <div data-hf-id="hf-bhnv" class="fc-val"><span data-hf-id="hf-xs3c" id="fc-n2">0</span> <small data-hf-id="hf-scja">MB / 41 GB</small></div>
+              <div data-hf-id="hf-wtkz" class="fc-track"><div data-hf-id="hf-h9fz" class="fc-fill" id="fc-f2"></div></div>
+            </div>
+            <div data-hf-id="hf-nawz" id="fc-ring"></div>
+            <div data-hf-id="hf-vmwg" class="fc-stamp" id="fc-stamp1">✓ FITS THIS PHONE</div>
+          </div>
+
+          <div data-hf-id="hf-a24s" class="fc-card" id="fc-card2">
+            <div data-hf-id="hf-pyv4" class="fc-ct">an 8B model · ~9 GB</div>
+            <div data-hf-id="hf-v364" class="fc-cs">LITERT-LM · .LITERTLM</div>
+            <div data-hf-id="hf-6nbi" class="fc-row">
+              <div data-hf-id="hf-zsgu" class="fc-lab"><span data-hf-id="hf-nq5r">RAM</span><span data-hf-id="hf-e11r">est.</span></div>
+              <div data-hf-id="hf-mxw4" class="fc-val" id="fc-val3" style="color:#FF6B57;"><span data-hf-id="hf-d4h1" id="fc-n3">0.0</span> <small data-hf-id="hf-umt1">GB / 8 GB</small></div>
+              <div data-hf-id="hf-wf9y" class="fc-track"><div data-hf-id="hf-v521" class="fc-fill bad" id="fc-f3"></div><div data-hf-id="hf-jsgm" class="fc-over" id="fc-over"></div><div data-hf-id="hf-p222" class="fc-cap" id="fc-cap">OVER 100%</div></div>
+            </div>
+            <div data-hf-id="hf-3neh" class="fc-row" id="fc-row4" style="margin-top:20px;">
+              <div data-hf-id="hf-ze5t" class="fc-lab"><span data-hf-id="hf-v9ym">STORAGE</span><span data-hf-id="hf-z34f">free</span></div>
+              <div data-hf-id="hf-b3cu" class="fc-val"><span data-hf-id="hf-5564" id="fc-n4">0.0</span> <small data-hf-id="hf-7klc">GB / 41 GB</small></div>
+              <div data-hf-id="hf-w0yx" class="fc-track"><div data-hf-id="hf-o6tl" class="fc-fill" id="fc-f4"></div></div>
+            </div>
+            <div data-hf-id="hf-sbdo" class="fc-stamp" id="fc-stamp2">
+              <div data-hf-id="hf-l8yv" class="a"><svg data-hf-id="hf-0n2h" viewBox="0 0 20 20"><path data-hf-id="hf-39f7" d="M4 4 16 16M16 4 4 16" fill="none" stroke="#FF6B57" stroke-width="3.4" stroke-linecap="round" /></svg>BLOCKED</div>
+              <div data-hf-id="hf-o5os" class="b">needs more RAM</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div data-hf-id="hf-3yrl" id="fc-rim-bad"></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+  <script>
+    (function () {
+      window.__timelines = window.__timelines || {};
+      var tl = gsap.timeline({ paused: true });
+      var DUR = 4.728;
+      var $ = function (s) { return document.querySelector(s); };
+
+      // counter helper: deterministic, O(1) onUpdate
+      function count(sel, to, dec, start, dur) {
+        var el = $(sel), o = { v: 0 };
+        tl.fromTo(o, { v: 0 }, { v: to, duration: dur, ease: "power2.out", onUpdate: function () { el.textContent = o.v.toFixed(dec); } }, start);
+      }
+
+      // ambient + camera push (whole shot)
+      tl.fromTo("#fc-cam", { scale: 1.0, x: 0, y: 0 }, { scale: 1.25, x: -20, y: 0, duration: DUR, ease: "power1.inOut" }, 0);
+      tl.fromTo("#fc-blob1", { x: 0, y: 0 }, { x: 80, y: 40, duration: DUR, ease: "none" }, 0);
+      tl.fromTo("#fc-blob2", { x: 0, y: 0 }, { x: -60, y: 50, duration: DUR, ease: "none" }, 0);
+
+      // phone + card 1 arrive (hero visible by 0.5s)
+      tl.fromTo("#fc-phone", { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.5, ease: "power3.out" }, 0);
+      tl.fromTo("#fc-head", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: "power2.out" }, 0.1);
+      tl.fromTo("#fc-card1", { opacity: 0, y: 36, scale: 0.96 }, { opacity: 1, y: 0, scale: 1, duration: 0.55, ease: "power3.out" }, 0.1);
+
+      // left type
+      tl.fromTo("#fc-kicker", { opacity: 0, x: -30 }, { opacity: 1, x: 0, duration: 0.5, ease: "power3.out" }, 0.1);
+      tl.fromTo("#fc-h1", { opacity: 0, x: -80 }, { opacity: 1, x: 0, duration: 0.7, ease: "expo.out" }, 0.3);
+
+      // Scene 1: bars fill + numbers count (RAM then storage)
+      tl.fromTo("#fc-f1", { scaleX: 0 }, { scaleX: 1.2 / 8, duration: 0.9, ease: "power2.out" }, 0.65);
+      count("#fc-n1", 1.2, 1, 0.65, 0.9);
+      tl.fromTo("#fc-f2", { scaleX: 0 }, { scaleX: 0.555 / 41 + 0.012, duration: 0.8, ease: "power2.out" }, 1.15);
+      count("#fc-n2", 555, 0, 1.15, 0.8);
+
+      // Scene 2: FITS stamp slams on "first,"
+      tl.fromTo("#fc-stamp1", { scale: 2.2, opacity: 0, rotation: -10 }, { scale: 1, opacity: 1, rotation: -3, duration: 0.45, ease: "back.out(1.6)" }, 1.96);
+      tl.fromTo("#fc-ring", { scale: 0.7, opacity: 0.9 }, { scale: 2.3, opacity: 0, duration: 0.9, ease: "power2.out" }, 2.0);
+      tl.fromTo("#fc-card1", { boxShadow: "0 0 40px rgba(155,255,90,0.12)" }, { boxShadow: "0 0 90px rgba(155,255,90,0.55)", duration: 0.5, ease: "power2.out", immediateRender: false }, 1.96);
+      tl.fromTo("#fc-h2", { opacity: 0, scale: 0.7, y: 20 }, { opacity: 1, scale: 1, y: 0, duration: 0.55, ease: "back.out(1.5)", transformOrigin: "left center" }, 1.96);
+      tl.fromTo("#fc-chip1", { opacity: 0, scale: 0 }, { opacity: 1, scale: 1, duration: 0.4, ease: "back.out(1.7)" }, 2.25);
+      tl.fromTo("#fc-chip2", { opacity: 0, scale: 0 }, { opacity: 1, scale: 1, duration: 0.4, ease: "back.out(1.7)" }, 2.4);
+
+      // Scene 3: second card slides over, RAM overflows, BLOCKED slams
+      tl.fromTo("#fc-card2", { opacity: 0, y: 520 }, { opacity: 1, y: 0, duration: 0.7, ease: "power3.out" }, 3.05);
+      tl.to("#fc-card1", { opacity: 0.12, scale: 0.94, y: -30, filter: "blur(3px)", duration: 0.6, ease: "power2.out" }, 3.1);
+      tl.fromTo("#fc-f3", { scaleX: 0 }, { scaleX: 1, duration: 0.7, ease: "power2.out" }, 3.55);
+      tl.fromTo("#fc-over", { scaleX: 0 }, { scaleX: 1, duration: 0.35, ease: "power2.out" }, 4.2);
+      count("#fc-n3", 9.6, 1, 3.55, 1.0);
+      tl.fromTo("#fc-f4", { scaleX: 0 }, { scaleX: 9 / 41, duration: 0.7, ease: "power2.out" }, 3.6);
+      count("#fc-n4", 9.0, 1, 3.6, 0.7);
+      tl.fromTo("#fc-cap", { opacity: 0 }, { opacity: 1, duration: 0.2, ease: "power2.out" }, 4.3);
+
+      // BLOCKED slam with shake
+      var S = 4.0;
+      tl.to("#fc-row4", { opacity: 0.12, duration: 0.2, ease: "power2.out" }, S - 0.05);
+      tl.fromTo("#fc-stamp2", { scale: 2.4, opacity: 0, rotation: 8 }, { scale: 1, opacity: 1, rotation: 2, duration: 0.3, ease: "expo.out" }, S);
+      tl.fromTo("#fc-card2", { x: 0 }, { x: -9, duration: 0.05, ease: "none", immediateRender: false }, S + 0.28);
+      tl.to("#fc-card2", { x: 8, duration: 0.06, ease: "none" }, S + 0.33);
+      tl.to("#fc-card2", { x: -5, duration: 0.06, ease: "none" }, S + 0.39);
+      tl.to("#fc-card2", { x: 3, duration: 0.06, ease: "none" }, S + 0.45);
+      tl.to("#fc-card2", { x: 0, duration: 0.08, ease: "power2.out" }, S + 0.51);
+      tl.fromTo("#fc-rim-bad", { opacity: 0 }, { opacity: 1, duration: 0.3, ease: "power2.out" }, S + 0.25);
+      tl.fromTo("#fc-blob3", { opacity: 0 }, { opacity: 0.2, duration: 0.5, ease: "power2.out" }, S + 0.25);
+      tl.fromTo("#fc-chip3", { opacity: 0, scale: 0 }, { opacity: 1, scale: 1, duration: 0.4, ease: "back.out(1.7)" }, S + 0.3);
+
+      window.__timelines["05-fit-check"] = tl;
+    })();
+  </script>
+</template>

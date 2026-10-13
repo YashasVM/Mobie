@@ -1,0 +1,59 @@
+<template>
+<div id="f10-root" data-composition-id="10-beta" data-start="0" data-duration="7.427" data-width="1920" data-height="1080">
+<style>
+@font-face {font-family:"IBM Plex Mono";src:url("assets/fonts/plex_mono_regular.ttf");font-weight:400;}
+@font-face {font-family:"IBM Plex Mono";src:url("assets/fonts/plex_mono_semibold.ttf");font-weight:600;}
+@font-face {font-family:"IBM Plex Mono";src:url("assets/fonts/plex_mono_bold.ttf");font-weight:700;}
+#f10-root {position:relative;width:100%;height:100%;overflow:hidden;background:#0C0C0B;color:#D6D3C8;font-family:"IBM Plex Mono",monospace;}
+.f10-bar {position:absolute;inset:0 0 auto;height:48px;background:#FFB547;color:#0C0C0B;font-size:22px;line-height:48px;font-weight:600;}
+.f10-left {position:absolute;left:200px;display:flex;}
+.f10-right {position:absolute;right:200px;display:flex;}
+.f10-bar span {padding:0 14px;}
+.f10-bar .on {background:#0C0C0B;color:#FFB547;}
+.f10-header {position:absolute;left:200px;top:112px;width:1520px;display:flex;align-items:center;gap:20px;font-size:30px;color:#FFB547;letter-spacing:.04em;}
+.f10-header i {flex:1;border-top:1px dashed #504D48;}
+#f10-title {position:absolute;left:200px;top:235px;font-size:100px;line-height:130px;font-weight:700;letter-spacing:-.02em;}
+#f10-beta {color:#FFB547;}
+#f10-features {position:absolute;left:200px;top:418px;font-size:54px;line-height:80px;opacity:0;}
+#f10-watch {position:absolute;left:200px;top:545px;font-size:54px;line-height:80px;font-weight:600;opacity:0;}
+#f10-watch span {color:#FFB547;}
+#f10-updates {position:absolute;left:200px;top:626px;font-size:48px;line-height:72px;opacity:0;}
+#f10-source {position:absolute;left:200px;top:775px;font-size:38px;line-height:56px;color:#D6D3C8;opacity:0;}
+#f10-site {position:absolute;left:200px;top:855px;font-size:34px;line-height:50px;color:#FFB547;opacity:0;}
+#f10-foot {position:absolute;left:200px;top:970px;width:1520px;border-top:1px solid #504D48;padding-top:15px;font-size:30px;color:#AAA79D;}
+#f10-root .char {display:none;}
+#f10-root .prompt {color:#FFB547;}
+#f10-cursor {display:inline-block;width:.6em;height:1em;background:#FFB547;vertical-align:-.12em;margin-left:4px;}
+</style>
+<div class="f10-bar"><div class="f10-left"><span class="on">0:mobie</span><span>1:about</span><span>2:browse</span><span>3:pull</span><span>4:chat</span><span>5:privacy</span></div><div class="f10-right"><span>github</span><span>download</span></div></div>
+<div class="f10-header"><b>MOBIE / RELEASE NOTES</b><i></i></div>
+<div id="f10-title"><span id="f10-state"></span><span id="f10-beta"></span></div>
+<div id="f10-features">new features are coming soon.</div>
+<div id="f10-watch">keep an eye on <span>GitHub</span></div>
+<div id="f10-updates">for new releases and updates.</div>
+<div id="f10-source"><span class="prompt">› </span><span id="f10-address"></span><span id="f10-cursor"></span></div>
+<div id="f10-site">mobie.yash0.in</div>
+<div id="f10-foot">mobie(1) · made by yashas <span style="float:right">EOF</span></div>
+<script>
+const tl=gsap.timeline({paused:true});
+function type(id,text,start,end){
+ const el=document.querySelector(id);
+ for(let i=0;i<text.length;i++){
+  const span=document.createElement('span');span.className='char';span.textContent=text[i];el.appendChild(span);
+  tl.set(span,{display:'inline'},start+(end-start)*i/Math.max(1,text.length-1));
+ }
+}
+function show(id,at){tl.fromTo(id,{opacity:0},{opacity:1,duration:.12,ease:'power2.out'},at);}
+type('#f10-state','still in ',.939,1.28);
+type('#f10-beta','beta.',1.323,1.813);
+show('#f10-features',2.133);
+show('#f10-watch',3.712);
+show('#f10-updates',4.779);
+show('#f10-source',4.224);
+type('#f10-address','github.com/YashasVM/Mobie/releases',4.224,5.291);
+show('#f10-site',4.224);
+for(let t=4.224,k=0;t<7.427;t+=.5,k++)tl.set('#f10-cursor',{opacity:k%2?0:1},t);
+window.__timelines['10-beta']=tl;
+</script>
+</div>
+</template>

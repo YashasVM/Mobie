@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mobie — app UI variations</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@400;500;700&family=Instrument+Serif&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#1b1b19;color:#d6d3c8;font:14px/1.5 "IBM Plex Mono",monospace;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:20px 12px 40px}
+.picker{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-bottom:6px}
+.picker button{font:500 13px "IBM Plex Mono",monospace;background:none;border:1px solid #444;color:#aaa;padding:7px 12px;cursor:pointer}
+.picker button.on{background:#ffb547;border-color:#ffb547;color:#0c0c0b}
+.blurb{color:#8a877d;font-size:12.5px;max-width:420px;text-align:center;margin:6px 0 16px;min-height:3em}
+.phone{width:390px;height:812px;max-width:100%;border-radius:44px;border:10px solid #000;box-shadow:0 0 0 2px #333,0 30px 80px #0008;overflow:hidden;position:relative;display:flex;flex-direction:column}
+.sb{height:34px;display:flex;justify-content:space-between;align-items:center;padding:0 26px;font-size:12px;font-weight:600;flex:none}
+.scr{flex:1;overflow-y:auto;overflow-x:hidden;scrollbar-width:none;position:relative}
+.scr::-webkit-scrollbar{display:none}
+.nav{flex:none;display:flex}
+.nav button{flex:1;background:none;border:0;cursor:pointer;font:inherit;color:inherit}
+.hint{color:#6f6c63;font-size:12px;margin-top:14px}
+button{font:inherit;color:inherit}
+input{font:inherit;color:inherit}
+.fade{animation:fd .22s ease-out}
+@keyframes fd{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.cur{display:inline-block;width:.55em;height:1em;background:currentColor;vertical-align:-.15em;animation:bl 1s steps(1) infinite}
+@keyframes bl{50%{opacity:0}}
+
+/* ================= V1 TTY — straight port of the site ================= */
+.v1{background:#0c0c0b;color:#d6d3c8;font-family:"IBM Plex Mono",monospace}
+.v1 .sb{color:#6f6c63}
+.v1 .top{position:sticky;top:0;z-index:5;background:#ffb547;color:#0c0c0b;display:flex;font-size:12.5px;font-weight:500;height:28px;align-items:center;white-space:nowrap}
+.v1 .top span{padding:0 9px}.v1 .top .sel{background:#0c0c0b;color:#ffb547}.v1 .top .sp{flex:1}
+.v1 .scr::before{content:"";position:fixed;pointer-events:none}
+.v1 .pad{padding:16px}
+.v1 h2{font:600 13px "IBM Plex Mono";color:#ffb547;letter-spacing:.05em;display:flex;gap:10px;align-items:center;margin:20px 0 10px}
+.v1 h2::after{content:"";flex:1;border-top:1px dashed #2a2925}
+.v1 h1{font:600 20px/1.3 "IBM Plex Mono";margin:6px 0 4px}
+.v1 .mut{color:#6f6c63}
+.v1 .search{display:flex;border:1px solid #6f6c63;padding:9px 10px;gap:8px}
+.v1 .search input{background:none;border:0;outline:0;flex:1}
+.v1 .search b{color:#ffb547}
+.v1 .rig{border:1px solid #6f6c63;background:#141412;margin-top:14px}
+.v1 .rig .t{display:flex;justify-content:space-between;padding:5px 10px;border-bottom:1px solid #6f6c63;color:#6f6c63;font-size:12px}
+.v1 .rig .kv{padding:8px 10px;display:grid;grid-template-columns:8ch 1fr;font-size:13px}
+.v1 .rig .kv span:nth-child(odd){color:#6f6c63}
+.v1 .list{border:1px solid #6f6c63;background:#141412}
+.v1 .row{display:grid;grid-template-columns:2ch 1fr auto;gap:1ch;padding:9px 10px;cursor:pointer;border-bottom:1px solid #2a2925}
+.v1 .row:last-child{border:0}
+.v1 .row:active,.v1 .row:hover{background:#ffb547;color:#0c0c0b}
+.v1 .row:hover *{color:#0c0c0b!important}
+.v1 .row .sub{grid-column:2/4;font-size:12px;color:#6f6c63}
+.v1 .ok{color:#8fd16a}.v1 .warn{color:#e8d27a}.v1 .bad{color:#ff6b57}.v1 .acc{color:#ffb547}
+.v1 .kv2{display:grid;grid-template-columns:11ch 1fr;font-size:13.5px;row-gap:3px}
+.v1 .kv2 span:nth-child(odd){color:#6f6c63}
+.v1 .verdict{border:1px solid currentColor;padding:8px 10px;margin:14px 0;font-size:13px}
+.v1 .btn{display:block;width:100%;text-align:center;border:1px solid #ffb547;color:#ffb547;background:none;padding:12px;cursor:pointer;font-weight:500;margin-top:8px}
+.v1 .btn:hover{background:#ffb547;color:#0c0c0b}
+.v1 .btn.ghost{border-color:#2a2925;color:#d6d3c8}
+.v1 .btn[disabled]{border-color:#2a2925;color:#6f6c63;cursor:not-allowed;background:none}
+.v1 .msgs{padding:12px 16px;font-size:13.5px}
+.v1 .m{margin-bottom:14px;white-space:pre-wrap}
+.v1 .m.u::before{content:"you> ";color:#ffb547}
+.v1 .m.a::before{content:"gemma> ";color:#8fd16a}
+.v1 .m .st{display:block;color:#6f6c63;font-size:11.5px;margin-top:3px}
+.v1 .composer{position:sticky;bottom:0;background:#0c0c0b;border-top:1px solid #2a2925;padding:10px 16px;display:flex;gap:8px}
+.v1 .composer input{flex:1;background:none;border:0;outline:0}
+.v1 .composer::before{content:"$";color:#ffb547}
+.v1 .composer button{background:none;border:1px solid #ffb547;color:#ffb547;padding:2px 8px;cursor:pointer}
+.v1 .nav{border-top:1px solid #6f6c63;font-size:12px;padding:6px 0 14px}
+.v1 .nav button{color:#6f6c63;padding:6px 0}
+.v1 .nav button b{background:#6f6c63;color:#0c0c0b;padding:0 4px;margin-right:4px;font-weight:500}
+.v1 .nav button.on{color:#ffb547}.v1 .nav button.on b{background:#ffb547}
+.v1 .prog{font-size:13px;margin-top:10px}
+.v1 .set{border:1px solid #2a2925;padding:10px;margin-bottom:8px;display:flex;justify-content:space-between;cursor:pointer}
+.v1 .chk div::before{content:"[✓] ";color:#8fd16a}
+
+/* ================= V2 Hybrid — terminal headings, readable sans body ================= */
+.v2{background:#10100f;color:#e4e1d6;font-family:"IBM Plex Sans",sans-serif}
+.v2 .sb{color:#8a877d;font-family:"IBM Plex Mono"}
+.v2 .mono{font-family:"IBM Plex Mono",monospace}
+.v2 .pad{padding:8px 18px 24px}
+.v2 .eyebrow{font:500 11.5px "IBM Plex Mono";color:#ffb547;letter-spacing:.08em;text-transform:uppercase}
+.v2 h1{font:600 28px/1.15 "IBM Plex Sans";letter-spacing:-.02em;margin:4px 0 6px}
+.v2 h2{font:500 11.5px "IBM Plex Mono";color:#8a877d;letter-spacing:.08em;text-transform:uppercase;margin:24px 0 10px}
+.v2 .mut{color:#8a877d}
+.v2 .search{display:flex;background:#1c1c1a;border-radius:14px;padding:13px 14px;gap:10px;margin-top:16px;border:1px solid #2a2925}
+.v2 .search input{background:none;border:0;outline:0;flex:1;font-size:15px}
+.v2 .search b{color:#ffb547;font-family:"IBM Plex Mono"}
+.v2 .rig{margin-top:14px;background:linear-gradient(135deg,#1e1a12,#16150f);border:1px solid #3a3020;border-radius:16px;padding:14px 16px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.v2 .rig div small{display:block;font:500 10.5px "IBM Plex Mono";color:#8a877d;text-transform:uppercase;letter-spacing:.06em}
+.v2 .rig div b{font:600 17px "IBM Plex Mono";color:#ffb547}
+.v2 .card{background:#181816;border:1px solid #262522;border-radius:16px;padding:14px 16px;margin-bottom:10px;cursor:pointer;transition:.15s}
+.v2 .card:hover{border-color:#ffb54766;transform:translateY(-1px)}
+.v2 .card .hd{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.v2 .card .nm{font-weight:600;font-size:15.5px}
+.v2 .card .sub{font:12px "IBM Plex Mono";color:#8a877d;margin-top:6px}
+.v2 .pill{font:500 11px "IBM Plex Mono";padding:3px 8px;border-radius:99px;white-space:nowrap}
+.v2 .pill.ok{background:#8fd16a1f;color:#8fd16a}.v2 .pill.warn{background:#e8d27a1f;color:#e8d27a}.v2 .pill.bad{background:#ff6b571f;color:#ff6b57}
+.v2 .ok{color:#8fd16a}.v2 .warn{color:#e8d27a}.v2 .bad{color:#ff6b57}.v2 .acc{color:#ffb547}
+.v2 .bar{height:6px;background:#262522;border-radius:9px;overflow:hidden;margin-top:10px}
+.v2 .bar i{display:block;height:100%;background:#ffb547;border-radius:9px}
+.v2 .kv2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.v2 .kv2>div{background:#181816;border:1px solid #262522;border-radius:12px;padding:10px 12px}
+.v2 .kv2 small{display:block;font:500 10.5px "IBM Plex Mono";color:#8a877d;text-transform:uppercase;letter-spacing:.06em}
+.v2 .kv2 b{font-weight:600;font-size:15px}
+.v2 .verdict{border-radius:14px;padding:12px 14px;margin:14px 0;font-size:14px;background:currentColor}
+.v2 .verdict span{color:#10100f}
+.v2 .verdict.ok{background:#8fd16a1a;color:#8fd16a;border:1px solid #8fd16a44}
+.v2 .verdict.warn{background:#e8d27a1a;color:#e8d27a;border:1px solid #e8d27a44}
+.v2 .verdict.bad{background:#ff6b571a;color:#ff6b57;border:1px solid #ff6b5744}
+.v2 .verdict span{color:inherit}
+.v2 .btn{display:block;width:100%;text-align:center;border:0;border-radius:14px;background:#ffb547;color:#10100f;padding:15px;cursor:pointer;font-weight:600;font-size:15px;margin-top:8px}
+.v2 .btn.ghost{background:#1c1c1a;color:#e4e1d6;border:1px solid #2a2925}
+.v2 .btn[disabled]{background:#1c1c1a;color:#5a574f;cursor:not-allowed}
+.v2 .back{background:none;border:0;color:#ffb547;font:500 13px "IBM Plex Mono";cursor:pointer;padding:6px 0}
+.v2 .msgs{padding:8px 16px 16px}
+.v2 .m{max-width:84%;padding:10px 14px;border-radius:18px;margin-bottom:10px;font-size:15px;white-space:pre-wrap}
+.v2 .m.u{margin-left:auto;background:#ffb547;color:#10100f;border-bottom-right-radius:6px}
+.v2 .m.a{background:#1c1c1a;border:1px solid #262522;border-bottom-left-radius:6px}
+.v2 .m .st{display:block;font:11px "IBM Plex Mono";color:#8a877d;margin-top:6px}
+.v2 .composer{position:sticky;bottom:0;padding:10px 14px;background:linear-gradient(transparent,#10100f 30%);display:flex;gap:8px}
+.v2 .composer input{flex:1;background:#1c1c1a;border:1px solid #2a2925;border-radius:22px;padding:11px 16px;outline:0}
+.v2 .composer button{width:44px;border-radius:50%;border:0;background:#ffb547;color:#10100f;font-weight:700;cursor:pointer}
+.v2 .chathd{display:flex;align-items:center;gap:10px;padding:8px 16px;border-bottom:1px solid #1f1e1b}
+.v2 .nav{background:#141412;border-top:1px solid #1f1e1b;padding:8px 10px 18px}
+.v2 .nav button{padding:8px 0;border-radius:12px;font:500 11.5px "IBM Plex Mono";color:#8a877d;display:flex;flex-direction:column;align-items:center;gap:2px}
+.v2 .nav button i{font-style:normal;font-size:17px}
+.v2 .nav button.on{color:#ffb547;background:#ffb54714}
+.v2 .prog{font:13px "IBM Plex Mono";margin-top:10px}
+.v2 .set{background:#181816;border:1px solid #262522;border-radius:14px;padding:14px;margin-bottom:8px;display:flex;justify-content:space-between;cursor:pointer}
+.v2 .chk div{padding:3px 0}.v2 .chk div::before{content:"✓  ";color:#8fd16a;font-family:"IBM Plex Mono"}
+
+/* ================= V3 Paper — light printout ================= */
+.v3{background:#f1ebdc;color:#1d1b16;font-family:"IBM Plex Mono",monospace}
+.v3 .sb{color:#1d1b16}
+.v3 .pad{padding:8px 18px 24px}
+.v3 .masthead{border-bottom:3px double #1d1b16;padding:4px 18px 10px;display:flex;justify-content:space-between;align-items:end}
+.v3 .masthead b{font:400 34px/1 "Instrument Serif",serif;letter-spacing:-.01em}
+.v3 .masthead small{font-size:11px;color:#6d6656}
+.v3 h1{font:400 32px/1.1 "Instrument Serif",serif;margin:10px 0 4px}
+.v3 h2{font:600 11.5px "IBM Plex Mono";letter-spacing:.1em;margin:22px 0 8px;display:flex;gap:8px;align-items:center}
+.v3 h2::after{content:"";flex:1;border-top:1px solid #1d1b16}
+.v3 .mut{color:#6d6656}
+.v3 .search{display:flex;border-bottom:2px solid #1d1b16;padding:10px 0;gap:8px;margin-top:6px}
+.v3 .search input{background:none;border:0;outline:0;flex:1}
+.v3 .search b{color:#c4671a}
+.v3 .rig{margin-top:14px;background:#fffaf0;border:1px dashed #1d1b16;padding:10px 12px;font-size:12.5px;display:flex;justify-content:space-between}
+.v3 .row{padding:12px 0;border-bottom:1px dotted #1d1b16;cursor:pointer;display:grid;grid-template-columns:1fr auto;gap:2px 10px}
+.v3 .row:hover .nm{background:#ffb547}
+.v3 .row .nm{font-weight:600}
+.v3 .row .sub{font-size:12px;color:#6d6656}
+.v3 .stamp{font:600 10.5px "IBM Plex Mono";letter-spacing:.06em;border:1.5px solid currentColor;padding:2px 6px;transform:rotate(-3deg);align-self:center;grid-row:1/3;grid-column:2}
+.v3 .ok{color:#2f7a2a}.v3 .warn{color:#a36b00}.v3 .bad{color:#b8321f}.v3 .acc{color:#c4671a}
+.v3 .kv2{display:grid;grid-template-columns:auto 1fr;font-size:13px}
+.v3 .kv2 span{padding:5px 0;border-bottom:1px dotted #b6ac94}
+.v3 .kv2 span:nth-child(odd){color:#6d6656;padding-right:16px}
+.v3 .kv2 span:nth-child(even){text-align:right;font-weight:500}
+.v3 .verdict{border:2px solid currentColor;padding:10px 12px;margin:14px 0;font-size:13px;transform:rotate(-.6deg)}
+.v3 .btn{display:block;width:100%;text-align:center;border:2px solid #1d1b16;background:#ffb547;color:#1d1b16;padding:13px;cursor:pointer;font-weight:600;margin-top:8px;box-shadow:4px 4px 0 #1d1b16}
+.v3 .btn:active{transform:translate(3px,3px);box-shadow:1px 1px 0 #1d1b16}
+.v3 .btn.ghost{background:#fffaf0}
+.v3 .btn[disabled]{background:#e3dcc9;color:#8e8670;box-shadow:none;border-color:#8e8670;cursor:not-allowed}
+.v3 .back{background:none;border:0;cursor:pointer;font-weight:600;text-decoration:underline;padding:4px 0}
+.v3 .msgs{padding:10px 18px}
+.v3 .m{margin-bottom:16px;white-space:pre-wrap;font-size:13.5px}
+.v3 .m.u{font:400 21px/1.25 "Instrument Serif",serif;border-left:3px solid #ffb547;padding-left:10px}
+.v3 .m .st{display:block;color:#6d6656;font-size:11px;margin-top:4px;border-top:1px dotted #b6ac94;padding-top:3px}
+.v3 .composer{position:sticky;bottom:0;background:#f1ebdc;border-top:2px solid #1d1b16;padding:10px 18px;display:flex;gap:8px}
+.v3 .composer input{flex:1;background:none;border:0;outline:0}
+.v3 .composer button{border:2px solid #1d1b16;background:#ffb547;padding:4px 10px;cursor:pointer;font-weight:600}
+.v3 .nav{border-top:3px double #1d1b16;padding:4px 0 16px;font-size:12px}
+.v3 .nav button{padding:8px 0;font-weight:500}
+.v3 .nav button.on span{background:#1d1b16;color:#f1ebdc;padding:2px 8px}
+.v3 .prog{font-size:13px;margin-top:10px}
+.v3 .set{border-bottom:1px dotted #1d1b16;padding:12px 0;display:flex;justify-content:space-between;cursor:pointer}
+.v3 .chk div::before{content:"☑ ";color:#2f7a2a}
+
+/* ================= V4 HUD — gauges and segments ================= */
+.v4{background:radial-gradient(120% 60% at 50% 0%,#1f1709,#0a0a09 60%);color:#e8e3d4;font-family:"Space Grotesk",sans-serif}
+.v4 .sb{color:#8a877d}
+.v4 .mono{font-family:"IBM Plex Mono",monospace}
+.v4 .pad{padding:6px 16px 24px}
+.v4 h1{font:700 26px/1.1 "Space Grotesk";letter-spacing:-.02em;margin:4px 0}
+.v4 h2{font:500 11px "IBM Plex Mono";color:#8a877d;letter-spacing:.14em;text-transform:uppercase;margin:22px 0 10px}
+.v4 .mut{color:#8a877d}
+.v4 .gauge{display:flex;align-items:center;gap:16px;padding:16px;border:1px solid #ffb54733;border-radius:22px;background:#ffb5470a;margin-top:10px}
+.v4 .ring{width:96px;height:96px;flex:none;position:relative}
+.v4 .ring svg{transform:rotate(-90deg)}
+.v4 .ring b{position:absolute;inset:0;display:grid;place-items:center;font:700 20px "Space Grotesk";text-align:center;line-height:1}
+.v4 .ring b small{display:block;font:500 10px "IBM Plex Mono";color:#8a877d}
+.v4 .gauge .seg{flex:1;font-size:12px}
+.v4 .segbar{display:flex;gap:2px;margin:4px 0 9px}
+.v4 .segbar i{flex:1;height:8px;border-radius:2px;background:#2a2925}
+.v4 .segbar i.f{background:#ffb547}
+.v4 .search{display:flex;background:#16150f;border-radius:99px;padding:12px 18px;gap:10px;margin-top:14px;border:1px solid #2a2925}
+.v4 .search input{background:none;border:0;outline:0;flex:1}
+.v4 .chips{display:flex;gap:6px;margin-top:10px;overflow:auto}
+.v4 .chips span{font:500 12px "IBM Plex Mono";border:1px solid #2a2925;border-radius:99px;padding:5px 11px;white-space:nowrap;cursor:pointer}
+.v4 .chips span.on{background:#ffb547;color:#0a0a09;border-color:#ffb547}
+.v4 .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.v4 .tile{background:#141310;border:1px solid #24221d;border-radius:20px;padding:14px;cursor:pointer;display:flex;flex-direction:column;gap:6px;min-height:150px;transition:.15s}
+.v4 .tile:hover{border-color:#ffb547}
+.v4 .tile .nm{font-weight:600;font-size:15px;line-height:1.2}
+.v4 .tile .sub{font:11.5px "IBM Plex Mono";color:#8a877d;margin-top:auto}
+.v4 .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}
+.v4 .ok{color:#8fd16a}.v4 .warn{color:#e8d27a}.v4 .bad{color:#ff6b57}.v4 .acc{color:#ffb547}
+.v4 .dot.ok{background:#8fd16a;box-shadow:0 0 8px #8fd16a}.v4 .dot.warn{background:#e8d27a;box-shadow:0 0 8px #e8d27a}.v4 .dot.bad{background:#ff6b57;box-shadow:0 0 8px #ff6b57}
+.v4 .fitbar{height:10px;background:#24221d;border-radius:9px;position:relative;margin:8px 0 4px;overflow:visible}
+.v4 .fitbar i{position:absolute;left:0;top:0;bottom:0;border-radius:9px}
+.v4 .fitbar em{position:absolute;top:-4px;bottom:-4px;width:2px;background:#e8e3d4}
+.v4 .kv2{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.v4 .kv2>div{background:#141310;border:1px solid #24221d;border-radius:16px;padding:10px}
+.v4 .kv2 small{display:block;font:500 10px "IBM Plex Mono";color:#8a877d;text-transform:uppercase;letter-spacing:.08em}
+.v4 .kv2 b{font-weight:600;font-size:15px}
+.v4 .verdict{border-radius:18px;padding:12px 14px;margin:14px 0;font-size:14px;border:1px solid currentColor;background:#ffffff05}
+.v4 .btn{display:block;width:100%;text-align:center;border:0;border-radius:99px;background:#ffb547;color:#0a0a09;padding:16px;cursor:pointer;font:700 15px "Space Grotesk";margin-top:8px;box-shadow:0 8px 30px #ffb54744}
+.v4 .btn.ghost{background:#16150f;color:#e8e3d4;box-shadow:none;border:1px solid #2a2925}
+.v4 .btn[disabled]{background:#16150f;color:#5a574f;box-shadow:none;cursor:not-allowed}
+.v4 .back{background:#16150f;border:1px solid #2a2925;border-radius:99px;cursor:pointer;padding:6px 12px;font:500 12px "IBM Plex Mono"}
+.v4 .msgs{padding:8px 16px 16px}
+.v4 .m{padding:12px 14px;border-radius:18px;margin-bottom:10px;font-size:15px;white-space:pre-wrap}
+.v4 .m.u{background:#24221d;margin-left:15%}
+.v4 .m.a{border:1px solid #ffb54733;background:#ffb5470a}
+.v4 .m .st{display:flex;gap:10px;font:11px "IBM Plex Mono";color:#ffb547;margin-top:8px}
+.v4 .composer{position:sticky;bottom:0;padding:10px 14px;display:flex;gap:8px;background:#0a0a09e6;backdrop-filter:blur(8px)}
+.v4 .composer input{flex:1;background:#16150f;border:1px solid #2a2925;border-radius:99px;padding:12px 18px;outline:0}
+.v4 .composer button{width:46px;border-radius:50%;border:0;background:#ffb547;color:#0a0a09;font-weight:700;cursor:pointer}
+.v4 .nav{margin:0 14px 16px;background:#16150f;border:1px solid #2a2925;border-radius:99px;padding:5px}
+.v4 .nav button{padding:10px 0;border-radius:99px;font:600 13px "Space Grotesk";color:#8a877d}
+.v4 .nav button.on{background:#ffb547;color:#0a0a09}
+.v4 .prog{font:13px "IBM Plex Mono";margin-top:10px}
+.v4 .set{background:#141310;border:1px solid #24221d;border-radius:18px;padding:14px;margin-bottom:8px;display:flex;justify-content:space-between;cursor:pointer}
+.v4 .chk div{padding:3px 0}.v4 .chk div::before{content:"● ";color:#8fd16a}
+
+/* ================= V5 Quiet — big type, hairlines, one accent ================= */
+.v5{background:#0c0c0b;color:#f2efe6;font-family:"Space Grotesk",sans-serif}
+.v5 .sb{color:#77736a}
+.v5 .mono{font-family:"IBM Plex Mono",monospace}
+.v5 .pad{padding:10px 22px 28px}
+.v5 h1{font:500 40px/1.02 "Space Grotesk";letter-spacing:-.04em;margin:18px 0 8px}
+.v5 h1 .acc{color:#ffb547}
+.v5 h2{font:400 12px "IBM Plex Mono";color:#77736a;margin:30px 0 6px}
+.v5 .mut{color:#77736a}
+.v5 .search{display:flex;border-bottom:1px solid #33312c;padding:14px 0;gap:10px;margin-top:12px;font-size:18px}
+.v5 .search input{background:none;border:0;outline:0;flex:1}
+.v5 .search input::placeholder{color:#4a4842}
+.v5 .rigline{font:12px "IBM Plex Mono";color:#77736a;margin-top:10px}
+.v5 .rigline b{color:#f2efe6;font-weight:500}
+.v5 .row{display:grid;grid-template-columns:1fr auto;align-items:baseline;padding:16px 0;border-bottom:1px solid #1f1e1b;cursor:pointer;gap:4px 10px}
+.v5 .row .nm{font-size:19px;font-weight:500;letter-spacing:-.01em;transition:.15s}
+.v5 .row:hover .nm{color:#ffb547;transform:translateX(4px)}
+.v5 .row .sub{font:12px "IBM Plex Mono";color:#77736a;grid-column:1/3}
+.v5 .row .tag{font:12px "IBM Plex Mono"}
+.v5 .ok{color:#8fd16a}.v5 .warn{color:#e8d27a}.v5 .bad{color:#ff6b57}.v5 .acc{color:#ffb547}
+.v5 .big{font:500 56px/1 "Space Grotesk";letter-spacing:-.04em}
+.v5 .kv2{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid #1f1e1b}
+.v5 .kv2>div{padding:12px 0;border-bottom:1px solid #1f1e1b}
+.v5 .kv2>div:nth-child(odd){border-right:1px solid #1f1e1b}
+.v5 .kv2>div:nth-child(even){padding-left:14px}
+.v5 .kv2 small{display:block;font:11px "IBM Plex Mono";color:#77736a}
+.v5 .kv2 b{font-weight:500;font-size:17px}
+.v5 .verdict{padding:14px 0;margin:6px 0 14px;font-size:16px;border-bottom:1px solid #1f1e1b}
+.v5 .btn{display:flex;justify-content:space-between;width:100%;border:0;background:#ffb547;color:#0c0c0b;padding:18px 20px;cursor:pointer;font:500 17px "Space Grotesk";margin-top:8px}
+.v5 .btn::after{content:"→"}
+.v5 .btn.ghost{background:none;color:#f2efe6;border:1px solid #33312c}
+.v5 .btn[disabled]{background:#1a1a18;color:#4a4842;cursor:not-allowed}
+.v5 .btn[disabled]::after{content:"×"}
+.v5 .back{background:none;border:0;cursor:pointer;font:13px "IBM Plex Mono";color:#77736a;padding:6px 0}
+.v5 .msgs{padding:10px 22px 16px}
+.v5 .m{margin-bottom:22px;white-space:pre-wrap;font-size:16px;line-height:1.55}
+.v5 .m.u{font-size:22px;font-weight:500;letter-spacing:-.02em;color:#77736a}
+.v5 .m .st{display:block;font:11px "IBM Plex Mono";color:#4a4842;margin-top:8px}
+.v5 .composer{position:sticky;bottom:0;background:#0c0c0b;border-top:1px solid #1f1e1b;padding:14px 22px;display:flex;gap:8px}
+.v5 .composer input{flex:1;background:none;border:0;outline:0;font-size:16px}
+.v5 .composer button{background:none;border:0;color:#ffb547;font-size:20px;cursor:pointer}
+.v5 .nav{padding:10px 22px 20px;gap:22px;justify-content:flex-start;border-top:1px solid #1f1e1b}
+.v5 .nav button{flex:none;font:500 15px "Space Grotesk";color:#4a4842;padding:4px 0}
+.v5 .nav button.on{color:#f2efe6;box-shadow:inset 0 -2px #ffb547}
+.v5 .prog{font:13px "IBM Plex Mono";margin-top:10px}
+.v5 .set{border-bottom:1px solid #1f1e1b;padding:16px 0;display:flex;justify-content:space-between;cursor:pointer;font-size:16px}
+.v5 .chk div{padding:4px 0}.v5 .chk div::before{content:"— ";color:#ffb547}
+</style>
+</head>
+<body>
+<div class="picker" id="picker"></div>
+<div class="blurb" id="blurb"></div>
+<div class="phone" id="phone">
+  <div class="sb"><span>9:41</span><span>● ● ▮</span></div>
+  <div id="top"></div>
+  <div class="scr" id="scr"></div>
+  <div class="nav" id="nav"></div>
+</div>
+<div class="hint">Click models, download, chat, and switch tabs. Keys 1–5 switch variant.</div>
+
+<script>
+const VARIANTS=[
+ ["1 · TTY","A direct port of the website: tmux status bar, monospace everywhere, man-page section rules, inverted-amber selection, bracketed buttons."],
+ ["2 · Hybrid","Website DNA (amber, mono labels, dashed rules) with a readable sans body, soft cards and chat bubbles. Most 'consumer' of the set."],
+ ["3 · Paper","Light mode as a printed spec sheet: serif headlines, dotted leaders, rubber-stamp verdicts, hard-shadow amber buttons."],
+ ["4 · HUD","Instrument panel: RAM ring gauge, segmented meters, model tiles in a grid, glowing status dots, pill navigation."],
+ ["5 · Quiet","Editorial minimalism: huge type, hairline lists, one amber accent, text-only nav. Calm and very legible."]
+];
+const DEV={name:"Pixel 7",ram:8,avail:3.4,free:41,chip:"Tensor G2 · arm64-v8a"};
+const MODELS=[
+ {id:"gemma-3n-E2B-it",org:"litert-community",size:3.14,ram:3.9,q:"int4",ctx:"4k",lic:"Gemma (gated)",fit:"ok",why:"Fits. Uses about half your RAM."},
+ {id:"Gemma3-1B-IT",org:"litert-community",size:0.55,ram:1.2,q:"int4",ctx:"4k",lic:"Gemma (gated)",fit:"ok",why:"Fits easily. Fastest option on this phone."},
+ {id:"Qwen2.5-1.5B-Instruct",org:"litert-community",size:1.6,ram:2.3,q:"int8",ctx:"4k",lic:"Apache-2.0",fit:"ok",why:"Fits. Good balance of speed and quality."},
+ {id:"gemma-3n-E4B-it",org:"litert-community",size:4.41,ram:5.6,q:"int4",ctx:"4k",lic:"Gemma (gated)",fit:"warn",why:"Fits after closing other apps. 3.4 GB free now, needs 5.6 GB."},
+ {id:"Phi-4-mini-instruct",org:"litert-community",size:3.9,ram:9.1,q:"int8",ctx:"4k",lic:"MIT",fit:"bad",why:"Can't run. Needs 9.1 GB RAM, this phone has 8 GB total."}
+];
+const LBL={ok:"FITS",warn:"TIGHT",bad:"TOO BIG"};
+const S={v:+(localStorage.mv||2),tab:"discover",screen:"discover",sel:0,installed:{1:true},dl:{},chatModel:1,msgs:[],q:""};
+const $=s=>document.querySelector(s);
+const sel=()=>MODELS[S.sel];
+const gb=n=>n<1?Math.round(n*1000)+" MB":n.toFixed(1)+" GB";
+const shown=()=>MODELS.map((m,i)=>[m,i]).filter(([m])=>m.id.toLowerCase().includes(S.q.toLowerCase()));
+
+function go(screen,extra){Object.assign(S,extra||{});S.screen=screen;if(["discover","library","settings"].includes(screen))S.tab=screen;render(true)}
+function setV(v){S.v=v;localStorage.mv=v;render(true)}
+
+/* ---------- variant pieces ---------- */
+function topBar(){
+ const v=S.v;
+ if(v==1)return `<div class="top"><span class="sel">0:mobie</span><span>${S.screen}</span><span class="sp"></span><span>${DEV.avail}G/${DEV.ram}G</span></div>`;
+ if(v==3)return `<div class="masthead"><b>Mobie</b><small>No. ${String(S.sel+1).padStart(3,"0")} · ${DEV.name} · offline</small></div>`;
+ return "";
+}
+function nav(){
+ const t=[["discover","Discover","⌕"],["library","Library","▤"],["settings","Settings","⚙"]];
+ const v=S.v;
+ return t.map(([k,l,ic],i)=>{
+  const on=S.tab==k?"on":"";
+  if(v==1)return `<button class="${on}" onclick="go('${k}')"><b>${i+1}</b>${l.toLowerCase()}</button>`;
+  if(v==2)return `<button class="${on}" onclick="go('${k}')"><i>${ic}</i>${l}</button>`;
+  if(v==3)return `<button class="${on}" onclick="go('${k}')"><span>${l.toUpperCase()}</span></button>`;
+  return `<button class="${on}" onclick="go('${k}')">${l}</button>`;
+ }).join("");
+}
+function meter(frac,cls){
+ const v=S.v,p=Math.min(1,frac);
+ if(v==1||v==3){const n=20,f=Math.round(p*n);return `<span class="${cls}">${"█".repeat(f)}</span><span class="mut">${"░".repeat(n-f)}</span>`}
+ if(v==4){return `<div class="segbar">${Array.from({length:16},(_,i)=>`<i class="${i<p*16?"f":""}"></i>`).join("")}</div>`}
+ return `<div class="bar"><i style="width:${p*100}%"></i></div>`;
+}
+function fitStatus(m,i){
+ if(S.installed[i])return ["ok","INSTALLED"];
+ if(S.dl[i]!=null)return ["acc",S.dl[i]+"%"];
+ return [m.fit,LBL[m.fit]];
+}
+
+/* ---------- screens ---------- */
+function discover(){
+ const v=S.v,list=shown();
+ const search=`<div class="search">${v==1?"<b>/</b>":v==2||v==3?"<b>⌕</b>":v==4?"⌕":""}<input placeholder="${v==5?"Search models":"search models, e.g. gemma"}" value="${S.q}" oninput="S.q=this.value;renderList()"></div>`;
+ let head="",rig="";
+ if(v==1){head=`<h1>Find a model that fits<span class="cur acc"></span></h1><p class="mut">Mobile-ready models from litert-community. Checked against this phone before download.</p>`;
+  rig=`<div class="rig"><div class="t"><b>device</b><span>probe ok</span></div><div class="kv"><span>phone</span><span>${DEV.name}</span><span>ram</span><span>${meter(DEV.avail/DEV.ram,"acc")} ${DEV.avail}/${DEV.ram}G free</span><span>disk</span><span>${DEV.free} GB free</span><span>chip</span><span>${DEV.chip}</span></div></div>`}
+ if(v==2){head=`<div class="eyebrow">mobie ~ discover</div><h1>Run AI on your phone, offline.</h1><p class="mut">Every model below was checked against your ${DEV.name} before you download.</p>`;
+  rig=`<div class="rig"><div><small>RAM free</small><b>${DEV.avail}<span class="mut">/${DEV.ram}G</span></b></div><div><small>Storage</small><b>${DEV.free}G</b></div><div><small>Chip</small><b style="font-size:13px">arm64</b></div></div>`}
+ if(v==3){head=`<h1>The model catalogue.</h1><p class="mut" style="font-size:12.5px">Each entry is measured against your phone. Stamped before you download, not after.</p>`;
+  rig=`<div class="rig"><span>RAM ${DEV.avail}/${DEV.ram} GB</span><span>DISK ${DEV.free} GB</span><span>ARM64</span></div>`}
+ if(v==4){const p=1-DEV.avail/DEV.ram,c=2*Math.PI*40;head=`<h1>Discover</h1>`;
+  rig=`<div class="gauge"><div class="ring"><svg width="96" height="96"><circle cx="48" cy="48" r="40" stroke="#2a2925" stroke-width="9" fill="none"/><circle cx="48" cy="48" r="40" stroke="#ffb547" stroke-width="9" fill="none" stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${c*(1-p)}"/></svg><b>${DEV.avail}<small>GB FREE</small></b></div><div class="seg"><span class="mut mono">RAM ${DEV.ram} GB</span>${meter(p)}<span class="mut mono">STORAGE ${DEV.free} GB FREE</span>${meter(41/128)}<span class="mono">${DEV.name}</span></div></div><div class="chips"><span class="on">All</span><span>Fits now</span><span>Chat</span><span>Under 1 GB</span><span>Gemma</span></div>`}
+ if(v==5){head=`<h1>Models that <span class="acc">fit</span> your phone.</h1>`;
+  rig=`<div class="rigline">${DEV.name} · <b>${DEV.avail} GB</b> RAM free · <b>${DEV.free} GB</b> storage</div>`}
+ const order=v==4?head+rig+search:head+search+rig;
+ return `<div class="pad">${order}<h2>${v==1?"MODELS ("+list.length+")":v==3?"ENTRIES":v==5?list.length+" results":"Available"}</h2><div id="list">${listHTML()}</div></div>`;
+}
+function listHTML(){
+ const v=S.v,list=shown();
+ if(!list.length)return `<p class="mut">No models match.</p>`;
+ if(v==1)return `<div class="list">${list.map(([m,i])=>{const[c,l]=fitStatus(m,i);return `<div class="row" onclick="go('model',{sel:${i}})"><span class="${c}">${m.fit=="bad"?"✗":m.fit=="warn"?"!":"●"}</span><span>${m.id}</span><span class="${c}">${l}</span><span class="sub">${gb(m.size)} · ${m.q} · ram ${gb(m.ram)}</span></div>`}).join("")}</div>`;
+ if(v==2)return list.map(([m,i])=>{const[c,l]=fitStatus(m,i);return `<div class="card" onclick="go('model',{sel:${i}})"><div class="hd"><span class="nm">${m.id}</span><span class="pill ${c=="acc"?"ok":c}">${l}</span></div><div class="sub">${gb(m.size)} download · needs ${gb(m.ram)} RAM · ${m.q}</div>${meter(m.ram/DEV.ram)}</div>`}).join("");
+ if(v==3)return list.map(([m,i])=>{const[c,l]=fitStatus(m,i);return `<div class="row" onclick="go('model',{sel:${i}})"><span class="nm">${m.id}</span><span class="stamp ${c}">${l}</span><span class="sub">${gb(m.size)} ·········· RAM ${gb(m.ram)}</span></div>`}).join("");
+ if(v==4)return `<div class="grid">${list.map(([m,i])=>{const[c,l]=fitStatus(m,i);return `<div class="tile" onclick="go('model',{sel:${i}})"><span class="mono" style="font-size:11px"><span class="dot ${m.fit}"></span><span class="${c}">${l}</span></span><span class="nm">${m.id}</span><span class="sub">${gb(m.size)}<br>RAM ${gb(m.ram)} · ${m.q}</span></div>`}).join("")}</div>`;
+ return list.map(([m,i])=>{const[c,l]=fitStatus(m,i);return `<div class="row" onclick="go('model',{sel:${i}})"><span class="nm">${m.id}</span><span class="tag ${c}">${l.toLowerCase()}</span><span class="sub">${gb(m.size)} · ${gb(m.ram)} RAM · ${m.q}</span></div>`}).join("");
+}
+function renderList(){const l=$("#list");if(l)l.innerHTML=listHTML()}
+
+function model(){
+ const v=S.v,m=sel(),i=S.sel,inst=S.installed[i],dl=S.dl[i];
+ const back=v==1?`<button class="btn ghost" style="width:auto;display:inline-block;padding:4px 10px;margin:0 0 6px" onclick="go('discover')">[ esc ] back</button>`:`<button class="back" onclick="go('discover')">← Back</button>`;
+ const rows=[["Download",gb(m.size)],["Needs RAM",gb(m.ram)],["Free RAM",DEV.avail+" GB"],["Free storage",DEV.free+" GB"],["Runtime","LiteRT-LM"],["Quantization",m.q],["Context",m.ctx],["License",m.lic]];
+ let specs;
+ if(v==2||v==4||v==5)specs=`<div class="kv2">${rows.map(([k,x])=>`<div><small>${k}</small><b>${x}</b></div>`).join("")}</div>`;
+ else specs=`<div class="kv2">${rows.map(([k,x])=>`<span>${v==1?k.toLowerCase():k}</span><span>${x}</span>`).join("")}</div>`;
+ let fit="";
+ if(v==4){const cls=m.fit=="ok"?"#8fd16a":m.fit=="warn"?"#e8d27a":"#ff6b57";fit=`<h2>Memory fit</h2><div class="fitbar"><i style="width:${Math.min(100,m.ram/DEV.ram*100)}%;background:${cls}"></i><em style="left:${DEV.avail/DEV.ram*100}%"></em></div><div class="mono mut" style="font-size:11px;display:flex;justify-content:space-between"><span>0</span><span>free now ${DEV.avail}</span><span>${DEV.ram} GB</span></div>`}
+ if(v==1||v==3)fit=`<div class="mono" style="font-size:12.5px;margin-top:10px"><span class="mut">ram </span>${meter(m.ram/DEV.ram,m.fit)} ${Math.round(m.ram/DEV.ram*100)}%</div>`;
+ if(v==2)fit=`<div class="mono mut" style="font-size:12px;margin-top:14px">Uses ${Math.round(m.ram/DEV.ram*100)}% of phone RAM</div>${meter(m.ram/DEV.ram)}`;
+ const vt=v==1?`[${LBL[m.fit]}] ${m.why}`:v==3?`<b>${LBL[m.fit]}.</b> ${m.why}`:v==5?m.why:`<span>${m.fit=="ok"?"✓":m.fit=="warn"?"!":"✕"}  ${m.why}</span>`;
+ let action;
+ const L=s=>v==1?`[ ${s.toLowerCase()} ]`:s;
+ if(inst)action=`<button class="btn" onclick="startChat(${i})">${L("Start chat")}</button><button class="btn ghost" onclick="del(${i})">${L("Delete from phone")}</button>`;
+ else if(dl!=null)action=`<div class="prog">${v==1||v==3?meter(dl/100,"acc"):meter(dl/100)} ${dl}% · ${gb(m.size*dl/100)} of ${gb(m.size)}</div><button class="btn ghost" onclick="cancelDl(${i})">${L("Pause")}</button>`;
+ else if(m.fit=="bad")action=`<button class="btn" disabled>${L("Can't download")}</button>`;
+ else if(m.fit=="warn")action=`<button class="btn" onclick="download(${i})">${L("Download anyway · "+gb(m.size))}</button>`;
+ else action=`<button class="btn" onclick="download(${i})">${L("Download · "+gb(m.size))}</button>`;
+ const title=v==5?`<div class="mono mut" style="font-size:12px;margin-top:16px">${m.org}/</div><h1 style="font-size:34px;margin-top:2px">${m.id}</h1><div class="big ${m.fit}" style="margin:18px 0 0">${gb(m.ram)}</div><div class="mono mut" style="font-size:12px">of ${DEV.ram} GB RAM needed</div>`
+  :`<div class="mono mut" style="font-size:12px;margin-top:6px">${m.org}/</div><h1>${m.id}</h1>`;
+ return `<div class="pad">${back}${title}<div class="verdict ${m.fit}">${vt}</div>${v==1?"<h2>SPECS</h2>":v==3?"<h2>SPECIFICATION</h2>":v==5?"":"<h2>Details</h2>"}${specs}${fit}<div style="margin-top:18px">${action}</div><p class="mut" style="font-size:12px;margin-top:12px">${v==1?"# ":""}Downloads from Hugging Face. After that, chat runs fully offline.</p></div>`;
+}
+
+function library(){
+ const v=S.v,ids=Object.keys(S.installed).map(Number);
+ const used=ids.reduce((a,i)=>a+MODELS[i].size,0);
+ const h=v==1?`<h2>INSTALLED (${ids.length})</h2>`:v==3?`<h1>On this phone.</h1><h2>${ids.length} ENTRIES · ${gb(used)}</h2>`:v==5?`<h1>Library</h1><div class="rigline">${ids.length} models · <b>${gb(used)}</b> used</div>`:`<h1>Library</h1><p class="mut">${ids.length} on this phone · ${gb(used)} used</p><h2>Ready offline</h2>`;
+ if(!ids.length)return `<div class="pad">${h}<p class="mut">Nothing installed yet.</p><button class="btn" onclick="go('discover')">Find a model</button></div>`;
+ const items=ids.map(i=>{const m=MODELS[i];
+  if(v==1)return `<div class="row" onclick="startChat(${i})"><span class="ok">●</span><span>${m.id}</span><span class="acc">chat ›</span><span class="sub">${gb(m.size)} · ${m.q} · ready</span></div>`;
+  if(v==2)return `<div class="card" onclick="startChat(${i})"><div class="hd"><span class="nm">${m.id}</span><span class="acc mono" style="font-size:13px">Chat →</span></div><div class="sub">${gb(m.size)} · ${m.q} · works offline</div></div>`;
+  if(v==4)return `<div class="tile" style="min-height:0" onclick="startChat(${i})"><span class="mono" style="font-size:11px"><span class="dot ok"></span><span class="ok">READY</span></span><span class="nm">${m.id}</span><span class="sub">${gb(m.size)} · tap to chat</span></div>`;
+  return `<div class="row" onclick="startChat(${i})"><span class="nm">${m.id}</span><span class="${v==3?"stamp":"tag"} ok">${v==3?"READY":"chat →"}</span><span class="sub">${gb(m.size)} · ${m.q}</span></div>`;});
+ const wrap=v==1?`<div class="list">${items.join("")}</div>`:v==4?`<div class="grid" style="grid-template-columns:1fr">${items.join("")}</div>`:items.join("");
+ const pad=v==1?`<div class="pad"><h1>Library</h1><p class="mut">${gb(used)} on disk</p>${h}${wrap}`:`<div class="pad">${h}${wrap}`;
+ return pad+`${v==1?"<h2>HISTORY</h2>":v==3?"<h2>RECENT</h2>":"<h2>Recent chats</h2>"}<p class="mut" style="font-size:13px">${S.msgs.length?"1 chat today":"No chats yet."}</p></div>`;
+}
+
+function settings(){
+ const v=S.v;
+ const H=s=>v==1?`<h2>${s.toUpperCase()}</h2>`:v==3?`<h2>${s.toUpperCase()}</h2>`:`<h2>${s}</h2>`;
+ const t=v==1||v==2||v==4?"<h1>Settings</h1>":v==3?"<h1>Settings &amp; terms.</h1>":"<h1>Settings</h1>";
+ return `<div class="pad">${t}${H("Account")}<div class="set"><span>Hugging Face token</span><span class="mut">Not set ›</span></div><p class="mut" style="font-size:12px">Only needed for gated models. Stored encrypted on this phone.</p>${H("Display")}<div class="set" onclick="setV(S.v==3?2:3)"><span>Appearance</span><span class="mut">${v==3?"Light":"Dark"} ›</span></div>${H("Storage")}<div class="set"><span>Models on phone</span><span class="mut">${gb(Object.keys(S.installed).reduce((a,i)=>a+MODELS[i].size,0))}</span></div>${H("Privacy")}<div class="chk" style="font-size:13.5px"><div>Prompts never leave the phone</div><div>No account, no analytics</div><div>Network only used to download</div></div><p class="mut mono" style="font-size:11.5px;margin-top:24px">mobie 0.4.0 · open source</p></div>`;
+}
+
+function chat(){
+ const v=S.v,m=MODELS[S.chatModel];
+ const hd=v==1?`<div class="pad" style="padding-bottom:0"><button class="btn ghost" style="width:auto;display:inline-block;padding:4px 10px" onclick="go('library')">[ esc ]</button> <span class="acc">${m.id}</span> <span class="mut">· offline</span></div>`
+  :v==2?`<div class="chathd"><button class="back" onclick="go('library')">←</button><div><b>${m.id}</b><div class="mono mut" style="font-size:11px">● on-device · offline</div></div></div>`
+  :`<div class="pad" style="padding-bottom:0"><button class="back" onclick="go('library')">← Library</button><div style="font-weight:600;margin-top:4px">${m.id}</div><div class="mono mut" style="font-size:11px">running on this phone · no network</div></div>`;
+ const empty=`<p class="mut" style="padding:40px 0;text-align:center;font-size:13px">${v==1?"# say something. nothing leaves this phone.":"Say something. Nothing leaves this phone."}</p>`;
+ const msgs=S.msgs.map(x=>`<div class="m ${x.r}">${x.t}${x.r=="a"&&x.done?`<span class="st">${v==4?`<span>⚡ ${x.tps} tok/s</span><span>${x.ftl} ms first token</span>`:`${x.tps} tok/s · ${x.ftl} ms to first token`}</span>`:x.r=="a"?'<span class="cur"></span>':""}</div>`).join("");
+ return `${hd}<div class="msgs">${msgs||empty}</div><form class="composer" onsubmit="send(event)"><input id="inp" placeholder="${v==1?"":"Message"}" autocomplete="off"><button>${v==1||v==3?"send":v==5?"→":"↑"}</button></form>`;
+}
+
+/* ---------- actions ---------- */
+function download(i){S.dl[i]=0;render();const t=setInterval(()=>{if(S.dl[i]==null)return clearInterval(t);S.dl[i]=Math.min(100,S.dl[i]+7);if(S.dl[i]>=100){clearInterval(t);delete S.dl[i];S.installed[i]=true}if(S.screen=="model"){render()}else renderList()},180)}
+function cancelDl(i){delete S.dl[i];render()}
+function del(i){delete S.installed[i];render()}
+function startChat(i){S.chatModel=i;S.msgs=[];go("chat")}
+const REPLIES=["Sure. Here's a short one:\n\nRain on the window,\nthe phone hums, no signal —\nstill, the words arrive.","It runs entirely on this phone's CPU and GPU through LiteRT-LM. Nothing you type is sent anywhere.","Good question. In short: smaller quantization saves memory, but too small can hurt quality, so Mobie recommends a balanced build."];
+function send(e){e.preventDefault();const t=$("#inp").value.trim();if(!t)return;S.msgs.push({r:"u",t});const a={r:"a",t:"",done:false};S.msgs.push(a);render();
+ const full=REPLIES[(S.msgs.length/2-1)%REPLIES.length].split(/(\s+)/);let k=0;
+ setTimeout(function step(){a.t+=full[k++]||"";if(k<full.length){render();$("#scr").scrollTop=1e5;setTimeout(step,28)}else{a.done=true;a.tps=(14+Math.random()*6).toFixed(1);a.ftl=Math.round(280+Math.random()*120);render();$("#scr").scrollTop=1e5}},350)}
+
+/* ---------- render ---------- */
+function render(anim){
+ const ph=$("#phone");ph.className="phone v"+S.v;
+ $("#picker").innerHTML=VARIANTS.map((x,i)=>`<button class="${S.v==i+1?"on":""}" onclick="setV(${i+1})">${x[0]}</button>`).join("");
+ $("#blurb").textContent=VARIANTS[S.v-1][1];
+ $("#top").innerHTML=topBar();
+ const scr=$("#scr"),y=scr.scrollTop;
+ const fn={discover,model,library,settings,chat}[S.screen];
+ const focus=document.activeElement&&document.activeElement.tagName=="INPUT"?document.activeElement.id:null;
+ scr.innerHTML=`<div class="${anim?"fade":""}">${fn()}</div>`;
+ if(!anim)scr.scrollTop=y;else scr.scrollTop=0;
+ $("#nav").innerHTML=nav();$("#nav").style.display=S.screen=="chat"?"none":"flex";
+ if(focus=="inp")$("#inp").focus();
+}
+addEventListener("keydown",e=>{if(e.target.tagName!="INPUT"&&/^[1-5]$/.test(e.key))setV(+e.key)});
+render(true);
+</script>
+</body>
+</html>

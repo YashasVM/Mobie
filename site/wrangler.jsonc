@@ -1,0 +1,6 @@
+{
+  "name": "mobie-site",
+  "compatibility_date": "2026-10-01",
+  "assets": { "directory": "./public" },
+  "routes": [{ "pattern": "mobie.yash0.in", "custom_domain": true }]
+}

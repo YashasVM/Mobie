@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>mobie(1) — run AI models on your Android phone</title>
+<meta name="description" content="Mobie finds mobile-ready AI models on Hugging Face, checks they fit your Android phone, downloads them safely, and runs them offline.">
+<meta property="og:title" content="mobie(1) — run AI models on your Android phone">
+<meta property="og:description" content="Browse Hugging Face, check the fit, download, chat offline. Free and open source.">
+<meta name="theme-color" content="#0c0c0b">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%230c0c0b'/><rect x='9' y='7' width='10' height='18' fill='%23ffb547'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0c0c0b;--bg2:#141412;--fg:#d6d3c8;--dim:#6f6c63;--faint:#2a2925;--amb:#ffb547;--grn:#8fd16a;--red:#ff6b57;--yel:#e8d27a;--blu:#7fb4d9;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;--ch:1ch}
+*{box-sizing:border-box;margin:0;padding:0}
+html{background:var(--bg)}
+body{background:var(--bg);color:var(--fg);font:15px/1.6 var(--mono);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+::selection{background:var(--amb);color:var(--bg)}
+a{color:var(--amb);text-decoration:none}
+a:hover{background:var(--amb);color:var(--bg)}
+.w{max-width:960px;margin:0 auto;padding:0 24px}
+.a{color:var(--amb)}.d{color:var(--dim)}.g{color:var(--grn)}.r{color:var(--red)}.y{color:var(--yel)}.b{color:var(--blu)}
+b{font-weight:600}
+
+/* scanlines, very subtle */
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:99;background:repeating-linear-gradient(0deg,rgba(0,0,0,.09) 0 1px,transparent 1px 3px);mix-blend-mode:multiply}
+
+/* status bar (tmux-like) */
+.bar{position:sticky;top:0;z-index:120;background:var(--amb);color:var(--bg);font-size:13px;font-weight:500}
+.bar .w{display:flex;gap:0;height:28px;align-items:center;white-space:nowrap;overflow:hidden}
+.bar span{padding:0 10px}
+.bar .sel{background:var(--bg);color:var(--amb)}
+.bar a{color:var(--bg);padding:0 10px}
+.bar a:hover{background:var(--bg);color:var(--amb)}
+.bar .sp{flex:1}
+
+/* hero */
+.hero{padding:72px 0 40px}
+pre{font:inherit;white-space:pre}
+.logo{color:var(--amb);font-family:"JetBrains Mono",monospace;font-weight:500;font-size:clamp(8px,2.3vw,22px);line-height:1;letter-spacing:0;margin:28px 0 30px;overflow:hidden}
+.logo .ln{display:block;clip-path:inset(0 100% 0 0)}
+.boot{color:var(--dim);min-height:7.5em}
+.boot div{white-space:pre-wrap}
+.lead{font-size:clamp(20px,2.6vw,28px);line-height:1.35;font-weight:500;max-width:30ch;margin:36px 0 20px;color:var(--fg)}
+.lead .a{font-weight:600}
+.cur{display:inline-block;width:.6em;height:1.1em;background:var(--amb);vertical-align:-.18em;animation:bl 1.05s steps(1) infinite}
+@keyframes bl{50%{opacity:0}}
+.p{color:var(--dim);max-width:62ch}
+
+.cmds{display:flex;flex-wrap:wrap;gap:12px;margin-top:36px}
+.k{display:inline-flex;align-items:center;gap:10px;border:1px solid var(--amb);padding:10px 16px;color:var(--amb);font-weight:500;transition:none}
+.k:hover,.k:focus-visible{background:var(--amb);color:var(--bg);outline:none}
+.k.ghost{border-color:var(--faint);color:var(--fg)}
+.k.ghost:hover{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.k kbd{font:inherit;font-size:12px;opacity:.7}
+
+/* sections as man page */
+section{padding:72px 0}
+h2{font:600 15px var(--mono);color:var(--amb);letter-spacing:.04em;margin-bottom:22px;display:flex;gap:14px;align-items:center}
+h2::after{content:"";flex:1;border-top:1px dashed var(--faint)}
+.ind{padding-left:7ch}
+.ind p{margin-bottom:14px;max-width:68ch}
+
+/* TUI window */
+.tui{border:1px solid var(--dim);background:var(--bg2);margin-top:8px;user-select:none}
+.tui-t{display:flex;justify-content:space-between;padding:6px 12px;border-bottom:1px solid var(--dim);color:var(--dim);font-size:13px}
+.tui-t b{color:var(--fg);font-weight:500}
+.tui-b{display:grid;grid-template-columns:1.25fr 1fr}
+.list{border-right:1px solid var(--dim);padding:8px 0}
+.row{display:grid;grid-template-columns:2ch 1fr 9ch;gap:1ch;padding:2px 12px;cursor:pointer;white-space:nowrap}
+.row .nm{overflow:hidden;text-overflow:ellipsis}
+.row.on{background:var(--amb);color:var(--bg)}
+.row.on .g,.row.on .y,.row.on .r,.row.on .d{color:var(--bg)}
+.row:not(.on):hover{background:var(--faint)}
+.det{padding:12px 16px;font-size:14px;min-height:300px}
+.det .h{color:var(--fg);font-weight:600;margin-bottom:10px;word-break:break-all}
+.kv{display:grid;grid-template-columns:10ch 1fr;gap:0 1ch}
+.kv span:nth-child(odd){color:var(--dim)}
+.meter{letter-spacing:-.05em}
+.verdict{margin-top:14px;padding:6px 10px;border:1px solid currentColor;display:inline-block}
+.tui-f{border-top:1px solid var(--dim);padding:6px 12px;font-size:13px;color:var(--dim);display:flex;gap:18px;flex-wrap:wrap}
+.tui-f b{color:var(--bg);background:var(--dim);padding:0 5px;font-weight:500}
+.note{font-size:12px;color:var(--dim);margin-top:10px}
+
+/* transcript blocks */
+.term{border-left:2px solid var(--faint);padding:4px 0 4px 18px;margin:18px 0 6px;font-size:14px;min-height:12em}
+.term div{white-space:pre-wrap;min-height:1.6em}
+
+/* specs table */
+.tbl{display:grid;grid-template-columns:max-content 1fr;gap:6px 4ch;font-size:14px}
+.tbl span:nth-child(odd){color:var(--amb)}
+
+/* privacy */
+.chk div{padding:3px 0}
+.chk div::before{content:"[✓] ";color:var(--grn)}
+
+/* footer */
+.end{padding:96px 0 40px}
+.end .big{font-size:clamp(22px,3vw,32px);font-weight:500;line-height:1.3;margin-bottom:30px}
+footer{border-top:1px solid var(--faint);color:var(--dim);font-size:13px}
+footer .w{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;padding-top:20px;padding-bottom:28px}
+
+/* line-print reveal */
+.pr{opacity:0}
+.pr.in{animation:print .5s steps(6) forwards}
+@keyframes print{from{opacity:0;clip-path:inset(0 100% 0 0)}to{opacity:1;clip-path:inset(0 0 0 0)}}
+
+@media(max-width:760px){
+  body{font-size:14px}
+  .ind{padding-left:0}
+  .tui-b{grid-template-columns:1fr}.list{border-right:0;border-bottom:1px solid var(--dim)}
+  .bar .hide{display:none}
+  .det{min-height:0}
+}
+@media(prefers-reduced-motion:reduce){*{animation:none!important}.pr,.logo .ln{opacity:1!important;clip-path:none!important}}
+</style>
+</head>
+<body>
+
+<div class="bar"><div class="w">
+  <span class="sel">0:mobie</span><a href="#describe">1:about</a><a href="#browse">2:browse</a><a class="hide" href="#privacy">3:privacy</a><span class="sp"></span><a href="https://github.com/YashasVM/Mobie">github</a><a href="https://github.com/YashasVM/Mobie/releases/latest">download</a>
+</div></div>
+
+<main class="w">
+<header class="hero">
+  <div class="boot" id="boot"></div>
+<pre class="logo" id="logo"><span class="ln">███╗   ███╗ ██████╗ ██████╗ ██╗███████╗</span><span class="ln">████╗ ████║██╔═══██╗██╔══██╗██║██╔════╝</span><span class="ln">██╔████╔██║██║   ██║██████╔╝██║█████╗  </span><span class="ln">██║╚██╔╝██║██║   ██║██╔══██╗██║██╔══╝  </span><span class="ln">██║ ╚═╝ ██║╚██████╔╝██████╔╝██║███████╗</span><span class="ln">╚═╝     ╚═╝ ╚═════╝ ╚═════╝ ╚═╝╚══════╝</span></pre>
+  <p class="lead">Run AI models <span class="a">on your phone</span>, offline.<span class="cur"></span></p>
+  <p class="p">An Android app that finds models on Hugging Face, checks whether your phone can actually run them, downloads them, and lets you chat with no connection at all.</p>
+  <div class="cmds">
+    <a class="k" href="https://github.com/YashasVM/Mobie/releases/latest">[ download apk ] <kbd>d</kbd></a>
+    <a class="k ghost" href="https://github.com/YashasVM/Mobie">[ source ] <kbd>g</kbd></a>
+  </div>
+</header>
+
+<section id="describe">
+  <h2>DESCRIPTION</h2>
+  <div class="ind">
+    <p class="pr">Most model apps let you download a 3 GB file and find out afterwards that it doesn't fit. <span class="a">mobie</span> checks first.</p>
+    <p class="pr">Before anything downloads it reads the file size, estimates memory, and compares both against your phone's RAM, free storage, and chip. Models that can't run are blocked. Models that only fit after you close a few apps get a warning.</p>
+    <p class="pr d">Once a model is on the phone, chatting needs no network at all.</p>
+  </div>
+</section>
+
+<section id="browse">
+  <h2>BROWSE</h2>
+  <div class="ind">
+    <p class="pr">This is roughly what picking a model feels like. Try it: <span class="a">↑ ↓</span> or <span class="a">j k</span>, or click a row.</p>
+    <div class="tui pr" id="tui" tabindex="0" aria-label="Model browser demo">
+      <div class="tui-t"><b>mobie › browse</b><span>litert-community</span></div>
+      <div class="tui-b">
+        <div class="list" id="list"></div>
+        <div class="det" id="det"></div>
+      </div>
+      <div class="tui-f"><span><b>↑↓</b> move</span><span><b>⏎</b> details</span><span><b>/</b> search</span><span><b>q</b> quit</span></div>
+    </div>
+    <p class="note">demo data on an imaginary 8 GB phone — not measurements.</p>
+  </div>
+</section>
+
+<section>
+  <h2>DOWNLOAD</h2>
+  <div class="ind">
+    <p class="pr">Big files are fetched in the background, resume after a dropped connection or a reboot, and are checked against their published hash before they're used.</p>
+    <div class="term" id="dl"></div>
+  </div>
+</section>
+
+<section>
+  <h2>CHAT</h2>
+  <div class="ind">
+    <p class="pr">Replies stream in as they're generated, using Google's LiteRT-LM runtime on the phone's own hardware. Conversations are saved on the device, per model.</p>
+    <div class="term" id="chat"></div>
+  </div>
+</section>
+
+<section id="privacy">
+  <h2>PRIVACY</h2>
+  <div class="ind chk">
+    <div class="pr">prompts and replies never leave the phone</div>
+    <div class="pr">models are kept in app-private storage</div>
+    <div class="pr">your Hugging Face token is encrypted with Android Keystore</div>
+    <div class="pr">code inside model repos is never run</div>
+    <div class="pr">no account, no analytics on your chats</div>
+  </div>
+</section>
+
+<section>
+  <h2>REQUIREMENTS</h2>
+  <div class="ind tbl">
+    <span>android</span><span>8.0 or newer</span>
+    <span>cpu</span><span>64-bit ARM (arm64-v8a)</span>
+    <span>format</span><span>.litertlm models from litert-community</span>
+    <span>license</span><span>open source — see the repo</span>
+  </div>
+</section>
+
+<section class="end">
+  <p class="big pr">$ that's it. go try it.<span class="cur"></span></p>
+  <div class="cmds">
+    <a class="k" href="https://github.com/YashasVM/Mobie/releases/latest">[ download apk ] <kbd>d</kbd></a>
+    <a class="k ghost" href="https://github.com/YashasVM/Mobie">[ star on github ] <kbd>g</kbd></a>
+  </div>
+</section>
+</main>
+
+<footer><div class="w">
+  <span>mobie(1) · made by <a href="https://yash0.in">yashas</a></span>
+  <span>EOF</span>
+</div></footer>
+
+<script>
+const RM=matchMedia('(prefers-reduced-motion:reduce)').matches;
+const sleep=ms=>new Promise(r=>setTimeout(r,RM?0:ms));
+const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+
+// typewriter into a container, line by line. lines: [html, delayAfter, typed?]
+async function typeLines(el,lines,speed=18){
+  for(const [html,wait=120,typed] of lines){
+    const d=document.createElement('div');el.appendChild(d);
+    if(typed&&!RM){const plain=html.replace(/<[^>]+>/g,'');for(let i=1;i<=plain.length;i++){d.textContent=plain.slice(0,i);await sleep(speed)}}
+    d.innerHTML=html;await sleep(wait);
+  }
+}
+
+// boot + logo
+(async()=>{
+  await typeLines(document.getElementById('boot'),[
+    ['<span class="a">$</span> mobie --version',260,true],
+    ['mobie 0.0.2 · android · litert-lm',90],
+    ['<span class="g">✓</span> runtime ready',70],
+    ['<span class="g">✓</span> network not required for chat',70],
+  ],38);
+  const lns=document.querySelectorAll('.logo .ln');
+  for(const l of lns){l.animate([{clipPath:'inset(0 100% 0 0)'},{clipPath:'inset(0 0 0 0)'}],{duration:RM?0:260,fill:'forwards',easing:'steps(20)'});await sleep(70)}
+})();
+
+// keyboard shortcuts
+addEventListener('keydown',e=>{
+  if(e.target.closest&&e.target.closest('input,textarea'))return;
+  if(e.key==='d')location.href='https://github.com/YashasVM/Mobie/releases/latest';
+  if(e.key==='g')location.href='https://github.com/YashasVM/Mobie';
+});
+
+// print-reveal on scroll
+const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}}),{threshold:.2});
+document.querySelectorAll('.pr').forEach((el,i)=>{el.style.animationDelay=(el.parentElement.children[0]===el?0:[...el.parentElement.children].indexOf(el)*.08)+'s';io.observe(el)});
+
+// TUI browser (illustrative data)
+const models=[
+  {n:'Gemma3-1B-IT',q:'int4',fmt:'.litertlm',kind:'text',mem:.22,sto:.08,v:'ok'},
+  {n:'Qwen2.5-1.5B-Instruct',q:'int8',fmt:'.litertlm',kind:'text',mem:.38,sto:.12,v:'ok'},
+  {n:'gemma-3n-E2B-it',q:'int4',fmt:'.litertlm',kind:'text + vision',mem:.55,sto:.2,v:'ok'},
+  {n:'gemma-3n-E4B-it',q:'int4',fmt:'.litertlm',kind:'text + vision',mem:.82,sto:.3,v:'warn'},
+  {n:'large-model-example',q:'int8',fmt:'.litertlm',kind:'text',mem:1.4,sto:.5,v:'no'},
+];
+const V={ok:['g','fits','✓ ready to download'],warn:['y','tight','! close some apps first'],no:['r','too big','✕ won\'t fit on this phone']};
+const bar=(f,w=16)=>{const n=Math.min(Math.round(f*w),w);const c=f>1?'r':f>.75?'y':'g';return `<span class="meter"><span class="${c}">${'█'.repeat(n)}</span><span class="d">${'░'.repeat(w-n)}</span></span>${f>1?' <span class="r">over</span>':''}`};
+const list=document.getElementById('list'),det=document.getElementById('det'),tui=document.getElementById('tui');
+let sel=0;
+function render(){
+  list.innerHTML=models.map((m,i)=>`<div class="row${i===sel?' on':''}" data-i="${i}"><span>${i===sel?'›':' '}</span><span class="nm">${m.n}</span><span class="${V[m.v][0]}">${V[m.v][1]}</span></div>`).join('');
+  const m=models[sel],v=V[m.v];
+  det.innerHTML=`<div class="h">${m.n}</div><div class="kv">
+    <span>format</span><span>${m.fmt}</span><span>quant</span><span>${m.q}</span><span>type</span><span>${m.kind}</span>
+    <span>memory</span><span>${bar(m.mem)}</span><span>storage</span><span>${bar(m.sto)}</span>
+    <span>license</span><span>shown before download</span></div>
+    <div class="verdict ${v[0]}">${v[2]}</div>`;
+}
+render();
+list.addEventListener('click',e=>{const r=e.target.closest('.row');if(r){sel=+r.dataset.i;render()}});
+tui.addEventListener('keydown',e=>{
+  if(['ArrowDown','j'].includes(e.key)){sel=(sel+1)%models.length;render();e.preventDefault();e.stopPropagation()}
+  if(['ArrowUp','k'].includes(e.key)){sel=(sel-1+models.length)%models.length;render();e.preventDefault();e.stopPropagation()}
+});
+tui.addEventListener('pointerenter',()=>tui.focus({preventScroll:true}));
+// idle auto-cycle until the user touches it
+let touched=false;['keydown','click'].forEach(ev=>tui.addEventListener(ev,()=>touched=true));
+setInterval(()=>{if(!touched&&!RM&&document.activeElement!==tui){sel=(sel+1)%models.length;render()}},2600);
+
+// download transcript
+const spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏';
+function pbar(p,w=28){const n=Math.round(p*w);return '█'.repeat(n)+'░'.repeat(w-n)}
+async function runDL(){
+  const el=document.getElementById('dl');
+  while(true){
+    el.innerHTML='';
+    await typeLines(el,[['<span class="a">$</span> mobie pull gemma-3n-E2B-it',200,true]],30);
+    const line=document.createElement('div');el.appendChild(line);
+    let p=0,s=0;
+    const step=async(to,label)=>{while(p<to){p=Math.min(to,p+.012);line.innerHTML=`<span class="a">${spin[s++%10]}</span> ${pbar(p)} ${String(Math.round(p*100)).padStart(3)}% <span class="d">${label}</span>`;await sleep(45)}};
+    await step(.46,'downloading');
+    line.innerHTML=`<span class="y">‖</span> ${pbar(p)} ${String(Math.round(p*100)).padStart(3)}% <span class="y">connection lost — paused</span>`;
+    await sleep(1400);
+    await typeLines(el,[['<span class="d">  wifi back · resuming from 46% (range request)</span>',300]]);
+    const l2=document.createElement('div');el.appendChild(l2);
+    const step2=async()=>{while(p<1){p=Math.min(1,p+.014);l2.innerHTML=`<span class="a">${spin[s++%10]}</span> ${pbar(p)} ${String(Math.round(p*100)).padStart(3)}% <span class="d">downloading</span>`;await sleep(45)}};
+    await step2();
+    l2.innerHTML=`<span class="g">✓</span> ${pbar(1)} 100%`;
+    await typeLines(el,[['<span class="g">✓</span> sha256 matches',160],['<span class="g">✓</span> saved to app storage · ready',3800]]);
+    if(RM)break;
+  }
+}
+// chat transcript
+async function runChat(){
+  const el=document.getElementById('chat');
+  const reply="Sure. Ember & Oak, The Slow Pour, and Little Lantern. Want a tagline for one?";
+  while(true){
+    el.innerHTML='';
+    await typeLines(el,[['<span class="d">[airplane mode: on]</span>',300],['<span class="a">you ›</span> three names for a cozy coffee shop?',400,true]],34);
+    const d=document.createElement('div');el.appendChild(d);
+    const w=reply.split(' ');let t='';
+    for(const x of w){t+=(t?' ':'')+x;d.innerHTML=`<span class="b">ai  ›</span> ${esc(t)}<span class="cur"></span>`;await sleep(85)}
+    d.innerHTML=`<span class="b">ai  ›</span> ${esc(t)}`;
+    await typeLines(el,[['<span class="d">  generated on-device · 0 bytes sent</span>',4500]]);
+    if(RM)break;
+  }
+}
+const once=(id,fn)=>new IntersectionObserver((es,o)=>{if(es[0].isIntersecting){o.disconnect();fn()}},{threshold:.3}).observe(document.getElementById(id));
+once('dl',runDL);once('chat',runChat);
+</script>
+</body>
+</html>

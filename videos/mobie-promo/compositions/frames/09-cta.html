@@ -1,0 +1,78 @@
+<template>
+<div id="f09-root" data-composition-id="09-cta" data-width="1920" data-height="1080" data-start="0" data-duration="7.58">
+<style>
+@font-face {font-family:"IBM Plex Mono";src:url("assets/fonts/plex_mono_regular.ttf");font-weight:400;}
+@font-face {font-family:"IBM Plex Mono";src:url("assets/fonts/plex_mono_semibold.ttf");font-weight:600;}
+@font-face {font-family:"IBM Plex Mono";src:url("assets/fonts/plex_mono_bold.ttf");font-weight:700;}
+#f09-root {position:relative;width:100%;height:100%;overflow:hidden;background:#0C0C0B;color:#D6D3C8;font-family:"IBM Plex Mono",monospace;}
+.f09-bar {position:absolute;inset:0 0 auto;height:48px;background:#FFB547;color:#0C0C0B;font-size:22px;line-height:48px;font-weight:600;}
+.f09-left {position:absolute;left:200px;display:flex;}
+.f09-right {position:absolute;right:200px;display:flex;}
+.f09-bar span {padding:0 14px;}
+.f09-bar .on {background:#0C0C0B;color:#FFB547;}
+.f09-header {position:absolute;left:200px;top:112px;width:1520px;display:flex;align-items:center;gap:20px;font-size:30px;color:#FFB547;letter-spacing:.04em;}
+.f09-header i {flex:1;border-top:1px dashed #504D48;}
+.f09-big {position:absolute;left:200px;top:190px;font-size:96px;line-height:120px;font-weight:600;letter-spacing:-.01em;}
+.f09-term {position:absolute;left:200px;top:360px;width:1520px;border-left:2px solid #504D48;padding-left:28px;font-size:38px;line-height:66px;}
+#f09-root .amber {color:#FFB547;}
+#f09-root .green {color:#8FD16A;}
+#f09-root .yellow {color:#E8D27A;}
+#f09-root .blue {color:#7FB4D9;}
+#f09-root .muted {color:#AAA79D;}
+#f09-root .reveal {opacity:0;}
+#f09-root .char {display:none;}
+#f09-root .cursor {display:inline-block;width:.6em;height:1em;background:#FFB547;vertical-align:-.12em;margin-left:4px;}
+.f09-note {position:absolute;left:200px;top:920px;font-size:30px;color:#AAA79D;}
+
+#f09-logo {position:absolute;left:200px;top:200px;margin:0;color:#FFB547;font-size:36px;line-height:46px;font-weight:600;white-space:pre;}
+#f09-logo span {display:block;}
+#f09-req {position:absolute;left:200px;top:598px;font-size:30px;line-height:46px;}
+#f09-buttons {position:absolute;left:200px;top:730px;display:flex;gap:26px;font-size:38px;}
+#f09-buttons span {padding:16px 22px;border:1px solid #AAA79D;}
+#f09-buttons #f09-download {color:#FFB547;border-color:#FFB547;}
+#f09-url {position:absolute;left:200px;top:900px;font-size:30px;line-height:42px;}
+#f09-site {position:absolute;left:200px;top:829px;font-size:48px;line-height:62px;font-weight:600;color:#FFB547;}
+.f09-note {top:970px;width:1520px;border-top:1px solid #504D48;padding-top:15px;}
+
+</style>
+<div class="f09-bar"><div class="f09-left"><span class="on">0:mobie</span><span class="">1:about</span><span class="">2:browse</span><span class="">3:pull</span><span class="">4:chat</span><span class="">5:privacy</span></div><div class="f09-right"><span>github</span><span>download</span></div></div>
+<div class="f09-header"><b>MOBIE(1)</b><i></i></div>
+
+<pre id="f09-logo" class="reveal"><span>███╗   ███╗ ██████╗ ██████╗ ██╗███████╗</span><span>████╗ ████║██╔═══██╗██╔══██╗██║██╔════╝</span><span>██╔████╔██║██║   ██║██████╔╝██║█████╗  </span><span>██║╚██╔╝██║██║   ██║██╔══██╗██║██╔══╝  </span><span>██║ ╚═╝ ██║╚██████╔╝██████╔╝██║███████╗</span><span>╚═╝     ╚═╝ ╚═════╝ ╚═════╝ ╚═╝╚══════╝</span></pre>
+<div class="f09-big" style="top:465px;font-size:88px"><span class="amber">$ </span><span id="f09-your"></span><span class="amber" id="f09-offline"></span></div>
+<div id="f09-req" class="reveal">android 8.0+ · 64-bit ARM<br>free &amp; open source · offline after download</div>
+<div id="f09-buttons" class="reveal"><span id="f09-download">[ download apk ]</span><span>[ source on github ]</span></div>
+<div id="f09-site" class="reveal">› <span id="f09-website"></span></div>
+<div id="f09-url" class="reveal"><span class="amber">› </span><span id="f09-address"></span><span id="f09-cursor" class="cursor"></span></div>
+<div class="f09-note">mobie(1) · made by yashas <span style="float:right">EOF</span></div>
+
+<script>
+const tl=gsap.timeline({paused:true});
+function show(id,t){tl.fromTo(id,{opacity:0},{opacity:1,duration:0.01},t);}
+function type(id,text,start,end){
+ const el=document.querySelector(id);
+ for(let i=0;i<text.length;i++){
+  const s=document.createElement('span');s.className='char';s.textContent=text[i];el.appendChild(s);
+  tl.set(s,{display:'inline'},start+(end-start)*i/Math.max(1,text.length-1));
+ }
+}
+function blink(id,start,end){
+ tl.set(id,{opacity:1},start);
+ for(let t=start+.5,k=0;t<end;t+=.5,k++)tl.set(id,{opacity:k%2?1:0},t);
+}
+
+show('#f09-logo',.299);
+type('#f09-your','your ai. ',1.109,1.85);
+type('#f09-offline','offline.',2.005,2.56);
+show('#f09-req',2.944);
+show('#f09-buttons',4.1);
+show('#f09-site',4.1);
+type('#f09-website','mobie.yash0.in',4.1,4.75);
+show('#f09-url',4.9);
+type('#f09-address','github.com/YashasVM/Mobie',4.9,5.7);
+tl.set('#f09-download',{backgroundColor:'#FFB547',color:'#0C0C0B'},4.693);
+blink('#f09-cursor',4.9,7.3);
+
+window.__timelines["09-cta"]=tl;</script>
+</div>
+</template>

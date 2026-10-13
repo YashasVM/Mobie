@@ -1,0 +1,11 @@
+# voice starts at frame t=0; seconds are frame-local
+0.30-0.47  Meet
+0.51-1.13  Mobie.
+1.41-1.66  Real
+1.83-2.13  AI
+2.18-2.62  models,
+2.77-2.94  running
+3.07-3.37  right
+3.46-3.54  on
+3.58-3.63  your
+3.67-3.99  phone.

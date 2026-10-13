@@ -1,0 +1,98 @@
+[
+  {
+    "id": "w0",
+    "text": "Every",
+    "start": 0.299,
+    "end": 0.4267
+  },
+  {
+    "id": "w1",
+    "text": "time",
+    "start": 0.512,
+    "end": 0.683
+  },
+  {
+    "id": "w2",
+    "text": "you",
+    "start": 0.725,
+    "end": 0.8107
+  },
+  {
+    "id": "w3",
+    "text": "ask",
+    "start": 0.853,
+    "end": 0.9387
+  },
+  {
+    "id": "w4",
+    "text": "a",
+    "start": 1.067,
+    "end": 1.109
+  },
+  {
+    "id": "w5",
+    "text": "cloud",
+    "start": 1.152,
+    "end": 1.365
+  },
+  {
+    "id": "w6",
+    "text": "AI",
+    "start": 1.451,
+    "end": 1.7067
+  },
+  {
+    "id": "w7",
+    "text": "something,",
+    "start": 1.792,
+    "end": 2.219
+  },
+  {
+    "id": "w8",
+    "text": "your",
+    "start": 2.475,
+    "end": 2.688
+  },
+  {
+    "id": "w9",
+    "text": "words",
+    "start": 2.731,
+    "end": 3.029
+  },
+  {
+    "id": "w10",
+    "text": "take",
+    "start": 3.243,
+    "end": 3.371
+  },
+  {
+    "id": "w11",
+    "text": "a",
+    "start": 3.456,
+    "end": 3.4987
+  },
+  {
+    "id": "w12",
+    "text": "trip",
+    "start": 3.541,
+    "end": 3.7547
+  },
+  {
+    "id": "w13",
+    "text": "to",
+    "start": 3.883,
+    "end": 3.925
+  },
+  {
+    "id": "w14",
+    "text": "the",
+    "start": 3.968,
+    "end": 4.053
+  },
+  {
+    "id": "w15",
+    "text": "cloud.",
+    "start": 4.096,
+    "end": 4.487
+  }
+]

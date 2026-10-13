@@ -1,0 +1,181 @@
+<template>
+<div data-hf-id="hf-uw0k" id="root" data-composition-id="06-download" data-width="1920" data-height="1080" data-start="0" data-duration="3.948">
+<style>
+@font-face{font-family:"Unbounded";src:url("assets/fonts/Unbounded-Variable.ttf");font-weight:200 900;}
+@font-face{font-family:"IBM Plex Mono";src:url("assets/fonts/plex_mono_regular.ttf");font-weight:400;}
+@font-face{font-family:"IBM Plex Mono";src:url("assets/fonts/plex_mono_medium.ttf");font-weight:500;}
+@font-face{font-family:"IBM Plex Mono";src:url("assets/fonts/plex_mono_semibold.ttf");font-weight:600;}
+@font-face{font-family:"IBM Plex Mono";src:url("assets/fonts/plex_mono_bold.ttf");font-weight:700;}
+#root{position:relative;width:1920px;height:1080px;overflow:hidden;font-family:"IBM Plex Mono",monospace;color:#D6D3C8;}
+#root .clip{position:absolute;left:0;top:0;width:1920px;height:1080px;}
+.dl-ground{background:#0C0C0B;}
+.dl-bloom{position:absolute;border-radius:50%;filter:blur(130px);}
+.dl-scan{position:absolute;inset:0;background:repeating-linear-gradient(0deg,rgba(255,255,255,.035) 0,rgba(255,255,255,.035) 1px,transparent 1px,transparent 4px);}
+.dl-kicker{position:absolute;left:110px;top:250px;display:flex;align-items:center;gap:16px;font-weight:500;font-size:20px;letter-spacing:.14em;color:#2EF2FF;}
+.dl-kicker i{display:block;width:36px;height:2px;background:#2EF2FF;box-shadow:0 0 12px #2EF2FF;}
+.dl-h{position:absolute;left:104px;top:300px;font-family:"Unbounded",sans-serif;font-weight:800;font-size:128px;line-height:1.02;letter-spacing:-.03em;text-transform:lowercase;color:#F4F2EA;}
+.dl-h .w{display:block;overflow:visible;}
+.dl-h .w span{display:inline-block;}
+.dl-h .acc{color:#2EF2FF;text-shadow:0 0 36px rgba(46,242,255,.55);}
+.dl-ghost{position:absolute;left:1045px;top:90px;width:430px;height:900px;border-radius:64px;border:3px solid;opacity:0;}
+.dl-gc{border-color:#2EF2FF;}
+.dl-gm{border-color:#FF3DCB;}
+.dl-phone{position:absolute;left:1045px;top:90px;width:430px;height:900px;border-radius:64px;background:#111214;box-sizing:border-box;padding:10px;box-shadow:0 0 0 2px rgba(46,242,255,.35),0 0 70px rgba(46,242,255,.35),0 0 160px rgba(46,242,255,.18);}
+.dl-screen{position:relative;width:410px;height:880px;border-radius:54px;background:#0B0C0E;overflow:hidden;}
+.dl-status{position:absolute;left:34px;right:34px;top:20px;display:flex;justify-content:space-between;align-items:center;font-size:15px;font-weight:600;color:#9a9a94;}
+.dl-wifi{width:26px;height:20px;}
+.dl-head{position:absolute;left:28px;right:28px;top:78px;display:flex;align-items:center;gap:14px;}
+.dl-head b{font-weight:600;font-size:17px;color:#fff;}
+.dl-head small{display:block;font-size:12px;color:#8b8b86;margin-top:3px;}
+.dl-rule{position:absolute;left:0;right:0;top:146px;height:1px;background:#26272a;}
+.dl-lab{position:absolute;left:28px;top:182px;font-size:12px;letter-spacing:.14em;font-weight:500;color:#2EF2FF;text-transform:uppercase;}
+.dl-title{position:absolute;left:28px;right:20px;top:208px;font-size:25px;font-weight:600;color:#fff;line-height:1.2;letter-spacing:-.02em;}
+.dl-pct{position:absolute;left:28px;top:300px;font-family:"Unbounded",sans-serif;font-weight:800;font-size:76px;letter-spacing:-.04em;color:#2EF2FF;text-shadow:0 0 28px rgba(46,242,255,.6);line-height:1;}
+.dl-pct sup{font-size:34px;vertical-align:top;position:relative;top:6px;margin-left:2px;}
+.dl-mb{position:absolute;right:28px;top:352px;font-size:14px;color:#a9a9a2;font-weight:500;}
+.dl-track{position:absolute;left:28px;right:28px;top:402px;height:20px;border-radius:10px;background:#1b1c20;overflow:hidden;}
+.dl-fill{position:absolute;inset:0;border-radius:10px;background:linear-gradient(90deg,#17c3d1,#2EF2FF);box-shadow:0 0 20px #2EF2FF;transform-origin:0 50%;transform:scaleX(0);}
+.dl-chipbox{position:absolute;left:28px;top:446px;height:40px;width:354px;}
+.dl-chip{position:absolute;left:0;top:0;display:flex;align-items:center;gap:10px;height:38px;padding:0 16px;border-radius:19px;font-size:13.5px;font-weight:600;white-space:nowrap;}
+.dl-chip.red{color:#FF6B57;background:rgba(255,107,87,.12);border:1px solid rgba(255,107,87,.7);box-shadow:0 0 22px rgba(255,107,87,.35);}
+.dl-chip.cy{color:#2EF2FF;background:rgba(46,242,255,.1);border:1px solid rgba(46,242,255,.7);box-shadow:0 0 22px rgba(46,242,255,.3);}
+.dl-dot{width:9px;height:9px;border-radius:50%;background:currentColor;}
+.dl-card{position:absolute;left:28px;right:28px;top:530px;height:236px;border-radius:26px;background:#121316;border:1px solid #2a2c31;box-sizing:border-box;padding:22px 24px;}
+.dl-card h4{margin:0 0 14px;font-size:12px;letter-spacing:.14em;font-weight:500;color:#8b8b86;text-transform:uppercase;}
+.dl-row{display:flex;align-items:center;gap:14px;height:50px;font-size:16px;font-weight:600;color:#fff;}
+.dl-tick{width:28px;height:28px;flex:none;border-radius:50%;background:#9BFF5A;box-shadow:0 0 18px rgba(155,255,90,.7);display:flex;align-items:center;justify-content:center;}
+.dl-row em{font-style:normal;color:#9BFF5A;}
+.dl-foot{position:absolute;left:0;right:0;top:812px;text-align:center;font-size:12px;color:#8b8b86;}
+.dl-flash{position:absolute;inset:0;background:linear-gradient(90deg,rgba(255,61,203,.25),rgba(46,242,255,.25));opacity:0;mix-blend-mode:screen;}
+</style>
+
+<div data-hf-id="hf-r4fk" id="dl-ground" class="clip dl-ground" data-start="0" data-duration="3.948" data-track-index="0">
+  <div data-hf-id="hf-a1g1" class="dl-bloom" id="dl-b1" style="left:900px;top:80px;width:760px;height:760px;background:#2EF2FF;opacity:.3"></div>
+  <div data-hf-id="hf-vpsw" class="dl-bloom" id="dl-b2" style="left:-200px;top:520px;width:640px;height:640px;background:#7B5CFF;opacity:.28"></div>
+  <div data-hf-id="hf-af0a" class="dl-scan"></div>
+</div>
+
+<div data-hf-id="hf-0trp" id="dl-main" class="clip" data-start="0" data-duration="3.948" data-track-index="1">
+  <div data-hf-id="hf-9epp" class="dl-kicker" id="dl-kick"><i data-hf-id="hf-wt6k"></i>03 / DOWNLOAD</div>
+  <div data-hf-id="hf-wo3b" class="dl-h">
+    <span data-hf-id="hf-fr20" class="w"><span data-hf-id="hf-hml7" id="dl-w1">never</span></span>
+    <span data-hf-id="hf-xths" class="w"><span data-hf-id="hf-47td" id="dl-w2">starts</span></span>
+    <span data-hf-id="hf-wmkp" class="w"><span data-hf-id="hf-7f1n" id="dl-w3" class="acc">over.</span></span>
+  </div>
+
+  <div data-hf-id="hf-5ur6" class="dl-ghost dl-gc" id="dl-gc"></div>
+  <div data-hf-id="hf-a07u" class="dl-ghost dl-gm" id="dl-gm"></div>
+  <div data-hf-id="hf-8xfy" class="dl-phone" id="dl-phone">
+    <div data-hf-id="hf-jgzd" class="dl-screen">
+      <div data-hf-id="hf-vhpn" class="dl-status"><span data-hf-id="hf-vnk6">3:42</span>
+        <svg data-hf-id="hf-qlkb" class="dl-wifi" id="dl-wifi" viewBox="0 0 26 20" fill="none" stroke="#2EF2FF" stroke-width="2.6" stroke-linecap="round"><path data-hf-id="hf-pgll" d="M2 7.5a16 16 0 0 1 22 0" /><path data-hf-id="hf-j96z" d="M6 12a10 10 0 0 1 14 0" /><circle data-hf-id="hf-lhqs" cx="13" cy="16.5" r="1.6" fill="#2EF2FF" stroke="none" /></svg>
+      </div>
+      <div data-hf-id="hf-9mfz" class="dl-head">
+        <svg data-hf-id="hf-ngpa" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path data-hf-id="hf-smle" d="M19 12H5M11 5l-7 7 7 7" /></svg>
+        <div data-hf-id="hf-yeow"><b data-hf-id="hf-3jsp">Download</b><small data-hf-id="hf-ah8x">Stays on this phone</small></div>
+      </div>
+      <div data-hf-id="hf-mu4z" class="dl-rule"></div>
+      <div data-hf-id="hf-kopq" class="dl-lab" id="dl-lab">Downloading</div>
+      <div data-hf-id="hf-oxyh" class="dl-lab" id="dl-lab2" style="opacity:0;color:#9BFF5A">Verified and ready</div>
+      <div data-hf-id="hf-z8um" class="dl-title" id="dl-title">Gemma3-1B-IT</div>
+      <div data-hf-id="hf-k5s6" class="dl-pct" id="dl-pct">0<sup data-hf-id="hf-9ngu">%</sup></div>
+      <div data-hf-id="hf-e46p" class="dl-mb" id="dl-mb">0 / 555 MB</div>
+      <div data-hf-id="hf-99iy" class="dl-track"><div data-hf-id="hf-je0y" class="dl-fill" id="dl-fill"></div></div>
+      <div data-hf-id="hf-00we" class="dl-chipbox">
+        <div data-hf-id="hf-mcvo" class="dl-chip red" id="dl-chip1" style="opacity:0"><span data-hf-id="hf-rliv" class="dl-dot"></span>connection lost · paused at 62%</div>
+        <div data-hf-id="hf-pcrw" class="dl-chip cy" id="dl-chip2" style="opacity:0"><span data-hf-id="hf-9gaf" class="dl-dot"></span>resuming from 62%</div>
+      </div>
+      <div data-hf-id="hf-bz3x" class="dl-card" id="dl-card" style="opacity:0">
+        <h4 data-hf-id="hf-8m6f">Receipt</h4>
+        <div data-hf-id="hf-z9n2" class="dl-row" id="dl-r1"><span data-hf-id="hf-qpux" class="dl-tick"><svg data-hf-id="hf-d01m" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#0B0C0E" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path data-hf-id="hf-767d" d="M3 8.5l3.2 3.2L13 4.8" /></svg></span>resumed</div>
+        <div data-hf-id="hf-sfii" class="dl-row" id="dl-r2"><span data-hf-id="hf-zvbx" class="dl-tick"><svg data-hf-id="hf-un1a" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#0B0C0E" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path data-hf-id="hf-zg9p" d="M3 8.5l3.2 3.2L13 4.8" /></svg></span><span data-hf-id="hf-357d">SHA-256 <em data-hf-id="hf-1xyz">verified</em></span></div>
+        <div data-hf-id="hf-aoqy" class="dl-row" id="dl-r3"><span data-hf-id="hf-1290" class="dl-tick"><svg data-hf-id="hf-v1cb" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#0B0C0E" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path data-hf-id="hf-0n6s" d="M3 8.5l3.2 3.2L13 4.8" /></svg></span>saved privately</div>
+      </div>
+      <div data-hf-id="hf-y4se" class="dl-flash" id="dl-flash"></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+<script>
+(function(){
+  window.__timelines = window.__timelines || {};
+  var tl = gsap.timeline({ paused: true });
+  var P = { v: 0 };
+  function render(){
+    var v = Math.round(P.v);
+    document.getElementById("dl-pct").innerHTML = v + "<sup>%</sup>";
+    document.getElementById("dl-mb").textContent = Math.round(P.v/100*555) + " / 555 MB";
+  }
+  // static start state
+  tl.set("#dl-fill",{scaleX:0},0);
+
+  // headline + kicker (visible early)
+  tl.fromTo("#dl-kick",{opacity:0,x:-30},{opacity:1,x:0,duration:.4,ease:"power3.out",immediateRender:false},0.05);
+  tl.fromTo("#dl-w1",{opacity:0,y:60,rotation:3},{opacity:1,y:0,rotation:0,duration:.5,ease:"back.out(1.6)",immediateRender:false},0.2);
+  tl.fromTo("#dl-w2",{opacity:0,y:60,rotation:3},{opacity:1,y:0,rotation:0,duration:.5,ease:"back.out(1.6)",immediateRender:false},0.7);
+  tl.fromTo("#dl-w3",{opacity:0,y:60,rotation:3,scale:.9},{opacity:1,y:0,rotation:0,scale:1,duration:.5,ease:"back.out(1.8)",immediateRender:false},2.25);
+  // phone entrance
+  tl.fromTo("#dl-phone",{opacity:0,y:50,scale:.96},{opacity:1,y:0,scale:1,duration:.45,ease:"power3.out"},0);
+  tl.fromTo("#dl-b1",{scale:.85},{scale:1.15,duration:3.4,ease:"none"},0);
+
+  // Scene 1: race 0 -> 62
+  tl.to("#dl-fill",{scaleX:.62,duration:1.05,ease:"power2.inOut"},0.2);
+  tl.to(P,{v:62,duration:1.05,ease:"power2.inOut",onUpdate:render},0.2);
+
+  // Scene 2: signal drops at "drop signal" (1.28)
+  tl.to("#dl-wifi",{opacity:0,duration:.05},1.3);
+  tl.to("#dl-wifi",{opacity:1,duration:.05},1.36);
+  tl.to("#dl-wifi",{opacity:0,duration:.05},1.42);
+  tl.set("#dl-wifi",{stroke:"#FF6B57"},1.42);
+  tl.to("#dl-wifi",{opacity:.45,duration:.05},1.5);
+  tl.fromTo("#dl-chip1",{opacity:0,y:10,scale:.92},{opacity:1,y:0,scale:1,duration:.3,ease:"back.out(2)",immediateRender:false},1.45);
+  tl.to("#dl-lab",{color:"#FF6B57",duration:.1},1.45);
+  tl.to("#dl-fill",{boxShadow:"0 0 8px #FF6B57",duration:.1},1.45);
+  // chromatic glitch
+  tl.to("#dl-phone",{x:-12,skewX:-3,duration:.05,ease:"none"},1.5);
+  tl.to("#dl-phone",{x:14,skewX:2,duration:.04,ease:"none"},1.55);
+  tl.to("#dl-phone",{x:-6,skewX:0,duration:.04,ease:"none"},1.6);
+  tl.to("#dl-phone",{x:8,duration:.04,ease:"none"},1.65);
+  tl.to("#dl-phone",{x:0,skewX:0,duration:.1,ease:"power2.out"},1.7);
+  tl.set("#dl-gc",{opacity:.9,x:-16},1.5);
+  tl.set("#dl-gm",{opacity:.9,x:16},1.5);
+  tl.set("#dl-gc",{x:14,y:-3},1.58);
+  tl.set("#dl-gm",{x:-14,y:3},1.58);
+  tl.set("#dl-gc",{x:-8,y:0},1.66);
+  tl.set("#dl-gm",{x:8,y:0},1.66);
+  tl.set("#dl-gc",{opacity:0},1.74);
+  tl.set("#dl-gm",{opacity:0},1.74);
+  tl.fromTo("#dl-flash",{opacity:0},{opacity:1,duration:.04,immediateRender:false},1.5);
+  tl.to("#dl-flash",{opacity:0,duration:.25,ease:"power2.out"},1.56);
+
+  // Scene 3: signal returns ("and", 1.96) -> resume
+  tl.set("#dl-wifi",{stroke:"#2EF2FF",opacity:1},1.96);
+  tl.fromTo("#dl-wifi",{scale:.7},{scale:1,duration:.25,ease:"back.out(3)",immediateRender:false},1.96);
+  tl.to("#dl-chip1",{opacity:0,y:-10,duration:.12,ease:"power2.in"},1.96);
+  tl.fromTo("#dl-chip2",{opacity:0,y:10,scale:.92},{opacity:1,y:0,scale:1,duration:.25,ease:"back.out(2)",immediateRender:false},2.04);
+  tl.to("#dl-lab",{color:"#2EF2FF",duration:.1},1.98);
+  tl.to("#dl-fill",{boxShadow:"0 0 20px #2EF2FF",duration:.1},1.98);
+  tl.to("#dl-fill",{scaleX:1,duration:.5,ease:"power2.inOut"},2.0);
+  tl.to(P,{v:100,duration:.5,ease:"power2.inOut",onUpdate:render},2.0);
+
+  // verified ("verified" 2.30): label flips, chip clears, receipt checks off
+  tl.to("#dl-chip2",{opacity:0,y:-10,duration:.15,ease:"power2.in"},2.45);
+  tl.to("#dl-lab",{color:"#9BFF5A",duration:.1},2.5);
+  tl.to("#dl-lab",{opacity:0,duration:.1},2.5);
+  tl.to("#dl-lab2",{opacity:1,duration:.15},2.5);
+  tl.to("#dl-pct",{color:"#9BFF5A",textShadow:"0 0 28px rgba(155,255,90,.6)",duration:.15},2.5);
+  tl.to("#dl-fill",{background:"linear-gradient(90deg,#7de03e,#9BFF5A)",boxShadow:"0 0 22px #9BFF5A",duration:.15},2.5);
+  tl.fromTo("#dl-card",{opacity:0,y:30},{opacity:1,y:0,duration:.3,ease:"power3.out",immediateRender:false},2.3);
+  tl.fromTo("#dl-r1",{opacity:0,y:16},{opacity:1,y:0,duration:.25,ease:"power3.out",immediateRender:false},2.42);
+  tl.fromTo("#dl-r2",{opacity:0,y:16},{opacity:1,y:0,duration:.25,ease:"power3.out",immediateRender:false},2.7);
+  tl.fromTo("#dl-r3",{opacity:0,y:16},{opacity:1,y:0,duration:.25,ease:"power3.out",immediateRender:false},2.98);
+  tl.fromTo("#dl-r1 .dl-tick",{scale:0},{scale:1,duration:.3,ease:"back.out(3)",immediateRender:false},2.42);
+  tl.fromTo("#dl-r2 .dl-tick",{scale:0},{scale:1,duration:.3,ease:"back.out(3)",immediateRender:false},2.7);
+  tl.fromTo("#dl-r3 .dl-tick",{scale:0},{scale:1,duration:.3,ease:"back.out(3)",immediateRender:false},2.98);
+
+  window.__timelines["06-download"] = tl;
+})();
+</script>
+</div>
+</template>

@@ -1,0 +1,16 @@
+# voice starts at frame t=0; seconds are frame-local
+0.30-0.60  Mobie
+0.64-0.85  checks
+0.94-1.02  your
+1.07-1.28  RAM
+1.45-1.54  and
+1.58-1.88  storage
+1.96-2.41  first,
+2.60-2.73  so
+2.77-2.86  you
+2.90-3.03  never
+3.12-3.46  download
+3.54-3.71  something
+3.88-3.97  that
+4.01-4.14  won't
+4.22-4.49  fit.

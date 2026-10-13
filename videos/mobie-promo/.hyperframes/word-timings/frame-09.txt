@@ -1,0 +1,13 @@
+# voice starts at frame t=0; seconds are frame-local
+0.30-0.85  Mobie.
+1.11-1.28  Your
+1.36-1.81  AI,
+2.00-2.71  offline.
+2.94-3.24  Free
+3.41-3.54  and
+3.58-3.75  open
+3.92-4.42  source.
+4.69-4.95  Grab
+4.99-5.04  it
+5.08-5.12  on
+5.16-5.56  GitHub.

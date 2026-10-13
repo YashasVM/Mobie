@@ -1,0 +1,67 @@
+<template>
+<div id="f07-root" data-composition-id="07-chat" data-width="1920" data-height="1080" data-start="0" data-duration="5.269">
+<style>
+@font-face {font-family:"IBM Plex Mono";src:url("assets/fonts/plex_mono_regular.ttf");font-weight:400;}
+@font-face {font-family:"IBM Plex Mono";src:url("assets/fonts/plex_mono_semibold.ttf");font-weight:600;}
+@font-face {font-family:"IBM Plex Mono";src:url("assets/fonts/plex_mono_bold.ttf");font-weight:700;}
+#f07-root {position:relative;width:100%;height:100%;overflow:hidden;background:#0C0C0B;color:#D6D3C8;font-family:"IBM Plex Mono",monospace;}
+.f07-bar {position:absolute;inset:0 0 auto;height:48px;background:#FFB547;color:#0C0C0B;font-size:22px;line-height:48px;font-weight:600;}
+.f07-left {position:absolute;left:200px;display:flex;}
+.f07-right {position:absolute;right:200px;display:flex;}
+.f07-bar span {padding:0 14px;}
+.f07-bar .on {background:#0C0C0B;color:#FFB547;}
+.f07-header {position:absolute;left:200px;top:112px;width:1520px;display:flex;align-items:center;gap:20px;font-size:30px;color:#FFB547;letter-spacing:.04em;}
+.f07-header i {flex:1;border-top:1px dashed #504D48;}
+.f07-big {position:absolute;left:200px;top:190px;font-size:96px;line-height:120px;font-weight:600;letter-spacing:-.01em;}
+.f07-term {position:absolute;left:200px;top:360px;width:1520px;border-left:2px solid #504D48;padding-left:28px;font-size:38px;line-height:66px;}
+#f07-root .amber {color:#FFB547;}
+#f07-root .green {color:#8FD16A;}
+#f07-root .yellow {color:#E8D27A;}
+#f07-root .blue {color:#7FB4D9;}
+#f07-root .muted {color:#AAA79D;}
+#f07-root .reveal {opacity:0;}
+#f07-root .char {display:none;}
+#f07-root .cursor {display:inline-block;width:.6em;height:1em;background:#FFB547;vertical-align:-.12em;margin-left:4px;}
+.f07-note {position:absolute;left:200px;top:920px;font-size:30px;color:#AAA79D;}
+#f07-answer {max-width:1450px;} #f07-title {opacity:0;}
+</style>
+<div class="f07-bar"><div class="f07-left"><span class="">0:mobie</span><span class="">1:about</span><span class="">2:browse</span><span class="">3:pull</span><span class="on">4:chat</span><span class="">5:privacy</span></div><div class="f07-right"><span>github</span><span>download</span></div></div>
+<div class="f07-header"><b>CHAT</b><i></i></div>
+
+<div class="f07-big" id="f07-title">just <span class="amber">chat.</span></div>
+<div class="f07-term">
+<div class="muted">[airplane mode: on]</div>
+<div><span class="amber">you › </span><span id="f07-prompt"></span></div>
+<div id="f07-answer" class="reveal"><span class="blue">ai  › </span><span id="f07-reply"></span><span class="cursor" id="f07-cursor"></span></div>
+<div id="f07-local" class="reveal muted" style="margin-top:46px">generated on-device · <span id="f07-private">0 bytes sent</span></div>
+</div>
+<div class="f07-note">illustrative conversation · works offline after download</div>
+
+<script>
+const tl=gsap.timeline({paused:true});
+function show(id,t){tl.fromTo(id,{opacity:0},{opacity:1,duration:0.01},t);}
+function type(id,text,start,end){
+ const el=document.querySelector(id);
+ for(let i=0;i<text.length;i++){
+  const s=document.createElement('span');s.className='char';s.textContent=text[i];el.appendChild(s);
+  tl.set(s,{display:'inline'},start+(end-start)*i/Math.max(1,text.length-1));
+ }
+}
+function blink(id,start,end){
+ tl.set(id,{opacity:1},start);
+ for(let t=start+.5,k=0;t<end;t+=.5,k++)tl.set(id,{opacity:k%2?1:0},t);
+}
+
+show('#f07-title',.469);
+type('#f07-prompt','three names for a cozy coffee shop?',.30,1.30);
+show('#f07-answer',1.92);
+const words=['Sure.','Ember & Oak,','The Slow Pour,','and Little Lantern.'];
+const reply=document.querySelector('#f07-reply');
+words.forEach((w,i)=>{const s=document.createElement('span');s.className='char';s.textContent=w+' ';reply.appendChild(s);tl.set(s,{display:'inline'},1.92+i*.42);});
+blink('#f07-cursor',1.92,4.989);
+show('#f07-local',3.584);
+tl.set('#f07-private',{backgroundColor:'#FFB547',color:'#0C0C0B'},4.011);
+
+window.__timelines["07-chat"]=tl;</script>
+</div>
+</template>

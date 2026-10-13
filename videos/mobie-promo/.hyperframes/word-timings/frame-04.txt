@@ -1,0 +1,8 @@
+# voice starts at frame t=0; seconds are frame-local
+0.26-0.64  Browse
+0.72-1.36  mobile-ready
+1.49-1.75  models
+1.92-2.52  straight
+2.60-2.69  from
+2.73-2.90  Hugging
+3.03-3.36  Face.

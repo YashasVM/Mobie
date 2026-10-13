@@ -1,0 +1,13 @@
+# voice starts at frame t=0; seconds are frame-local
+0.34-0.43  Then
+0.47-0.60  just
+0.64-1.11  chat.
+1.41-1.75  Replies
+1.92-2.13  stream
+2.22-2.54  in,
+2.77-3.16  generated
+3.29-3.41  by
+3.46-3.54  your
+3.58-3.97  phone's
+4.01-4.18  own
+4.39-4.74  chip.
