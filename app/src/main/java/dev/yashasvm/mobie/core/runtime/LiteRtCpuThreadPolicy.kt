@@ -19,15 +19,16 @@ internal object LiteRtCpuThreadPolicy {
      * threads past four mostly add heat and contention with the UI thread; users can still pick
      * up to eight to measure their own device. If frequencies are unreadable or show no
      * clear cluster split, it falls back to a conservative 2 threads.
+     * [frequenciesKhz] is read only for Auto; explicit overrides require no topology I/O.
      */
     fun threadCount(
-        frequenciesKhz: Map<Int, Int> = readMaxFrequencies(),
+        frequenciesKhz: () -> Map<Int, Int> = ::readMaxFrequencies,
         availableProcessors: Int = Runtime.getRuntime().availableProcessors(),
         override: Int? = null,
     ): Int {
         if (override != null) return requireNotNull(CpuThreadPolicy.clamp(override, availableProcessors))
         val online = availableProcessors.coerceAtLeast(1)
-        val measured = frequenciesKhz.filterKeys { it < online }.values.filter { it > 0 }
+        val measured = frequenciesKhz().filterKeys { it < online }.values.filter { it > 0 }
         if (measured.size < 2) return minOf(2, online)
         val levels = measured.distinct().sorted()
         if (levels.size < 2) return minOf(2, online)

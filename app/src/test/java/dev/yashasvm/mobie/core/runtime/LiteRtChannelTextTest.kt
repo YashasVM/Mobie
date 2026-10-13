@@ -31,4 +31,27 @@ class LiteRtChannelTextTest {
         val split = LiteRtChannelText.split(mapOf("cot" to "step"), reasoning)
         assertEquals(LiteRtChannelText.Split("step", ""), split)
     }
+
+    @Test
+    fun singleVisibleChannelPreservesWhitespaceAndUnicode() {
+        assertEquals(
+            LiteRtChannelText.Split("", "  Hello 🌍\n"),
+            LiteRtChannelText.split(mapOf("text" to "  Hello 🌍\n"), reasoning),
+        )
+    }
+
+    @Test
+    fun singleMixedCaseReasoningChannelStaysSeparate() {
+        assertEquals(
+            LiteRtChannelText.Split("step", ""),
+            LiteRtChannelText.split(mapOf("ThInKiNg" to "step"), reasoning),
+        )
+    }
+
+    @Test
+    fun emptySingleChannelHasNoText() {
+        for (channel in listOf("text", "Analysis")) {
+            assertEquals(LiteRtChannelText.Split("", ""), LiteRtChannelText.split(mapOf(channel to ""), reasoning))
+        }
+    }
 }

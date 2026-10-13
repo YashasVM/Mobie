@@ -53,25 +53,27 @@ internal object LiteRtContextWindowPolicy {
         maxContextTokens = maxContextTokens,
         dynamicContext = dynamicContext,
         requested = requestedContextTokens,
-        automatic = select(
-            advertisedContextWindowTokens = advertisedContextWindowTokens,
-            modelWeightsBytes = modelWeightsBytes,
-            totalRamBytes = totalRamBytes,
-            availableRamBytes = availableRamBytes,
-            lowMemoryThresholdBytes = lowMemoryThresholdBytes,
-            isLowRamDevice = isLowRamDevice,
-            backend = backend,
-        ),
+        automatic = {
+            select(
+                advertisedContextWindowTokens = advertisedContextWindowTokens,
+                modelWeightsBytes = modelWeightsBytes,
+                totalRamBytes = totalRamBytes,
+                availableRamBytes = availableRamBytes,
+                lowMemoryThresholdBytes = lowMemoryThresholdBytes,
+                isLowRamDevice = isLowRamDevice,
+                backend = backend,
+            )
+        },
     )
 
-    /** Throws when a request cannot be honoured. Shared with [ComputeCapabilities.resolveContext]. */
-    fun resolveRequested(maxContextTokens: Int, dynamicContext: Boolean, requested: Int?, automatic: Int): Int {
+    /** Validates first; reads [automatic] only for dynamic Auto context. */
+    fun resolveRequested(maxContextTokens: Int, dynamicContext: Boolean, requested: Int?, automatic: () -> Int): Int {
         require(maxContextTokens > 0) { "The artifact has no known context limit." }
         if (!dynamicContext) {
             require(requested == null || requested == maxContextTokens) { "This artifact requires a fixed $maxContextTokens-token context." }
             return maxContextTokens
         }
         require(requested == null || requested <= maxContextTokens) { "The requested context exceeds the artifact's $maxContextTokens-token limit." }
-        return requested ?: minOf(automatic, maxContextTokens)
+        return requested ?: minOf(automatic(), maxContextTokens)
     }
 }

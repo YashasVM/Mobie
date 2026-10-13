@@ -36,13 +36,36 @@ class ComputeOptionsTest {
     @Test fun dynamicContextIsBoundedByArtifactAndStaticContextCannotChange() {
         val dynamic = ComputeCapabilities(2_048, true, false, false)
         assertEquals(listOf(1_024, 2_048), dynamic.contextChoices())
-        assertEquals(2_048, dynamic.resolveContext(null, 4_096))
-        assertEquals(1_024, dynamic.resolveContext(1_024, 4_096))
-        assertThrows(IllegalArgumentException::class.java) { dynamic.resolveContext(4_096, 4_096) }
+        assertEquals(2_048, dynamic.resolveContext(null) { 4_096 })
+        assertEquals(1_024, dynamic.resolveContext(1_024) { 4_096 })
+        assertThrows(IllegalArgumentException::class.java) { dynamic.resolveContext(4_096) { 4_096 } }
         val fixed = dynamic.copy(dynamicContext = false)
         assertEquals(listOf(2_048), fixed.contextChoices())
-        assertEquals(2_048, fixed.resolveContext(null, 1_024))
-        assertThrows(IllegalArgumentException::class.java) { fixed.resolveContext(1_024, 4_096) }
+        assertEquals(2_048, fixed.resolveContext(null) { 1_024 })
+        assertThrows(IllegalArgumentException::class.java) { fixed.resolveContext(1_024) { 4_096 } }
+    }
+
+    @Test fun fixedAndExplicitContextsDoNotReadMemoryForAnUnusedEstimate() {
+        val unavailableMemory = { error("Memory must not be read to choose this context") }
+        val fixed = ComputeCapabilities(4_096, false, false, false)
+        assertEquals(4_096, fixed.resolveContext(null, unavailableMemory))
+        assertEquals(4_096, fixed.resolveContext(4_096, unavailableMemory))
+        assertThrows(IllegalArgumentException::class.java) { fixed.resolveContext(1_024, unavailableMemory) }
+        val dynamic = fixed.copy(dynamicContext = true, maxContextTokens = 2_048)
+        assertEquals(1_024, dynamic.resolveContext(1_024, unavailableMemory))
+        assertThrows(IllegalArgumentException::class.java) { dynamic.resolveContext(4_096, unavailableMemory) }
+        assertThrows(IllegalArgumentException::class.java) { fixed.copy(maxContextTokens = 0).resolveContext(null, unavailableMemory) }
+    }
+
+    @Test fun dynamicAutoContextUsesFreshMemoryEstimateAndArtifactLimit() {
+        val dynamic = ComputeCapabilities(2_048, true, false, false)
+        var estimate = 4_096
+        var reads = 0
+        val automatic = { reads += 1; estimate }
+        assertEquals(2_048, dynamic.resolveContext(null, automatic))
+        estimate = 1_024
+        assertEquals(1_024, dynamic.resolveContext(null, automatic))
+        assertEquals(2, reads)
     }
 
     @Test fun optionalFeaturesRequireArtifactSupport() {

@@ -521,12 +521,15 @@ class LiteRtLmRuntimeAdapter(
             memoryBlockReason(modelPath, contexts.getValue(backend), allowReclaim, vision, backend)
         }
         admitted.skippedReason?.let { Log.w("MobieCompute", it) }
+        // Resolve topology only if CPU is actually attempted, then reuse that exact count in stats.
+        // This cache lasts one load, so the next load observes any change in available processors.
+        val cpuThreads by lazy { LiteRtCpuThreadPolicy.threadCount(override = options.cpuThreads) }
         val result = loadWithBackendFallback(
             attempts = admitted.attempts,
             load = { backend ->
                 val contextWindowTokens = contexts.getValue(backend)
                 Log.i("MobieCompute", "Loading ${backend.name}; LiteRT-LM ${BuildConfig.LITERT_LM_VERSION}; context=$contextWindowTokens")
-                val threads = cpuThreadsFor(backend, options)
+                val threads = if (backend == ComputeBackend.CPU) cpuThreads else null
                 val nativeBackend = when (backend) {
                     ComputeBackend.CPU -> Backend.CPU(threadCount = threads)
                     ComputeBackend.GPU -> Backend.GPU()
@@ -554,7 +557,7 @@ class LiteRtLmRuntimeAdapter(
         return result.value.copy(
             compute = ActiveCompute(
                 backend = result.backend,
-                cpuThreads = cpuThreadsFor(result.backend, options),
+                cpuThreads = if (result.backend == ComputeBackend.CPU) cpuThreads else null,
                 contextTokens = result.value.contextWindowTokens,
                 fallbackReason = listOfNotNull(admitted.skippedReason, result.fallbackReason)
                     .joinToString(" ").ifEmpty { null },
@@ -562,9 +565,6 @@ class LiteRtLmRuntimeAdapter(
             rememberPreferred = ComputeBackendPolicy.shouldRememberSuccess(options.backend, admitted.attempts, result.backend),
         )
     }
-
-    private fun cpuThreadsFor(backend: ComputeBackend, options: ComputeOptions): Int? =
-        if (backend == ComputeBackend.CPU) LiteRtCpuThreadPolicy.threadCount(override = options.cpuThreads) else null
 
     private fun initializeEngine(modelPath: String, textBackend: Backend, visionBackend: Backend?, contextWindowTokens: Int, options: ComputeOptions): Engine {
         val modelFile = File(modelPath)
@@ -726,14 +726,11 @@ class LiteRtLmRuntimeAdapter(
         capabilities: ComputeCapabilities,
         requested: Int?,
         backend: ComputeBackend,
-    ): Int {
+    ): Int = capabilities.resolveContext(requested) {
         val manager = appContext.getSystemService(ActivityManager::class.java)
         val memory = MemorySnapshotReader(manager).read()
         val modelFile = File(modelPath)
-        return LiteRtContextWindowPolicy.contextFor(
-            maxContextTokens = capabilities.maxContextTokens,
-            dynamicContext = capabilities.dynamicContext,
-            requestedContextTokens = requested,
+        LiteRtContextWindowPolicy.select(
             advertisedContextWindowTokens = runtimeContextWindowTokens(modelPath),
             modelWeightsBytes = modelFile.length(),
             totalRamBytes = memory.totalBytes,

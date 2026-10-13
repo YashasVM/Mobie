@@ -43,7 +43,7 @@ data class ComputeCapabilities(
     fun contextChoices(): List<Int> = if (dynamicContext) listOf(1_024, 2_048, 4_096).filter { it <= maxContextTokens }
         else listOf(maxContextTokens).filter { it in 1_024..4_096 }
 
-    internal fun resolveContext(requested: Int?, automatic: Int): Int =
+    internal fun resolveContext(requested: Int?, automatic: () -> Int): Int =
         LiteRtContextWindowPolicy.resolveRequested(maxContextTokens, dynamicContext, requested, automatic)
 
     internal fun validate(options: ComputeOptions) {
