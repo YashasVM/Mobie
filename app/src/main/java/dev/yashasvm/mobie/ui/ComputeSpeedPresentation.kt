@@ -47,9 +47,13 @@ internal fun decodeSpeedLabel(speed: DecodeSpeed): String {
     return if (low == high) "≈$low tokens/s" else "$low–$high tokens/s"
 }
 
-internal fun decodeSpeedSourceLabel(speed: DecodeSpeed): String = when (speed.source) {
+/** A measurement counts as "on this phone" only for the same thread count and context size. */
+internal fun decodeSpeedSourceLabel(speed: DecodeSpeed, exactSettings: Boolean = true): String = when (speed.source) {
     DecodeSpeedSource.ESTIMATED -> if (speed.confidence == DecodeSpeedConfidence.LOW) "estimate · lower confidence" else "estimate"
-    DecodeSpeedSource.MEASURED -> "measured on this phone · ${if (speed.sampleCount == 1) "last run" else "${speed.sampleCount} recent runs"}"
+    DecodeSpeedSource.MEASURED -> {
+        val runs = if (speed.sampleCount == 1) "last run" else "${speed.sampleCount} recent runs"
+        if (exactSettings) "measured on this phone · $runs" else "measured at different settings · $runs"
+    }
 }
 
 /** One backend row's RAM, e.g. `needs ~3.6 GB RAM · Free memory first`; null when the size is unknown. */

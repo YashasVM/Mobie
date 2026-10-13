@@ -87,7 +87,29 @@ internal inline fun <T : Any> replaceRuntimeResourceAfterClosingPrevious(
     installReplacement(replacement)
 }
 
+/**
+ * Reload order: admission (validation, memory, storage, thermal) runs while the previous runtime is
+ * still loaded. [release] runs only after admission succeeds, so a refused reload leaves the previous
+ * runtime loaded and usable. A refusal thrown by [admit] never reaches [release].
+ */
+internal inline fun <A> admitThenReleaseRuntime(admit: () -> A, release: () -> Unit): A {
+    val admitted = admit()
+    release()
+    return admitted
+}
+
+/**
+ * Only truly fatal VM states propagate. OutOfMemoryError, linkage failures and other Errors thrown
+ * by native code are reported as a runtime failure that needs a reload, so they cannot crash the app.
+ */
+internal fun isFatalRuntimeFailure(error: Throwable): Boolean =
+    error is VirtualMachineError && error !is OutOfMemoryError
+
+/** Plain-language event for a failure that escaped the native call. Errors leave native state uncertain. */
+internal fun runtimeFailureEvent(error: Throwable): InferenceEvent.Error =
+    InferenceEvent.Error(error.message ?: "Inference failed", requiresReload = error !is Exception)
+
 internal fun rethrowNonRecoverableRuntimeFailure(error: Throwable) {
     if (error is CancellationException) throw error
-    rethrowFatalRuntimeFailure(error)
+    if (isFatalRuntimeFailure(error)) throw error
 }

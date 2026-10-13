@@ -27,23 +27,23 @@ class DecodeSpeedStore(context: Context) {
         }, Build.FINGERPRINT, BuildConfig.LITERT_LM_VERSION)
     }
 
-    suspend fun read(identity: String): Map<ComputeBackend, DecodeSpeed> = withContext(Dispatchers.IO) {
+    suspend fun read(identity: String): List<DecodeMeasurement> = withContext(Dispatchers.IO) {
         mutex.withLock { readHistory(identity) }
     }
 
-    suspend fun record(identity: String, stats: InferenceStats): Map<ComputeBackend, DecodeSpeed> = withContext(Dispatchers.IO) {
-        // The requested backend may be Auto or may have changed after load. Only the actual
-        // backend reported with these SDK stats identifies what produced this measurement.
-        mutex.withLock {
-            stats.compute?.backend?.let { backend ->
-                history.record(identity, backend, stats.tokensPerSecond, stats.decodeTokenCount)
+    /** [settings] are the requested settings the loaded engine ran with, not what Auto happened to pick. */
+    suspend fun record(identity: String, stats: InferenceStats, settings: DecodeRunSettings): List<DecodeMeasurement> =
+        withContext(Dispatchers.IO) {
+            // The requested backend may be Auto or may have changed after load. Only the actual
+            // backend reported with these SDK stats identifies what produced this measurement.
+            mutex.withLock {
+                stats.compute?.backend?.let { backend ->
+                    history.record(identity, backend, settings, stats.tokensPerSecond, stats.decodeTokenCount)
+                }
+                readHistory(identity)
             }
-            readHistory(identity)
         }
-    }
 
-    private fun readHistory(identity: String): Map<ComputeBackend, DecodeSpeed> =
-        listOf(ComputeBackend.CPU, ComputeBackend.GPU).mapNotNull { backend ->
-            history.read(identity, backend)?.let { backend to it }
-        }.toMap()
+    private fun readHistory(identity: String): List<DecodeMeasurement> =
+        listOf(ComputeBackend.CPU, ComputeBackend.GPU).flatMap { backend -> history.read(identity, backend) }
 }

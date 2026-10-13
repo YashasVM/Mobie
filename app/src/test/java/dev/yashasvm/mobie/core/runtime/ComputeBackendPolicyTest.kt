@@ -52,9 +52,20 @@ class ComputeBackendPolicyTest {
     }
 
     @Test fun explicitBackendsNeverSilentlyFallback() {
-        assertEquals(listOf(ComputeBackend.GPU), ComputeBackendPolicy.attempts(ComputeBackend.GPU, false, null))
+        assertEquals(listOf(ComputeBackend.GPU), ComputeBackendPolicy.attempts(ComputeBackend.GPU, true, null))
         assertEquals(listOf(ComputeBackend.CPU), ComputeBackendPolicy.attempts(ComputeBackend.CPU, true, null))
         assertEquals(emptyList<ComputeBackend>(), ComputeBackendPolicy.attempts(ComputeBackend.NPU, true, null))
+    }
+
+    @Test fun explicitGpuFailsFastWhenTheDeviceCannotRunIt() {
+        // An emulator or non-arm64 device is never attempted, so the load is refused before anything is released.
+        assertEquals(emptyList<ComputeBackend>(), ComputeBackendPolicy.attempts(ComputeBackend.GPU, false, null))
+        val reason = ComputeBackendPolicy.unavailableReason(ComputeBackend.GPU, gpuPlausible = false)
+        assertEquals("GPU is not available on this device. Choose CPU or Auto to load this model.", reason)
+        assertNull(ComputeBackendPolicy.unavailableReason(ComputeBackend.GPU, gpuPlausible = true))
+        assertNull(ComputeBackendPolicy.unavailableReason(ComputeBackend.CPU, gpuPlausible = false))
+        assertNull(ComputeBackendPolicy.unavailableReason(ComputeBackend.AUTO, gpuPlausible = false))
+        assertTrue(ComputeBackendPolicy.unavailableReason(ComputeBackend.NPU, gpuPlausible = true)!!.contains("NPU"))
     }
 
     @Test fun memoryIsScopedToArtifactAndDeviceAndInvalidates() {

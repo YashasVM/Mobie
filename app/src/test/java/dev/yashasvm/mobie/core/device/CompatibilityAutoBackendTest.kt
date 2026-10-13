@@ -64,13 +64,27 @@ class CompatibilityAutoBackendTest {
     }
 
     @Test
-    fun `GPU impossible by total RAM falls back to CPU with a reason`() {
-        val threeGib = device(available = 3 * gib, total = 3 * gib)
-        val admission = resolver.resolveBackend(artifact(4_096), threeGib, backend = ComputeBackend.AUTO)
+    fun `GPU impossible even at its smallest context falls back to CPU with a reason`() {
+        // Total RAM leaves room for CPU at 4096 but not for GPU at its minimum 1024-token context.
+        val budget = (estimate(ComputeBackend.GPU, 1_024) + estimate(ComputeBackend.CPU, 4_096)) / 2
+        val phone = device(available = budget + threshold, total = budget + threshold)
+        val admission = resolver.resolveBackend(artifact(4_096), phone, backend = ComputeBackend.AUTO)
 
         assertEquals(ComputeBackend.CPU, admission.backend)
         assertEquals(Compatibility.COMPATIBLE, admission.result.status)
         assertTrue(admission.result.reason.contains("more than this phone can provide safely"))
+    }
+
+    @Test
+    fun `GPU that only fits at a shorter context is judged at that context`() {
+        // Auto's context follows total RAM per backend, so a 3 GiB phone runs GPU at what it can hold.
+        val threeGib = device(available = 3 * gib, total = 3 * gib)
+        val admission = resolver.resolveBackend(artifact(4_096), threeGib, backend = ComputeBackend.AUTO)
+
+        assertEquals(ComputeBackend.GPU, admission.backend)
+        val context = admission.result.contextWindowTokens
+        assertTrue("GPU context $context must be shorter than 4096", context in 1_024 until 4_096)
+        assertEquals(estimate(ComputeBackend.GPU, context), admission.result.estimatedRamBytes)
     }
 
     @Test

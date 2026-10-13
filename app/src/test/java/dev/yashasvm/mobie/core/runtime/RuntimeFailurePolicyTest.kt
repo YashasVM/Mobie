@@ -305,10 +305,35 @@ class RuntimeFailurePolicyTest {
     @Test
     fun generationBoundaryRethrowsFatalVmErrors() {
         try {
-            rethrowNonRecoverableRuntimeFailure(OutOfMemoryError("fatal generation"))
-            fail("OutOfMemoryError should propagate")
-        } catch (error: OutOfMemoryError) {
+            rethrowNonRecoverableRuntimeFailure(InternalError("fatal generation"))
+            fail("InternalError should propagate")
+        } catch (error: InternalError) {
             assertEquals("fatal generation", error.message)
         }
+    }
+
+    @Test
+    fun generationBoundaryDoesNotRethrowOutOfMemory() {
+        rethrowNonRecoverableRuntimeFailure(OutOfMemoryError("recoverable by reload"))
+    }
+
+    @Test
+    fun errorsBecomeReloadRequiredEventsAndExceptionsDoNot() {
+        val error = runtimeFailureEvent(OutOfMemoryError("oom"))
+        assertEquals("oom", error.message)
+        assertTrue(error.requiresReload)
+
+        val exception = runtimeFailureEvent(IllegalStateException("recoverable"))
+        assertEquals("recoverable", exception.message)
+        assertFalse(exception.requiresReload)
+    }
+
+    @Test
+    fun onlyTrulyFatalVmErrorsAreFatal() {
+        assertFalse(isFatalRuntimeFailure(OutOfMemoryError()))
+        assertFalse(isFatalRuntimeFailure(LinkageError("native library missing")))
+        assertFalse(isFatalRuntimeFailure(IllegalStateException()))
+        assertTrue(isFatalRuntimeFailure(InternalError()))
+        assertTrue(isFatalRuntimeFailure(UnknownError()))
     }
 }

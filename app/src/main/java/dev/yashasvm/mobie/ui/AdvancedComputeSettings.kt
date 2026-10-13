@@ -7,6 +7,7 @@ import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.BuildConfig
 import java.security.MessageDigest
+import dev.yashasvm.mobie.core.runtime.ActiveCompute
 import dev.yashasvm.mobie.core.runtime.ActivationType
 import dev.yashasvm.mobie.core.runtime.ComputeBackend
 import dev.yashasvm.mobie.core.runtime.ComputeCapabilities
@@ -112,10 +113,33 @@ internal object AdvancedComputePolicy {
     fun canApply(state: RuntimeState, downloaded: Boolean): Boolean = downloaded &&
         state !in setOf(RuntimeState.GENERATING, RuntimeState.LOADING, RuntimeState.STOPPING)
 
-    fun needsApply(options: ComputeOptions, sampler: SamplerSettings, applied: ComputeOptions?, appliedSampler: SamplerSettings?): Boolean =
-        options.copy(artifactIdentity = "") != (applied ?: ComputeOptions()).copy(artifactIdentity = "") ||
+    /** Pending changes only exist against a loaded engine. With nothing loaded, saved settings wait for the next load. */
+    fun needsApply(options: ComputeOptions, sampler: SamplerSettings, applied: ComputeOptions?, appliedSampler: SamplerSettings?): Boolean {
+        if (applied == null) return false
+        return options.copy(artifactIdentity = "") != applied.copy(artifactIdentity = "") ||
             sampler != (appliedSampler ?: SamplerSettings())
+    }
 }
+
+/**
+ * Plain copy for a reload that was refused or failed. When the previous engine is still running,
+ * the message names it, so the user knows what is answering.
+ */
+internal fun keptRunningMessage(keptEngine: ActiveCompute?, reason: String): String =
+    keptEngine?.let { "Kept running on ${it.backend.name}. $reason" } ?: reason
+
+/**
+ * The state after a refused reload: the runtime fields go back to what they were before Apply, so
+ * chat and runtime state agree with the engine that is still loaded (or with nothing loaded).
+ */
+internal fun MobieUiState.afterRefusedReload(previous: MobieUiState, keptEngine: ActiveCompute?, reason: String): MobieUiState = copy(
+    chatting = previous.chatting,
+    runtimeState = previous.runtimeState,
+    activeCompute = previous.activeCompute,
+    stats = previous.stats,
+    telemetry = previous.telemetry,
+    error = keptRunningMessage(keptEngine, reason),
+)
 
 /** Uses the existing runtime_compute preferences, including its typed backend/thread keys. */
 internal fun RuntimeComputeSettings.readAdvancedOptions(coreCount: Int): ComputeOptions {

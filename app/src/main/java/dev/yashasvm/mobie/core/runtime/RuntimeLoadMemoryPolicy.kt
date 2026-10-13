@@ -91,6 +91,11 @@ internal object RuntimeLoadMemoryPolicy {
         allowReclaim: Boolean = false,
         backend: ComputeBackend = ComputeBackend.CPU,
         visionEncoderLoaded: Boolean = false,
+        /**
+         * RAM held by the runtime this load replaces. A reload is admitted before that runtime is
+         * released, so its estimate counts as available here instead of being measured after release.
+         */
+        reclaimableBytes: Long = 0L,
     ): String? {
         if (thermalStatus >= THERMAL_STATUS_CRITICAL) {
             return "Android reports critical thermal pressure. Let the device cool before loading a local model."
@@ -103,9 +108,30 @@ internal object RuntimeLoadMemoryPolicy {
             format = ModelFormat.LITERT_LM, contextWindowTokens = contextWindowTokens),
             backend, visionEncoderLoaded)
             ?: return "Model memory could not be estimated."
-        return admit(estimate, totalRamBytes, availableRamBytes, availableAfterReclaimBytes,
-            lowMemoryThresholdBytes, isLowMemory, isLowRamDevice).blockReason(allowReclaim)
+        val reclaimable = reclaimableBytes.coerceAtLeast(0L)
+        if (reclaimable == 0L) {
+            return admit(estimate, totalRamBytes, availableRamBytes, availableAfterReclaimBytes,
+                lowMemoryThresholdBytes, isLowMemory, isLowRamDevice).blockReason(allowReclaim)
+        }
+        // With credit, the low-memory flag is re-derived from the credited availability, because
+        // releasing the replaced engine is what would clear it.
+        val nowAvailable = availableRamBytes + reclaimable
+        return admit(estimate, totalRamBytes, nowAvailable, availableAfterReclaimBytes + reclaimable,
+            lowMemoryThresholdBytes, isLowMemory && nowAvailable <= lowMemoryThresholdBytes, isLowRamDevice)
+            .blockReason(allowReclaim)
     }
+
+    /** Estimated RAM of one loaded engine. A reload credits this as reclaimable until the engine is released. */
+    fun estimatedRamBytes(
+        modelWeightsBytes: Long,
+        contextWindowTokens: Int,
+        backend: ComputeBackend,
+        visionEncoderLoaded: Boolean,
+    ): Long = estimate(
+        ModelArtifact("model.litertlm", "", modelWeightsBytes,
+            format = ModelFormat.LITERT_LM, contextWindowTokens = contextWindowTokens),
+        backend, visionEncoderLoaded,
+    )?.estimatedRamBytes ?: 0L
 
     fun generationBlockReason(
         isLowMemory: Boolean,
