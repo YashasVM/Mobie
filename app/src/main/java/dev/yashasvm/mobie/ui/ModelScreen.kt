@@ -71,6 +71,10 @@ import dev.yashasvm.mobie.core.device.CpuThreadPolicy
 import dev.yashasvm.mobie.core.device.DecodeSpeedEstimator
 import dev.yashasvm.mobie.core.device.HardwareProfile
 import dev.yashasvm.mobie.core.runtime.ComputeBackend
+import dev.yashasvm.mobie.core.runtime.ComputeOptions
+import dev.yashasvm.mobie.core.runtime.ComputeCapabilities
+import dev.yashasvm.mobie.core.runtime.ActiveCompute
+import dev.yashasvm.mobie.core.runtime.SamplerSettings
 import dev.yashasvm.mobie.data.download.DownloadProgress
 import dev.yashasvm.mobie.data.download.isCancellable
 import dev.yashasvm.mobie.ui.theme.Mobie
@@ -89,6 +93,10 @@ internal fun ModelScreen(
     onBack: () -> Unit = {},
     onBackendChange: (ComputeBackend) -> Unit = {},
     onCpuThreadsChange: (Int?) -> Unit = {},
+    onComputeOptionsChange: (ComputeOptions) -> Unit = {},
+    onSamplerChange: (SamplerSettings) -> String? = { null },
+    onApplyCompute: () -> Unit = {},
+    onResetCompute: () -> Unit = {},
     onMemoryRefresh: () -> Unit = {},
     onFreeMemory: (() -> Unit) -> Unit = { it() },
 ) {
@@ -128,6 +136,17 @@ internal fun ModelScreen(
                     measuredSpeeds = state.measuredDecodeSpeeds,
                     onBackendChange = onBackendChange,
                     onCpuThreadsChange = onCpuThreadsChange,
+                    options = state.computeOptions,
+                    sampler = state.sampler,
+                    capabilities = state.computeCapabilities,
+                    activeCompute = state.activeCompute,
+                    needsApply = state.computeNeedsApply,
+                    runtimeState = state.runtimeState,
+                    downloaded = state.downloadedPath != null,
+                    onOptionsChange = onComputeOptionsChange,
+                    onSamplerChange = onSamplerChange,
+                    onApply = onApplyCompute,
+                    onReset = onResetCompute,
                     modifier = Modifier.entrance(entrance, "compute", 5),
                 )
             }
@@ -512,9 +531,20 @@ internal fun ComputeSettingsPanel(
     hardware: HardwareProfile? = null,
     artifactSizeBytes: Long = 0,
     measuredSpeeds: Map<ComputeBackend, DecodeSpeed> = emptyMap(),
+    options: ComputeOptions = ComputeOptions(backend = backend, cpuThreads = cpuThreads),
+    sampler: SamplerSettings = SamplerSettings(),
+    capabilities: ComputeCapabilities? = null,
+    activeCompute: ActiveCompute? = null,
+    needsApply: Boolean = false,
+    runtimeState: RuntimeState = RuntimeState.IDLE,
+    downloaded: Boolean = false,
+    onOptionsChange: (ComputeOptions) -> Unit = { onBackendChange(it.backend); onCpuThreadsChange(it.cpuThreads) },
+    onSamplerChange: (SamplerSettings) -> String? = { null },
+    onApply: () -> Unit = {},
+    onReset: () -> Unit = { onOptionsChange(ComputeOptions()); onSamplerChange(SamplerSettings()) },
 ) {
     val coreCount = hardware?.cpuCoreCount?.takeIf { it > 0 } ?: Runtime.getRuntime().availableProcessors()
-    val selectedThreads = CpuThreadPolicy.clamp(cpuThreads, coreCount)
+    var inputsValid by remember { mutableStateOf(true) }
     TuiWindow("compute", modifier.fillMaxWidth().testTag("compute_settings")) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -527,19 +557,20 @@ internal fun ComputeSettingsPanel(
                 }
             }
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                FlagHeader("--backend", "where the model runs")
+                FlagHeader("Run on", "where the model runs")
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(ComputeBackend.AUTO, ComputeBackend.CPU, ComputeBackend.GPU).forEach { choice ->
                         FlagChoice(
-                            label = choice.name.lowercase(Locale.US),
+                            label = if (choice == ComputeBackend.AUTO) "Auto" else choice.name,
                             selected = backend == choice,
                             onClick = { onBackendChange(choice) },
+                            modifier = Modifier.testTag("backend_${choice.name}"),
                         )
                     }
                 }
             }
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                FlagHeader("--speed", "text generation on this phone")
+                FlagHeader("Generation speed", "tokens per second")
                 listOf(ComputeBackend.CPU, ComputeBackend.GPU).forEach { choice ->
                     val prediction = remember(hardware, artifactSizeBytes, choice, measuredSpeeds[choice]) {
                         DecodeSpeedEstimator.predict(hardware, artifactSizeBytes, choice, measuredSpeeds[choice])
@@ -555,27 +586,30 @@ internal fun ComputeSettingsPanel(
                         }
                     }
                 }
-                Text("Estimates use model size and assumed memory bandwidth. Heat, context and CPU threads affect speed. Run a reply to measure it.",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                FlagHeader("--threads", "cpu threads")
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FlagChoice("auto", selected = selectedThreads == null, onClick = { onCpuThreadsChange(null) })
-                    (1..CpuThreadPolicy.limit(coreCount)).forEach { count ->
-                        FlagChoice(
-                            label = count.toString(),
-                            selected = selectedThreads == count,
-                            onClick = { onCpuThreadsChange(count) },
-                        )
-                    }
+            activeCompute?.fallbackReason?.let { reason ->
+                Text(reason, modifier = Modifier.testTag("compute_fallback"), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text("Auto tries GPU when it fits, then CPU if needed. GPU support is checked when loading.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            AdvancedComputePanel(options, sampler, coreCount, capabilities, onOptionsChange, onSamplerChange, onReset) { inputsValid = it }
+            if (needsApply) {
+                Text("Changes need a reload. Your saved conversation will be kept.", modifier = Modifier.testTag("reload_prompt"),
+                    style = MaterialTheme.typography.bodySmall)
+                when {
+                    !inputsValid -> Text("Fix the highlighted fields before applying.", style = MaterialTheme.typography.bodySmall)
+                    runtimeState == RuntimeState.GENERATING || runtimeState == RuntimeState.STOPPING ->
+                        Text("Wait for the reply to finish, or stop it before applying changes.", style = MaterialTheme.typography.bodySmall)
+                    runtimeState == RuntimeState.LOADING -> Text("Wait for the model to finish loading.", style = MaterialTheme.typography.bodySmall)
+                    !downloaded -> Text("Download this model before applying. These settings are saved for its next load.", style = MaterialTheme.typography.bodySmall)
                 }
+                TermButton("Apply & reload", onClick = onApply, enabled = inputsValid && AdvancedComputePolicy.canApply(runtimeState, downloaded),
+                    modifier = Modifier.fillMaxWidth().testTag("apply_compute"))
+            } else {
+                Text("Settings apply when you load the model.", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Text(
-                "GPU support is checked when loading; a speed estimate does not confirm it. First GPU load can be slow. Auto tries GPU and falls back to CPU if needed. Changes apply on the next model load.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
 }
@@ -591,10 +625,10 @@ private fun FlagHeader(flag: String, hint: String) {
 
 /** A square option button. The selected option is filled, like an inverted tmux cursor. */
 @Composable
-private fun FlagChoice(label: String, selected: Boolean, onClick: () -> Unit) {
+internal fun FlagChoice(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val accent = MaterialTheme.colorScheme.primary
     Box(
-        Modifier
+        modifier
             .heightIn(min = 44.dp)
             .widthIn(min = 44.dp)
             .background(if (selected) accent else Color.Transparent)

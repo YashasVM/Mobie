@@ -1,6 +1,8 @@
 package dev.yashasvm.mobie.ui
 
 import dev.yashasvm.mobie.core.device.CpuThreadPolicy
+import dev.yashasvm.mobie.BuildConfig
+import java.security.MessageDigest
 import dev.yashasvm.mobie.core.runtime.ActivationType
 import dev.yashasvm.mobie.core.runtime.ComputeBackend
 import dev.yashasvm.mobie.core.runtime.ComputeCapabilities
@@ -28,6 +30,26 @@ internal object AdvancedComputeSettingsCodec {
         )
     }
 
+    fun decodeCapabilities(values: Map<String, String?>, identity: String, runtimeVersion: String): ComputeCapabilities? {
+        if (values["capability_identity"] != capabilityIdentity(identity, runtimeVersion)) return null
+        val maximum = values["capability_max_context"]?.toIntOrNull()?.takeIf { it > 0 } ?: return null
+        val dynamic = values["capability_dynamic"]?.toBooleanStrictOrNull() ?: return null
+        val thinking = values["capability_thinking"]?.toBooleanStrictOrNull() ?: return null
+        val drafter = values["capability_drafter"]?.toBooleanStrictOrNull() ?: return null
+        return ComputeCapabilities(maximum, dynamic, thinking, drafter)
+    }
+
+    fun encodeCapabilities(capabilities: ComputeCapabilities, identity: String, runtimeVersion: String): Map<String, String> = mapOf(
+        "capability_identity" to capabilityIdentity(identity, runtimeVersion),
+        "capability_max_context" to capabilities.maxContextTokens.toString(),
+        "capability_dynamic" to capabilities.dynamicContext.toString(),
+        "capability_thinking" to capabilities.supportsThinking.toString(),
+        "capability_drafter" to capabilities.supportsSpeculativeDecoding.toString(),
+    )
+
+    private fun capabilityIdentity(identity: String, runtimeVersion: String): String = MessageDigest.getInstance("SHA-256")
+        .digest("$runtimeVersion\u0000$identity".toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+
     fun encode(options: ComputeOptions): Map<String, String?> = mapOf(
         "context_tokens" to options.contextTokens?.toString(),
         "max_output_tokens" to options.maxOutputTokens.toString(),
@@ -42,6 +64,7 @@ internal object AdvancedComputeSettingsCodec {
 internal object AdvancedComputePolicy {
     /** Unknown metadata never enables a context, reasoning or drafter override. */
     fun forArtifact(options: ComputeOptions, coreCount: Int, capabilities: ComputeCapabilities?): ComputeOptions = options.copy(
+        backend = options.backend.takeUnless { it == ComputeBackend.NPU } ?: ComputeBackend.AUTO,
         cpuThreads = CpuThreadPolicy.clamp(options.cpuThreads, coreCount),
         contextTokens = options.contextTokens?.takeIf { it in capabilities?.contextChoices().orEmpty() },
         thinkingEnabled = options.thinkingEnabled.takeIf { capabilities?.supportsThinking == true },
@@ -78,5 +101,15 @@ internal fun RuntimeComputeSettings.writeAdvancedOptions(options: ComputeOptions
     AdvancedComputeSettingsCodec.encode(options).forEach { (key, value) ->
         if (value == null) editor.remove(key) else editor.putString(key, value)
     }
+    editor.apply()
+}
+
+/** One bounded metadata cache entry, qualified only as header metadata for this exact artifact. */
+internal fun RuntimeComputeSettings.readCachedCapabilities(identity: String): ComputeCapabilities? =
+    AdvancedComputeSettingsCodec.decodeCapabilities(preferences.all.mapValues { it.value?.toString() }, identity, BuildConfig.LITERT_LM_VERSION)
+
+internal fun RuntimeComputeSettings.writeCachedCapabilities(identity: String, capabilities: ComputeCapabilities) {
+    val editor = preferences.edit()
+    AdvancedComputeSettingsCodec.encodeCapabilities(capabilities, identity, BuildConfig.LITERT_LM_VERSION).forEach { (key, value) -> editor.putString(key, value) }
     editor.apply()
 }
