@@ -1,5 +1,6 @@
 package dev.yashasvm.mobie
 
+import android.content.Context
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.yashasvm.mobie.data.history.ChatHistoryStore
@@ -72,6 +73,67 @@ class LocalPersistenceTest {
             assertEquals(updatedFirst + HistoryMessage(true, "Another question"), recreated.read(modelId))
             recreated.activate(modelId, secondId)
             assertEquals(listOf(HistoryMessage(true, "Second chat")), recreated.read(modelId))
+        } finally {
+            store.clear(modelId)
+        }
+    }
+
+    @Test
+    fun writingRestoredLegacyChatUpdatesItInsteadOfCreatingDuplicateSession() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val modelId = "test/legacy-chat-write"
+        val store = ChatHistoryStore(context)
+        store.clear(modelId)
+        context.getSharedPreferences("chat_history", Context.MODE_PRIVATE)
+            .edit()
+            .putString(
+                modelId,
+                """[{"fromUser":true,"text":"Earlier question"},{"fromUser":false,"text":"Earlier answer"}]""",
+            )
+            .commit()
+
+        try {
+            val restored = ChatHistoryStore(context)
+            val original = listOf(
+                HistoryMessage(true, "Earlier question"),
+                HistoryMessage(false, "Earlier answer"),
+            )
+            assertEquals(original, restored.read(modelId))
+            assertEquals("legacy", restored.currentSessionId(modelId))
+
+            val updated = original + HistoryMessage(true, "Follow-up")
+            restored.write(modelId, updated)
+
+            assertEquals(1, restored.sessions(modelId).size)
+            assertEquals("legacy", restored.currentSessionId(modelId))
+            assertEquals(updated, ChatHistoryStore(context).read(modelId))
+        } finally {
+            store.clear(modelId)
+        }
+    }
+
+    @Test
+    fun staleActiveSessionPointerFallsBackToExistingSession() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val modelId = "test/stale-chat-pointer"
+        val store = ChatHistoryStore(context)
+        store.clear(modelId)
+        try {
+            val actualId = store.startNewSession(modelId)
+            val original = listOf(HistoryMessage(true, "Existing chat"))
+            store.write(modelId, original)
+            context.getSharedPreferences("chat_history", Context.MODE_PRIVATE)
+                .edit().putString("current:$modelId", "missing-session").commit()
+
+            val restored = ChatHistoryStore(context)
+            assertEquals(actualId, restored.currentSessionId(modelId))
+            assertEquals(original, restored.read(modelId))
+
+            val updated = original + HistoryMessage(false, "Existing answer")
+            restored.write(modelId, updated)
+            assertEquals(1, restored.sessions(modelId).size)
+            assertEquals(actualId, restored.currentSessionId(modelId))
+            assertEquals(updated, ChatHistoryStore(context).read(modelId))
         } finally {
             store.clear(modelId)
         }
