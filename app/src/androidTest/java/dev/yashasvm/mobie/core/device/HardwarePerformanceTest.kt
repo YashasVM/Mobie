@@ -73,8 +73,9 @@ class HardwarePerformanceTest {
             assertEquals(2, saved.size)
             val gpu = saved.single { it.backend == ComputeBackend.GPU }
             val cpu = saved.single { it.backend == ComputeBackend.CPU }
-            assertEquals(18.0, gpu.speed.lowTokensPerSecond)
-            assertEquals(8.0, cpu.speed.lowTokensPerSecond)
+            // Exact samples, so a zero delta is correct; JUnit's two-argument double overload always fails.
+            assertEquals(18.0, gpu.speed.lowTokensPerSecond, 0.0)
+            assertEquals(8.0, cpu.speed.lowTokensPerSecond, 0.0)
             assertEquals(DecodeSpeedSource.MEASURED, cpu.speed.source)
             assertTrue(DecodeSpeedStore(context).read("$identity-new-revision").isEmpty())
         } finally {

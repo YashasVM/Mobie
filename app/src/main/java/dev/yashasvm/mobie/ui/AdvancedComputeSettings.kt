@@ -78,9 +78,16 @@ internal object AdvancedComputePolicy {
         artifactIdentity = "",
     )
 
+    /**
+     * The explicit context the next load requests for this artifact, or null for Auto. Only metadata
+     * that permits the override enables it, so the verdict and the load gate use the same value.
+     */
+    fun contextOverride(options: ComputeOptions, capabilities: ComputeCapabilities?): Int? =
+        options.contextTokens?.takeIf { it in capabilities?.contextChoices().orEmpty() }
+
     /** Change the RAM estimate only when this exact artifact's metadata permits the override. */
     fun compatibilityArtifact(artifact: ModelArtifact?, options: ComputeOptions, capabilities: ComputeCapabilities?): ModelArtifact? {
-        val context = options.contextTokens?.takeIf { it in capabilities?.contextChoices().orEmpty() } ?: return artifact
+        val context = contextOverride(options, capabilities) ?: return artifact
         return artifact?.copy(contextWindowTokens = context)
     }
 
@@ -98,8 +105,9 @@ internal object AdvancedComputePolicy {
     ): Map<ComputeBackend, BackendAdmission> {
         val target = device ?: return emptyMap()
         val sized = compatibilityArtifact(artifact, options, capabilities) ?: return emptyMap()
+        val context = contextOverride(options, capabilities)
         return listOf(ComputeBackend.AUTO, ComputeBackend.CPU, ComputeBackend.GPU).associateWith { backend ->
-            resolver.resolveBackend(sized, target, visionEncoderLoaded, backend)
+            resolver.resolveBackend(sized, target, visionEncoderLoaded, backend, contextTokens = context)
         }
     }
 
