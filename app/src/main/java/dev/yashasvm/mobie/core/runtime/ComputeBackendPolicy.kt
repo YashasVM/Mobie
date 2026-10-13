@@ -1,23 +1,16 @@
 package dev.yashasvm.mobie.core.runtime
 
 import android.content.Context
+import android.content.SharedPreferences
+import dev.yashasvm.mobie.core.device.CpuThreadPolicy
 import java.security.MessageDigest
 import kotlinx.coroutines.CancellationException
-
-/** NPU remains reserved for a future SoC-specific artifact qualification path. */
-
-data class ComputeOptions(
-    val backend: ComputeBackend = ComputeBackend.AUTO,
-    /** Null means topology-aware automatic selection. */
-    val cpuThreads: Int? = null,
-    /** Repository ID, artifact path and immutable source revision. */
-    val artifactIdentity: String = "",
-)
 
 data class ActiveCompute(
     val backend: ComputeBackend,
     val cpuThreads: Int? = null,
     val fallbackReason: String? = null,
+    val contextTokens: Int? = null,
 ) {
     val label: String get() = if (backend == ComputeBackend.CPU) "CPU · $cpuThreads threads" else backend.name
 }
@@ -35,10 +28,7 @@ internal object ComputeBackendPolicy {
             ComputeBackend.CPU -> listOf(ComputeBackend.CPU)
             ComputeBackend.GPU -> listOf(ComputeBackend.GPU)
             ComputeBackend.NPU -> emptyList() // No qualified NPU artifacts in the v1 catalog.
-            ComputeBackend.AUTO -> {
-                val candidates = if (gpuPlausible) listOf(ComputeBackend.GPU, ComputeBackend.CPU) else listOf(ComputeBackend.CPU)
-                if (remembered in candidates) listOf(remembered!!) + candidates.filterNot { it == remembered } else candidates
-            }
+            ComputeBackend.AUTO -> if (gpuPlausible) listOf(ComputeBackend.GPU, ComputeBackend.CPU) else listOf(ComputeBackend.CPU)
         }
 }
 
@@ -52,6 +42,14 @@ internal data class BackendLoadResult<T>(
 
 /** Attempts that passed memory admission, plus a note when Auto skipped a backend for memory. */
 internal data class AdmittedAttempts(val attempts: List<ComputeBackend>, val skippedReason: String?)
+
+/** JNI initialization errors contain source locations, not a useful action for the user. */
+internal fun describeBackendLoadFailure(backend: ComputeBackend, failure: Exception): String =
+    if (backend == ComputeBackend.GPU && failure.message.orEmpty().startsWith("Failed to create engine:")) {
+        "This model could not be loaded on GPU by LiteRT-LM. Use CPU or try another model artifact."
+    } else {
+        failure.message ?: failure.javaClass.simpleName
+    }
 
 /**
  * Under Auto, drops backends that do not fit in memory right now (GPU keeps a private copy of
@@ -85,7 +83,8 @@ internal fun <T> loadWithBackendFallback(
         try {
             val value = load(backend)
             val reason = firstFailure?.let { failure ->
-                "${attempts.first().name} load failed: ${failure.message ?: failure.javaClass.simpleName}. Using ${backend.name}."
+                val description = (failure.message ?: failure.javaClass.simpleName).trim().trimEnd('.')
+                "${attempts.first().name} load failed: $description. Using ${backend.name}."
             }
             return BackendLoadResult(backend, value, reason)
         } catch (failure: Exception) {
@@ -130,8 +129,12 @@ internal class SuccessfulBackendMemory(private val store: BackendKeyValueStore) 
 }
 
 /** Settings and successful backend history use app-private preferences, never model metadata. */
-class RuntimeComputeSettings(context: Context) {
-    private val preferences = context.applicationContext.getSharedPreferences("runtime_compute", Context.MODE_PRIVATE)
+class RuntimeComputeSettings internal constructor(
+    internal val preferences: SharedPreferences,
+    private val coreCountProvider: () -> Int,
+) {
+    constructor(context: Context, coreCountProvider: () -> Int = { Runtime.getRuntime().availableProcessors() }) :
+        this(context.applicationContext.getSharedPreferences("runtime_compute", Context.MODE_PRIVATE), coreCountProvider)
     internal val memory = SuccessfulBackendMemory(object : BackendKeyValueStore {
         override fun get(key: String): String? = preferences.getString(key, null)
         override fun put(key: String, value: String) { preferences.edit().putString(key, value).apply() }
@@ -142,15 +145,20 @@ class RuntimeComputeSettings(context: Context) {
         ?.let { runCatching { ComputeBackend.valueOf(it) }.getOrNull() }
         ?.takeIf { it != ComputeBackend.NPU } ?: ComputeBackend.AUTO
 
-    fun selectedCpuThreads(): Int? = preferences.getInt("cpu_threads", 0).takeIf { it in 1..8 }
+    fun selectedCpuThreads(coreCount: Int = coreCountProvider()): Int? {
+        val stored = preferences.getInt("cpu_threads", 0)
+        val sanitized = CpuThreadPolicy.clamp(stored.takeIf { it != 0 }, coreCount)
+        if (stored != (sanitized ?: 0)) preferences.edit().putInt("cpu_threads", sanitized ?: 0).apply()
+        return sanitized
+    }
 
     fun setBackend(backend: ComputeBackend) {
         require(backend != ComputeBackend.NPU) { "NPU artifacts are not qualified" }
         preferences.edit().putString("selected_backend", backend.name).apply()
     }
 
-    fun setCpuThreads(threads: Int?) {
-        require(threads == null || threads in 1..8)
-        preferences.edit().putInt("cpu_threads", threads ?: 0).apply()
+    fun setCpuThreads(threads: Int?, coreCount: Int = coreCountProvider()) {
+        val sanitized = CpuThreadPolicy.clamp(threads?.takeIf { it != 0 }, coreCount)
+        preferences.edit().putInt("cpu_threads", sanitized ?: 0).apply()
     }
 }

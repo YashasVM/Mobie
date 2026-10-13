@@ -66,6 +66,10 @@ import dev.yashasvm.mobie.core.model.CompatibilityResult
 import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.MemoryAdmissionTier
 import dev.yashasvm.mobie.core.model.ModelArtifact
+import dev.yashasvm.mobie.core.device.DecodeSpeed
+import dev.yashasvm.mobie.core.device.CpuThreadPolicy
+import dev.yashasvm.mobie.core.device.DecodeSpeedEstimator
+import dev.yashasvm.mobie.core.device.HardwareProfile
 import dev.yashasvm.mobie.core.runtime.ComputeBackend
 import dev.yashasvm.mobie.data.download.DownloadProgress
 import dev.yashasvm.mobie.data.download.isCancellable
@@ -85,9 +89,12 @@ internal fun ModelScreen(
     onBack: () -> Unit = {},
     onBackendChange: (ComputeBackend) -> Unit = {},
     onCpuThreadsChange: (Int?) -> Unit = {},
+    onMemoryRefresh: () -> Unit = {},
+    onFreeMemory: (() -> Unit) -> Unit = { it() },
 ) {
     val model = state.selected ?: return
     val artifact = model.bestArtifact ?: return
+    MemoryReliefResumeEffect(onMemoryRefresh)
     var confirmWarning by remember { mutableStateOf(false) }
     var confirmRun by remember { mutableStateOf(false) }
     val downloading = state.download?.state in setOf(WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED, WorkInfo.State.RUNNING)
@@ -105,7 +112,8 @@ internal fun ModelScreen(
             item(key = "identity") { ModelIdentity(model, artifact, Modifier.entrance(entrance, "identity", 0)) }
             item(key = "verdict") { VerdictPanel(state.compatibility, Modifier.entrance(entrance, "verdict", 1)) }
             item(key = "memory") {
-                MemoryPanel(state.compatibility, state.device, Modifier.entrance(entrance, "memory", 2))
+                MemoryPanel(state.compatibility, state.device, Modifier.entrance(entrance, "memory", 2),
+                    state.memoryReliefInProgress, onFreeMemory)
             }
             item(key = "storage") {
                 StoragePanel(artifact, state.compatibility, state.device, Modifier.entrance(entrance, "storage", 3))
@@ -115,6 +123,9 @@ internal fun ModelScreen(
                 ComputeSettingsPanel(
                     backend = state.computeBackend,
                     cpuThreads = state.cpuThreads,
+                    hardware = state.hardware,
+                    artifactSizeBytes = artifact.sizeBytes,
+                    measuredSpeeds = state.measuredDecodeSpeeds,
                     onBackendChange = onBackendChange,
                     onCpuThreadsChange = onCpuThreadsChange,
                     modifier = Modifier.entrance(entrance, "compute", 5),
@@ -133,7 +144,7 @@ internal fun ModelScreen(
                 if (state.compatibility?.status == Compatibility.WARNING) confirmWarning = true else onDownload(false)
             },
             onRun = {
-                if (state.compatibility?.memoryTier == MemoryAdmissionTier.FITS_AFTER_RECLAIM) confirmRun = true
+                if (MemoryReliefDecision.from(state.compatibility, state.device).requiresConfirmation) confirmRun = true
                 else onRun(false)
             },
             onCancelDownload = onCancelDownload,
@@ -264,7 +275,7 @@ private fun VerdictPanel(result: CompatibilityResult?, modifier: Modifier = Modi
             Text("[$mark]", style = Mobie.numeric.large, color = color)
             AnimatedContent(
                 targetState = when (status) {
-                    Compatibility.COMPATIBLE -> "Runs on this phone"
+                    Compatibility.COMPATIBLE -> "Expected to fit on this phone"
                     Compatibility.WARNING ->
                         if (result?.memoryTier == MemoryAdmissionTier.FITS_AFTER_RECLAIM) "Fits after freeing memory" else "Check before running"
                     Compatibility.INCOMPATIBLE -> "Won't fit on this phone"
@@ -284,7 +295,13 @@ private fun VerdictPanel(result: CompatibilityResult?, modifier: Modifier = Modi
 }
 
 @Composable
-private fun MemoryPanel(result: CompatibilityResult?, device: DeviceProfile?, modifier: Modifier = Modifier) {
+private fun MemoryPanel(
+    result: CompatibilityResult?,
+    device: DeviceProfile?,
+    modifier: Modifier = Modifier,
+    memoryReliefInProgress: Boolean = false,
+    onFreeMemory: (() -> Unit) -> Unit = { it() },
+) {
     val weightsColor = MaterialTheme.colorScheme.primary
     val kvColor = Mobie.signals.thinking
     val overheadColor = MaterialTheme.colorScheme.outline
@@ -320,7 +337,7 @@ private fun MemoryPanel(result: CompatibilityResult?, device: DeviceProfile?, mo
             }
             // Legend rows land just after the bar finishes sweeping in.
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                KvRow("Est. peak", formatBytes(peak), valueColor = MaterialTheme.colorScheme.onSurface)
+                KvRow("Model needs", formatBytes(peak), valueColor = MaterialTheme.colorScheme.onSurface)
                 segments.forEachIndexed { index, segment ->
                     KvRow(
                         segment.label,
@@ -351,13 +368,7 @@ private fun MemoryPanel(result: CompatibilityResult?, device: DeviceProfile?, mo
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Text(
-                "App RAM ${formatBytes(device?.appPssBytes ?: 0L)} · Now ${formatBytes(available)} · " +
-                    "After reclaim ${formatBytes(device?.availableAfterReclaimBytes ?: available)} · " +
-                    "Swap ${formatBytes(device?.swapFreeBytes ?: 0L)} free / ${formatBytes(device?.swapTotalBytes ?: 0L)}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            MemoryReliefControls(MemoryReliefDecision.from(result, device), memoryReliefInProgress, onFreeMemory)
             val name = listOfNotNull(deviceName(device), chipName(device)).joinToString(" · ")
             Text(
                 if (name.isBlank()) deviceLabel(device) else "$name · ${deviceLabel(device)}",
@@ -492,15 +503,29 @@ private fun middleEllipsis(text: String, maxChars: Int = 44): String {
 }
 
 @Composable
-private fun ComputeSettingsPanel(
+internal fun ComputeSettingsPanel(
     backend: ComputeBackend,
     cpuThreads: Int?,
     onBackendChange: (ComputeBackend) -> Unit,
     onCpuThreadsChange: (Int?) -> Unit,
     modifier: Modifier = Modifier,
+    hardware: HardwareProfile? = null,
+    artifactSizeBytes: Long = 0,
+    measuredSpeeds: Map<ComputeBackend, DecodeSpeed> = emptyMap(),
 ) {
-    TuiWindow("compute", modifier.fillMaxWidth()) {
+    val coreCount = hardware?.cpuCoreCount?.takeIf { it > 0 } ?: Runtime.getRuntime().availableProcessors()
+    val selectedThreads = CpuThreadPolicy.clamp(cpuThreads, coreCount)
+    TuiWindow("compute", modifier.fillMaxWidth().testTag("compute_settings")) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(hardwareSummary(hardware), style = Mobie.numeric.small,
+                    color = MaterialTheme.colorScheme.onSurface)
+                hardware?.let { profile ->
+                    val details = hardwareDetails(profile)
+                    if (details.isNotEmpty()) Text(details, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 FlagHeader("--backend", "where the model runs")
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -513,21 +538,41 @@ private fun ComputeSettingsPanel(
                     }
                 }
             }
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                FlagHeader("--speed", "text generation on this phone")
+                listOf(ComputeBackend.CPU, ComputeBackend.GPU).forEach { choice ->
+                    val prediction = remember(hardware, artifactSizeBytes, choice, measuredSpeeds[choice]) {
+                        DecodeSpeedEstimator.predict(hardware, artifactSizeBytes, choice, measuredSpeeds[choice])
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(choice.name, style = Mobie.numeric.small,
+                            color = if (backend == choice) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                        Column(Modifier.weight(1f).testTag("decode_speed_${choice.name}")) {
+                            Text(prediction.speed?.let(::decodeSpeedLabel) ?: "Speed unavailable",
+                                style = Mobie.numeric.small, color = MaterialTheme.colorScheme.onSurface)
+                            Text(prediction.speed?.let(::decodeSpeedSourceLabel) ?: prediction.unavailableReason.orEmpty(),
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+                Text("Estimates use model size and assumed memory bandwidth. Heat, context and CPU threads affect speed. Run a reply to measure it.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 FlagHeader("--threads", "cpu threads")
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FlagChoice("auto", selected = cpuThreads == null, onClick = { onCpuThreadsChange(null) })
-                    (1..8).forEach { count ->
+                    FlagChoice("auto", selected = selectedThreads == null, onClick = { onCpuThreadsChange(null) })
+                    (1..CpuThreadPolicy.limit(coreCount)).forEach { count ->
                         FlagChoice(
                             label = count.toString(),
-                            selected = cpuThreads == count,
+                            selected = selectedThreads == count,
                             onClick = { onCpuThreadsChange(count) },
                         )
                     }
                 }
             }
             Text(
-                "First GPU load can be slow. Auto tries GPU on supported phones and uses CPU if loading fails. Changes apply on the next model load.",
+                "GPU support is checked when loading; a speed estimate does not confirm it. First GPU load can be slow. Auto tries GPU and falls back to CPU if needed. Changes apply on the next model load.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -592,7 +637,8 @@ private fun ActionDock(
             if (artifact.sizeBytes > 0) "Download model · ${formatBytes(artifact.sizeBytes)}" else "Download model",
         )
     }
-    val primaryEnabled = (downloaded && state.compatibility?.status != Compatibility.INCOMPATIBLE) || canDownload
+    val primaryEnabled = !state.memoryReliefInProgress &&
+        ((downloaded && MemoryReliefDecision.from(state.compatibility, state.device).canLoad) || canDownload)
     // Keep the last download visible while its block collapses away.
     var lastDownload by remember { mutableStateOf(state.download) }
     if (state.download != null) lastDownload = state.download

@@ -46,10 +46,13 @@ interface RuntimeAdapter {
     val format: ModelFormat
     /** Backend selected by the loaded engine, including a visible automatic fallback reason. */
     val activeCompute: ActiveCompute? get() = null
+    val computeCapabilities: ComputeCapabilities? get() = null
     /** Applied before load; artifactIdentity includes the repository, artifact and pinned source. */
     fun configureCompute(options: ComputeOptions) = Unit
     /** Stored sampler used to create the conversation at load; generate still applies its own sampler per request. */
     fun configureSampler(sampler: SamplerSettings) = Unit
+    /** Applied before load. Null preserves the artifact's reasoning default. */
+    fun configureThinking(enabled: Boolean?) = Unit
     /** True only while the loaded runtime has an initialized image encoder. */
     val supportsImageInput: Boolean get() = false
     suspend fun load(

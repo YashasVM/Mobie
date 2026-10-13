@@ -166,6 +166,8 @@ fun MobieApp(
                     onCancelDownload = viewModel::cancelDownload,
                     onBackendChange = viewModel::setComputeBackend,
                     onCpuThreadsChange = viewModel::setCpuThreads,
+                    onMemoryRefresh = viewModel::refreshMemory,
+                    onFreeMemory = viewModel::freeUpMemory,
                     onBack = { viewModel.select(null) },
                 )
                 else -> CatalogScreen(
