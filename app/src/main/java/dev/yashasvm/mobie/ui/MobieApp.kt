@@ -104,6 +104,7 @@ fun MobieApp(
 
     var warningOverride by remember { mutableStateOf(false) }
     var showHistory by rememberSaveable { mutableStateOf(false) }
+    var showComputeSettings by rememberSaveable { mutableStateOf(false) }
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) {
@@ -121,6 +122,12 @@ fun MobieApp(
         } else {
             viewModel.download(allowWarning)
         }
+    }
+
+    if (showComputeSettings && state.chatting) {
+        ComputeSettingsDialog(state, viewModel::updateComputeOptions, viewModel::updateSampler,
+            onApply = { viewModel.applyComputeSettings(); showComputeSettings = false },
+            onReset = viewModel::resetComputeSettings, onClose = { showComputeSettings = false })
     }
 
     BackHandler(enabled = state.selected != null) {
@@ -156,7 +163,7 @@ fun MobieApp(
                     onBack = viewModel::leaveChat,
                     onHistory = { showHistory = true },
                     onNewChat = viewModel::newChat,
-                    onSamplerChange = viewModel::updateSampler,
+                    onComputeSettings = { showComputeSettings = true },
                     onLoadAnyway = { viewModel.runInstalled(allowReclaim = true) },
                 )
                 "model" -> ModelScreen(
@@ -166,6 +173,10 @@ fun MobieApp(
                     onCancelDownload = viewModel::cancelDownload,
                     onBackendChange = viewModel::setComputeBackend,
                     onCpuThreadsChange = viewModel::setCpuThreads,
+                    onComputeOptionsChange = viewModel::updateComputeOptions,
+                    onSamplerChange = viewModel::updateSampler,
+                    onApplyCompute = viewModel::applyComputeSettings,
+                    onResetCompute = viewModel::resetComputeSettings,
                     onMemoryRefresh = viewModel::refreshMemory,
                     onFreeMemory = viewModel::freeUpMemory,
                     onBack = { viewModel.select(null) },

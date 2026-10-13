@@ -36,7 +36,7 @@ One earlier direct-SDK 1024-context probe produced 30.14882 decode tok/s and 245
 
 ## Resume qualification
 
-Production-adapter 1024/2048/4096 probes, new-default Auto, five-minute GPU and CPU4 workloads, cancellation/reload/backend switching, precision trials, and Gallery-equivalent configuration are pending in this draft. Every new result records artifact SHA, device, Android, backend, context, quantization, peak PSS, observed TTFT, native tok/s, and thermal status.
+The direct-SDK context sweep, new-default Auto, and five-minute GPU loop are complete below. The user stopped all phone work before CPU4 sustained, lifecycle, precision, Gallery comparison, and chat demo completed. Every completed new result records artifact SHA, device, Android, backend, context, quantization, peak PSS, observed TTFT, native tok/s, and thermal status.
 
 Gallery 1.0.20 at commit `4928788ef07cdf2194fc435a0f446cf3b997bd5d` also pins LiteRT-LM 0.18.0. The SDK upgrade establishes runtime parity, not a Gallery advantage. A configuration reconstructed in Mobie's harness must be labeled as such; it is not an installed Gallery app measurement. Gallery's normal chat turns benchmarking off, while this harness enables native counters. Sampler, context, output budget, and thinking differences change the workload and cannot prove identical-configuration superiority.
 
@@ -65,3 +65,37 @@ Reproduce a summary with `python3 docs/perf/summarize-gpu-results.py app/build/g
 The production adapter selected GPU in all four runs, with no CPU-thread override and no fallback reason. Three measured repetitions after warm-up produced median decode **28.18529 tok/s**, observed first visible chunk **1101 ms**, load **5851 ms**, median sampled peak PSS **3281891328 bytes / 3.057 GiB**, and thermal 0/0/0 throughout. Every output hash matches the greedy 4096-context reference. This is **3.68304x** the matched 0.16.1 Auto+CPU8 baseline. It clears the 2x target and the preferred 3x target on this exact artifact and phone.
 
 Runtime metadata reports context 4096, fixed context, and no speculative-decoding support. A speculative-on trial is therefore not offered for this artifact. These short default runs do not establish sustained performance or support for other artifacts. Evidence is in `resume-auto/`.
+
+### Five-minute GPU loop
+
+One persistent production engine, first generation excluded as warm-up, fresh conversation per measured prompt, same 4096 context/greedy sampler/thinking-off/64 output cap. Twenty measured samples span 307461 ms. Median decode is **33.18999 tok/s**; first-minute median is39.77307 and last-minute median30.84292, a22.45% decline. Minimum sample24.90297. Thermal status rises from0 to1 around150 seconds and ends at1. Peak sampled PSS is **6014105600bytes / 5.601 GiB**. Median observed TTFT is **13171ms**, with first-minute median12768 and last-minute median12421.
+
+This workload includes conversation reset and allocation costs. Reset runs reach roughly double the initial loaded PSS and take12–17 seconds to deliver a first chunk, even though native decode remains fast. The reset implementation creates the replacement conversation before closing the previous one. That overlaps native resources; native allocation/first-use work is a candidate cause, not a proven full explanation. No change to ownership/cleanup order is justified solely by this run. The result does not promise a13-second delay on ordinary retained-chat turns, which do not reset every prompt.
+
+Peak PSS exceeds the current generic admission heuristic substantially. Before broad GPU release, memory admission must account for measured graphics/session memory and replacement overlap. A safe reset/rebuild optimization needs its own lifecycle and failure-recovery qualification. A headless decode improvement is not a complete user-experience qualification.
+
+Evidence is in `resume-sustained-gpu/`, including per-sample thermal/TTFT/decode/PSS under `samples`, native logs, before/after thermalservice output, and `mid-run-meminfo.txt`. Artifact, SHA, quantization, device, Android, and runtime are on the parent result record and apply to every nested sample.
+
+
+## Phone unavailable at session end
+
+The user requested an immediate stop before taking the phone. Agent A ran `adb -s RZCY81Q06XR shell am force-stop dev.yashasvm.mobie` successfully and stopped the local phone runner. No new phone command or instrumentation starts afterward. CPU4 instrumentation reported "Process crashed" after the force-stop; this is an interrupted test, not evidence of a spontaneous runtime failure.
+
+Completed cases are frozen as `completed-results.jsonl` under `resume-sdk-context-{1024,2048,4096}/`, `resume-auto/`, and `resume-sustained-gpu/`. `resume-completed-index.json` records full model identity, quantization, SHA, phone serial, device, Android, runtime, and source file for each case. Original cumulative and native evidence remains intact. No interrupted sample is used for an aggregate or performance claim.
+
+| Remaining phone work | Status |
+| --- | --- |
+| Five-minute CPU4 loop, after thermal status returns to 0 | not run (phone unavailable); previous invocation interrupted before a completed result |
+| Cancel mid-generation and recover, unload then reload, CPU/GPU switch in one process, cache growth | not run (phone unavailable); `LiteRtGpuLifecycleProbeTest` is written and compiled, not executed |
+| FP16 versus automatic activation, output-quality checks, repeatability | not run (phone unavailable); keep AUTO as the default and overrides experimental |
+| Speculative-decoding trial on a supported artifact | not run (phone unavailable); current exact Qwen artifact advertises no support, so true remains blocked |
+| Gallery-equivalent configuration versus tuned Mobie, matched workload and actual app caveats | not run (phone unavailable); no Mobie-vs-Gallery speed claim |
+| Visible on-screen chat demo and screenshot in `/home/yvm/code/Mobie-research/` | not run (phone unavailable) |
+| Longer-context correctness/history test for smaller exploratory allocations | not run (phone unavailable); production retains metadata-fixed 4096 |
+| Release APK runtime verification after shrinker | not run (phone unavailable) |
+
+## Code-only validation
+
+`assembleRelease` passed in 1m33s using the isolated A build directory. The unsigned release APK contains the exact 0.18.0 AAR LICENSE, 16086 bytes, SHA-256 `ec40a2da15ab0e8b44a9f787ab210203d3cad32572f5f99744a88eb90ff9ba4e`, and THIRD_PARTY_NOTICE, 2198164 bytes, SHA-256 `52a70c82685debf85d4ea9d677615b8636ffd3b75435ce71f247bf5982fb2ba2`. Debug packaging also matches exactly. R8 warns that some dependency Kotlin metadata is newer than its parser; the build succeeds, but release runtime is unqualified.
+
+Final `ANDROID_HOME=/home/yvm/Android/Sdk ./gradlew --init-script /tmp/mobie-A.init.gradle testDebugUnitTest lintDebug assembleDebug` passed in 48 seconds: 414 unit tests, zero failures/errors/skips; lint zero errors and 48 warnings; debug assembly passed. The final log is `app/build/gpu-benchmark/resume-final-gates.log`. B owns Advanced UI and emulator checks. Agent A's physical evidence cannot substitute for their Compose/navigation test requirements.

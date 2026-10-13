@@ -12,6 +12,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -38,14 +41,22 @@ internal fun AdvancedComputePanel(
     onOptionsChange: (ComputeOptions) -> Unit,
     onSamplerChange: (SamplerSettings) -> String?,
     onReset: () -> Unit,
+    onValidityChange: (Boolean) -> Unit = {},
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
+    var resetVersion by remember { mutableIntStateOf(0) }
+    val invalidFields = remember { mutableStateMapOf<String, Boolean>() }
+    val validate: (String, Boolean) -> Unit = { tag, valid ->
+        invalidFields[tag] = !valid
+        onValidityChange(invalidFields.values.none { it })
+    }
     TermButton(
         "Advanced ${if (expanded) "▾" else "▸"}",
-        onClick = { expanded = !expanded }, style = TermButtonStyle.Ghost,
+        onClick = { expanded = !expanded; invalidFields.clear(); onValidityChange(true) }, style = TermButtonStyle.Ghost,
         modifier = Modifier.fillMaxWidth().testTag("advanced_toggle"),
     )
     if (!expanded) return
+    key(resetVersion) {
     Column(Modifier.testTag("advanced_controls"), verticalArrangement = Arrangement.spacedBy(18.dp)) {
         AdvancedField("CPU threads", "Auto chooses workers for your CPU layout; extra threads can slow it down.", "advanced_threads") {
             val selected = CpuThreadPolicy.clamp(options.cpuThreads, coreCount)
@@ -65,7 +76,7 @@ internal fun AdvancedComputePanel(
             }
         }
         AdvancedField("Max output tokens", "Caps reasoning and the visible reply together, within the context limit.", "advanced_output") {
-            NumberOption(options.maxOutputTokens.toString(), "1–1024", "output_tokens") { text ->
+            NumberOption(options.maxOutputTokens.toString(), "1–1024", "output_tokens", validate) { text ->
                 text.toIntOrNull()?.takeIf { it in 1..1_024 }?.let { onOptionsChange(options.copy(maxOutputTokens = it)) }
                     ?: return@NumberOption "Enter a whole number from 1 to 1024."
                 null
@@ -104,24 +115,24 @@ internal fun AdvancedComputePanel(
             }
         }
         AdvancedField("Sampler", "Controls the reply's variation; it also changes fair speed comparisons.", "advanced_sampler") {
-            NumberOption(sampler.temperature.toString(), "Temperature · 0–2", "sampler_temperature") { text ->
+            NumberOption(sampler.temperature.toString(), "Temperature · 0–2", "sampler_temperature", validate) { text ->
                 val value = text.toDoubleOrNull()?.takeIf { it.isFinite() && it in 0.0..2.0 }
                     ?: return@NumberOption "Enter a number from 0 to 2."
                 onSamplerChange(sampler.copy(temperature = value))
             }
             Text("Temperature: 0 picks the most likely token; higher values add variation.", style = MaterialTheme.typography.bodySmall)
-            NumberOption(sampler.topK.toString(), "Top-k · 1–64", "sampler_top_k") { text ->
+            NumberOption(sampler.topK.toString(), "Top-k · 1–64", "sampler_top_k", validate) { text ->
                 val value = text.toIntOrNull()?.takeIf { it in 1..64 } ?: return@NumberOption "Enter a whole number from 1 to 64."
                 onSamplerChange(sampler.copy(topK = value))
             }
             Text("Top-k: limits the number of candidate tokens considered.", style = MaterialTheme.typography.bodySmall)
-            NumberOption(sampler.topP.toString(), "Top-p · above 0, up to 1", "sampler_top_p") { text ->
+            NumberOption(sampler.topP.toString(), "Top-p · above 0, up to 1", "sampler_top_p", validate) { text ->
                 val value = text.toDoubleOrNull()?.takeIf { it.isFinite() && it > 0 && it <= 1 }
                     ?: return@NumberOption "Enter a number above 0 and no greater than 1."
                 onSamplerChange(sampler.copy(topP = value))
             }
             Text("Top-p: keeps candidates within a cumulative probability threshold.", style = MaterialTheme.typography.bodySmall)
-            NumberOption(sampler.seed.toString(), "Seed · whole number", "sampler_seed") { text ->
+            NumberOption(sampler.seed.toString(), "Seed · whole number", "sampler_seed", validate) { text ->
                 val value = text.toIntOrNull() ?: return@NumberOption "Enter a whole number within the 32-bit range."
                 onSamplerChange(sampler.copy(seed = value))
             }
@@ -130,8 +141,9 @@ internal fun AdvancedComputePanel(
         if (capabilities == null) Text("Thinking and drafter controls appear after the runtime reads this artifact's metadata.", style = MaterialTheme.typography.bodySmall)
         Text("Estimates use model size and assumed memory bandwidth. Heat, context and CPU threads affect speed. Run a reply to measure it.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        TermButton("Reset to recommended", onClick = onReset, style = TermButtonStyle.Ghost,
+        TermButton("Reset to recommended", onClick = { invalidFields.clear(); onValidityChange(true); resetVersion++; onReset() }, style = TermButtonStyle.Ghost,
             modifier = Modifier.fillMaxWidth().testTag("reset_compute"))
+    }
     }
 }
 
@@ -152,10 +164,10 @@ private fun <T> AdvancedChoices(choices: List<T>, selected: T, label: (T) -> Str
 }
 
 @Composable
-private fun NumberOption(value: String, label: String, tag: String, onChange: (String) -> String?) {
+private fun NumberOption(value: String, label: String, tag: String, onValidityChanged: (String, Boolean) -> Unit, onChange: (String) -> String?) {
     var text by remember(value) { mutableStateOf(value) }
     var error by remember(value) { mutableStateOf<String?>(null) }
-    OutlinedTextField(text, { newValue -> text = newValue; error = onChange(newValue) },
+    OutlinedTextField(text, { newValue -> text = newValue; error = onChange(newValue); onValidityChanged(tag, error == null) },
         label = { Text(label) }, singleLine = true, shape = RectangleShape, isError = error != null,
         supportingText = error?.let { message -> { Text(message) } }, modifier = Modifier.fillMaxWidth().testTag(tag))
 }

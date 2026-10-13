@@ -17,6 +17,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -94,7 +95,7 @@ class LiteRtGpuLifecycleProbeTest {
                                 }
                             }
                             } catch (cancelled: CancellationException) {
-                                if (chunks < 4) throw cancelled
+                                if (cancelled is TimeoutCancellationException || chunks < 4) throw cancelled
                             }
                             assertTrue("Cancellation must happen during output", chunks >= 4 && !complete)
                             result.put("cancel_mid_generation", true)
