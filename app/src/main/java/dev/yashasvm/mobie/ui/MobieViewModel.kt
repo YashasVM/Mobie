@@ -13,7 +13,8 @@ import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.MemoryAdmissionTier
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.device.BatteryCurrentMath
-import dev.yashasvm.mobie.core.device.DecodeSpeed
+import dev.yashasvm.mobie.core.device.DecodeMeasurement
+import dev.yashasvm.mobie.core.device.DecodeRunSettings
 import dev.yashasvm.mobie.core.device.DecodeSpeedStore
 import dev.yashasvm.mobie.core.device.HardwareProfile
 import dev.yashasvm.mobie.core.device.HardwareProfileProvider
@@ -91,18 +92,25 @@ data class MobieUiState(
     val telemetry: RunTelemetry = RunTelemetry(),
     val sampler: SamplerSettings = SamplerSettings(),
     val imageInputReady: Boolean = false,
+    /** The user's saved choices. Artifact limits are applied in [effectiveComputeOptions], never written back. */
     val computeOptions: ComputeOptions = ComputeOptions(),
+    /** The options the loaded engine was started with; null when no engine was loaded with them. */
     val appliedComputeOptions: ComputeOptions? = null,
     val appliedSampler: SamplerSettings? = null,
     val computeCapabilities: ComputeCapabilities? = null,
     val activeCompute: ActiveCompute? = null,
     val hardware: HardwareProfile? = null,
-    val measuredDecodeSpeeds: Map<ComputeBackend, DecodeSpeed> = emptyMap(),
+    val decodeMeasurements: List<DecodeMeasurement> = emptyList(),
     val memoryReliefInProgress: Boolean = false,
 ) {
     val computeBackend: ComputeBackend get() = computeOptions.backend
     val cpuThreads: Int? get() = computeOptions.cpuThreads
-    val computeNeedsApply: Boolean get() = AdvancedComputePolicy.needsApply(computeOptions, sampler, appliedComputeOptions, appliedSampler)
+
+    /** What the next load of the selected artifact would run: saved choices after its metadata limits. */
+    val effectiveComputeOptions: ComputeOptions get() = AdvancedComputePolicy.forArtifact(
+        computeOptions, hardware?.cpuCoreCount?.takeIf { it > 0 } ?: Runtime.getRuntime().availableProcessors(), computeCapabilities,
+    )
+    val computeNeedsApply: Boolean get() = AdvancedComputePolicy.needsApply(effectiveComputeOptions, sampler, appliedComputeOptions, appliedSampler)
 }
 
 class MobieViewModel(private val container: AppContainer) : ViewModel() {
@@ -114,9 +122,12 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             welcomeSeen = container.tokenStore.hasSeenWelcome(),
             onboardingComplete = container.tokenStore.hasCompletedOnboarding(),
             sampler = AdvancedComputePolicy.sampler(container.samplerSettings.read()).also(container.samplerSettings::write),
-            computeOptions = container.computeSettings.readAdvancedOptions(Runtime.getRuntime().availableProcessors()),
+            // Saved compute options are read on IO in init; recommended defaults show until then.
+            computeOptions = ComputeOptions(),
         ),
     )
+    /** Set on the main thread by an explicit edit, so a slower preference read cannot overwrite it. */
+    private var computeOptionsEdited = false
     val state: StateFlow<MobieUiState> = mutableState.asStateFlow()
     private var catalogJob: Job? = null
     private var downloadObserverJob: Job? = null
@@ -135,9 +146,14 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             mutableState.update { it.copy(device = it.device ?: device) }
         }
         viewModelScope.launch {
-            val hardware = HardwareProfileProvider(container.appContext).detect()
-            val options = container.computeSettings.readAdvancedOptions(hardware.cpuCoreCount)
-            mutableState.update { it.copy(hardware = hardware, computeOptions = if (it.computeCapabilities == null) options else AdvancedComputePolicy.forArtifact(options, hardware.cpuCoreCount, it.computeCapabilities)) }
+            // Hardware detection and the preference read both touch disk, so they run on IO.
+            val (hardware, options) = withContext(Dispatchers.IO) {
+                val hardware = HardwareProfileProvider(container.appContext).detect()
+                hardware to container.computeSettings.readAdvancedOptions(hardware.cpuCoreCount)
+            }
+            mutableState.update {
+                it.copy(hardware = hardware, computeOptions = if (computeOptionsEdited) it.computeOptions else options)
+            }
         }
         container.runtimes.all().forEach { it.configureSampler(mutableState.value.sampler) }
         refreshInstalled()
@@ -232,20 +248,22 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setCpuThreads(threads: Int?) = updateComputeOptions(state.value.computeOptions.copy(cpuThreads = threads))
 
-    /** Persist desired settings without mutating the loaded engine or an in-flight reply. */
+    /**
+     * Saves the user's explicit choice without mutating the loaded engine or an in-flight reply.
+     * Artifact limits are not written back, so a choice survives loading an artifact that lacks it.
+     */
     fun updateComputeOptions(options: ComputeOptions) {
-        val current = state.value
-        val cores = current.hardware?.cpuCoreCount ?: Runtime.getRuntime().availableProcessors()
-        val sanitized = if (current.computeCapabilities == null) options.forCoreCount(cores)
-            else AdvancedComputePolicy.forArtifact(options, cores, current.computeCapabilities)
-        container.computeSettings.writeAdvancedOptions(sanitized, cores)
+        val cores = state.value.hardware?.cpuCoreCount ?: Runtime.getRuntime().availableProcessors()
+        val saved = options.forCoreCount(cores)
+        computeOptionsEdited = true
+        container.computeSettings.writeAdvancedOptions(saved, cores)
         mutableState.update { latest ->
-            val updated = latest.copy(computeOptions = sanitized)
+            val updated = latest.copy(computeOptions = saved)
             val device = latest.device
             val artifact = latest.selectedArtifact
             if (device == null || artifact == null) updated else updated.copy(
-                compatibility = container.compatibility.resolve(admissionArtifact(artifact, sanitized), device,
-                    latest.selected?.supportsVision == true, sanitized.backend),
+                compatibility = container.compatibility.resolve(admissionArtifact(artifact, saved), device,
+                    latest.selected?.supportsVision == true, saved.backend),
             )
         }
     }
@@ -274,7 +292,9 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 model.supportsVision, state.value.computeBackend)
             mutableState.update { it.copy(device = device, compatibility = compatibility) }
             if (compatibility.status == Compatibility.INCOMPATIBLE || compatibility.memoryTier == MemoryAdmissionTier.FITS_AFTER_RECLAIM) {
-                mutableState.update { it.copy(runtimeState = RuntimeState.ERROR, error = compatibility.reason) }
+                // Nothing was unloaded, so the previous engine (if any) is still the one answering.
+                val keptEngine = container.runtimes.adapterFor(artifact.format)?.activeCompute
+                mutableState.update { it.afterRefusedReload(current, keptEngine, compatibility.reason) }
                 return@launch
             }
             loadRuntimeConversation(model, artifact, path, current.messages, preferReset = false, operation = operation)
@@ -375,12 +395,10 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 history = sessions,
                 sessionId = currentSessionId,
                 stats = null,
-                measuredDecodeSpeeds = emptyMap(),
+                decodeMeasurements = emptyList(),
                 imageInputReady = false,
                 activeCompute = null,
                 computeCapabilities = capabilities,
-                computeOptions = if (capabilities == null) it.computeOptions else AdvancedComputePolicy.forArtifact(it.computeOptions,
-                    it.hardware?.cpuCoreCount ?: Runtime.getRuntime().availableProcessors(), capabilities),
                 appliedComputeOptions = null,
                 appliedSampler = null,
                 error = null,
@@ -392,7 +410,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 val measurements = decodeSpeeds.read(modelPerformanceIdentity(presentedModel.id, artifact))
                 mutableState.update {
                     if (it.selected?.id == presentedModel.id && it.selectedArtifact == artifact) {
-                        it.copy(measuredDecodeSpeeds = measurements)
+                        it.copy(decodeMeasurements = measurements)
                     } else it
                 }
             }
@@ -554,6 +572,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         if (!isCurrentRuntimeOperation(operation)) return
         result.fold(
             onSuccess = {
+                // Only the applied snapshot changes. Saved choices are not rewritten with this artifact's limits.
                 mutableState.update {
                     it.copy(
                         runtimeState = RuntimeState.READY,
@@ -562,19 +581,22 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                         computeCapabilities = adapter.computeCapabilities,
                         appliedComputeOptions = options,
                         appliedSampler = sampler,
-                        computeOptions = AdvancedComputePolicy.forArtifact(it.computeOptions,
-                            it.hardware?.cpuCoreCount ?: Runtime.getRuntime().availableProcessors(), adapter.computeCapabilities),
                     )
                 }
                 adapter.computeCapabilities?.let { capabilities ->
                     container.computeSettings.writeCachedCapabilities(modelPerformanceIdentity(model.id, artifact), capabilities)
                 }
-                container.computeSettings.writeAdvancedOptions(state.value.computeOptions,
-                    state.value.hardware?.cpuCoreCount ?: Runtime.getRuntime().availableProcessors())
             },
             onFailure = { error ->
+                // A refused reload can leave the previous engine running; chat must keep showing it.
+                val keptEngine = adapter.activeCompute
+                val message = error.message ?: "Model failed to load"
                 mutableState.update {
-                    it.copy(runtimeState = RuntimeState.ERROR, error = error.message ?: "Model failed to load")
+                    if (keptEngine != null) {
+                        it.copy(runtimeState = RuntimeState.READY, activeCompute = keptEngine, error = keptRunningMessage(keptEngine, message))
+                    } else {
+                        it.copy(runtimeState = RuntimeState.ERROR, error = message)
+                    }
                 }
             },
         )
@@ -624,10 +646,13 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                             )
                         }
                         viewModelScope.launch {
-                            val measurements = decodeSpeeds.record(modelPerformanceIdentity(model.id, artifact), event.value)
+                            // Settings are the requested ones the engine was loaded with, so the key matches what the user chose.
+                            val applied = current.appliedComputeOptions ?: current.effectiveComputeOptions
+                            val settings = DecodeRunSettings(cpuThreads = applied.cpuThreads, contextTokens = applied.contextTokens)
+                            val measurements = decodeSpeeds.record(modelPerformanceIdentity(model.id, artifact), event.value, settings)
                             mutableState.update {
                                 if (it.selected?.id == model.id && it.selectedArtifact == artifact) {
-                                    it.copy(measuredDecodeSpeeds = measurements)
+                                    it.copy(decodeMeasurements = measurements)
                                 } else it
                             }
                         }

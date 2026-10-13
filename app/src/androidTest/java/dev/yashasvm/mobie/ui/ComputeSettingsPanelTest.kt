@@ -25,6 +25,8 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.yashasvm.mobie.core.device.CpuCluster
+import dev.yashasvm.mobie.core.device.DecodeMeasurement
+import dev.yashasvm.mobie.core.device.DecodeRunSettings
 import dev.yashasvm.mobie.core.device.DecodeSpeed
 import dev.yashasvm.mobie.core.device.DecodeSpeedSource
 import dev.yashasvm.mobie.core.device.GpuHardware
@@ -60,7 +62,8 @@ class ComputeSettingsPanelTest {
                         backend = selected, cpuThreads = null,
                         onBackendChange = { selected = it }, onCpuThreadsChange = {},
                         hardware = hardware, artifactSizeBytes = 2_000_000_000L,
-                        measuredSpeeds = mapOf(ComputeBackend.GPU to DecodeSpeed(18.0, 22.0, DecodeSpeedSource.MEASURED, 2)),
+                        measurements = listOf(DecodeMeasurement(ComputeBackend.GPU, DecodeRunSettings(null, null),
+                            DecodeSpeed(18.0, 22.0, DecodeSpeedSource.MEASURED, 2))),
                     )
                 }
             }
@@ -94,7 +97,47 @@ class ComputeSettingsPanelTest {
         composeRule.onNodeWithText("OpenCL driver was not found. Run GPU to measure support and speed.").assertIsDisplayed()
         composeRule.onNodeWithTag("backend_GPU").performClick()
         composeRule.runOnIdle { assertEquals(ComputeBackend.GPU, selected) }
-        composeRule.onNodeWithText("Settings apply", substring = true).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Saved. Used next time you load a model.").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun savedNonDefaultChoicesWithNothingLoadedNeverOfferAReload() {
+        val saved = ComputeOptions(backend = ComputeBackend.GPU, maxOutputTokens = 128, prefillPrefaceOnInit = true)
+        var applyCount = 0
+        composeRule.setContent {
+            MobieTheme {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    ComputeSettingsPanel(saved.backend, saved.cpuThreads, {}, {}, hardware = hardware,
+                        artifactSizeBytes = 344_671_744, options = saved,
+                        needsApply = AdvancedComputePolicy.needsApply(saved, SamplerSettings(), null, null),
+                        loaded = false, runtimeState = RuntimeState.IDLE, downloaded = true, onApply = { applyCount++ })
+                }
+            }
+        }
+        composeRule.onNodeWithTag("saved_settings").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Saved. Used next time you load a model.").assertIsDisplayed()
+        composeRule.onNodeWithTag("reload_prompt").assertDoesNotExist()
+        composeRule.onNodeWithTag("apply_compute").assertDoesNotExist()
+        composeRule.runOnIdle { assertEquals(0, applyCount) }
+    }
+
+    @Test fun speedRowsNameMeasurementsFromOtherSettingsInsteadOfClaimingThisPhone() {
+        composeRule.setContent {
+            MobieTheme {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    ComputeSettingsPanel(
+                        backend = ComputeBackend.CPU, cpuThreads = 6,
+                        onBackendChange = {}, onCpuThreadsChange = {},
+                        hardware = hardware, artifactSizeBytes = 344_671_744,
+                        measurements = listOf(DecodeMeasurement(ComputeBackend.CPU, DecodeRunSettings(2, null),
+                            DecodeSpeed(7.0, 7.0, DecodeSpeedSource.MEASURED, 1))),
+                        options = ComputeOptions(backend = ComputeBackend.CPU, cpuThreads = 6),
+                    )
+                }
+            }
+        }
+        composeRule.onNodeWithTag("decode_speed_CPU").assertIsDisplayed()
+        composeRule.onNodeWithText("measured at different settings · last run").assertIsDisplayed()
+        composeRule.onNodeWithText("measured on this phone · last run").assertDoesNotExist()
     }
 
     @Test fun fourCorePickerClampsRestoredSelectionAndNeverOffersMoreWorkers() {
@@ -143,7 +186,8 @@ class ComputeSettingsPanelTest {
                         backend = ComputeBackend.CPU, cpuThreads = null,
                         onBackendChange = {}, onCpuThreadsChange = {},
                         hardware = hardware.copy(cpuClusters = emptyList()), artifactSizeBytes = 344_671_744,
-                        measuredSpeeds = mapOf(ComputeBackend.GPU to DecodeSpeed(30.0, 30.0, DecodeSpeedSource.MEASURED, 1)),
+                        measurements = listOf(DecodeMeasurement(ComputeBackend.GPU, DecodeRunSettings(null, null),
+                            DecodeSpeed(30.0, 30.0, DecodeSpeedSource.MEASURED, 1))),
                     )
                 }
             }
@@ -190,6 +234,11 @@ class ComputeSettingsPanelTest {
         composeRule.onNodeWithTag("advanced_speculative").performScrollTo().assertIsDisplayed()
         composeRule.onNode(hasText("Experimental — not yet tested on this phone") and
             hasAnyAncestor(hasTestTag("advanced_speculative"))).assertIsDisplayed()
+        composeRule.onNode(hasText("Experimental — not yet tested on this phone") and
+            hasAnyAncestor(hasTestTag("advanced_preface"))).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("activation_hint").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("FP16 was 7% slower than Auto in one S24 Ultra test.")
+            .assertIsDisplayed()
         composeRule.onNode(hasText("1024") and hasAnyAncestor(hasTestTag("advanced_context"))).assertDoesNotExist()
         composeRule.onNode(hasText("1280") and hasAnyAncestor(hasTestTag("advanced_context"))).performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("advanced_activation").performScrollTo().assertIsDisplayed()
@@ -207,7 +256,7 @@ class ComputeSettingsPanelTest {
                     ComputeSettingsPanel(options.backend, options.cpuThreads, { options = options.copy(backend = it) }, {},
                         hardware = hardware, artifactSizeBytes = 344_671_744, options = options,
                         activeCompute = ActiveCompute(ComputeBackend.CPU, 4, "GPU could not load this model. Using CPU."),
-                        needsApply = options != original, runtimeState = runtime, downloaded = true,
+                        needsApply = options != original, loaded = true, runtimeState = runtime, downloaded = true,
                         onOptionsChange = { options = it }, onApply = { applyCount++ })
                 }
             }
@@ -236,7 +285,8 @@ class ComputeSettingsPanelTest {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     ComputeSettingsPanel(options.backend, options.cpuThreads, { options = options.copy(backend = it) }, {},
                         hardware = hardware, artifactSizeBytes = 344_671_744, options = options, sampler = sampler,
-                        needsApply = AdvancedComputePolicy.needsApply(options, sampler, null, null),
+                        needsApply = AdvancedComputePolicy.needsApply(options, sampler, ComputeOptions(), SamplerSettings()),
+                        loaded = true,
                         runtimeState = RuntimeState.READY, downloaded = true, onOptionsChange = { options = it },
                         onSamplerChange = { sampler = it; null }, onApply = { applyCount++ },
                         onReset = { options = ComputeOptions(); sampler = SamplerSettings() })

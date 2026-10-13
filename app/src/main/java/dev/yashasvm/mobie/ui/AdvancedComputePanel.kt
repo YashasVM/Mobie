@@ -33,6 +33,9 @@ import dev.yashasvm.mobie.core.runtime.SamplerSettings
 
 private const val EXPERIMENT_WARNING = "Experimental — not yet tested on this phone"
 
+/** The one phone and model where activation was measured. Do not extend this claim to other phones or models. */
+private const val FP16_HINT = "FP16 was 7% slower than Auto in one S24 Ultra test."
+
 @Composable
 internal fun AdvancedComputePanel(
     options: ComputeOptions,
@@ -57,6 +60,8 @@ internal fun AdvancedComputePanel(
         modifier = Modifier.fillMaxWidth().testTag("advanced_toggle"),
     )
     if (!expanded) return
+    // Edits change the saved choice; selected values show what this artifact would actually run.
+    val effective = AdvancedComputePolicy.forArtifact(options, coreCount, capabilities)
     key(resetVersion) {
     Column(Modifier.testTag("advanced_controls"), verticalArrangement = Arrangement.spacedBy(18.dp)) {
         AdvancedField("CPU threads", "Auto chooses workers for your CPU layout; extra threads can slow it down.", "advanced_threads") {
@@ -69,7 +74,7 @@ internal fun AdvancedComputePanel(
             if (capabilities == null) {
                 Text("Run this model once to read its context limits.", style = MaterialTheme.typography.bodySmall)
             } else {
-                AdvancedChoices(listOf<Int?>(null) + capabilities.contextChoices(), options.contextTokens, { it?.toString() ?: "Auto" }) {
+                AdvancedChoices(listOf<Int?>(null) + capabilities.contextChoices(), effective.contextTokens, { it?.toString() ?: "Auto" }) {
                     onOptionsChange(options.copy(contextTokens = it))
                 }
                 Text("Artifact maximum: ${capabilities.maxContextTokens} tokens${if (!capabilities.dynamicContext) " · fixed size" else ""}",
@@ -85,12 +90,12 @@ internal fun AdvancedComputePanel(
         }
         if (capabilities?.supportsThinking == true) {
             AdvancedField("Thinking", "Reasoning uses the same output budget as the final answer.", "advanced_thinking") {
-                AdvancedChoices(listOf<Boolean?>(null, false, true), options.thinkingEnabled,
+                AdvancedChoices(listOf<Boolean?>(null, false, true), effective.thinkingEnabled,
                     { when (it) { null -> "Model default"; true -> "On"; false -> "Off" } }) {
                     onOptionsChange(options.copy(thinkingEnabled = it))
                 }
                 Text("Thinking budget: limits reasoning tokens; Model default keeps the artifact setting.", style = MaterialTheme.typography.bodySmall)
-                AdvancedChoices(listOf<Int?>(null, 0, 64, 128, 256, 512, 1_024), options.thinkingTokenBudget, { it?.toString() ?: "Model default" }) {
+                AdvancedChoices(listOf<Int?>(null, 0, 64, 128, 256, 512, 1_024), effective.thinkingTokenBudget, { it?.toString() ?: "Model default" }) {
                     onOptionsChange(options.copy(thinkingTokenBudget = it))
                 }
             }
@@ -100,10 +105,12 @@ internal fun AdvancedComputePanel(
                 onOptionsChange(options.copy(activationType = it))
             }
             Text(EXPERIMENT_WARNING, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(FP16_HINT, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag("activation_hint"))
         }
         if (capabilities?.supportsSpeculativeDecoding == true) {
             AdvancedField("Speculative decoding", "Uses the artifact's drafter to propose tokens; may need extra memory.", "advanced_speculative") {
-                AdvancedChoices(listOf<Boolean?>(null, false, true), options.speculativeDecoding,
+                AdvancedChoices(listOf<Boolean?>(null, false, true), effective.speculativeDecoding,
                     { when (it) { null -> "Model default"; true -> "On"; false -> "Off" } }) {
                     onOptionsChange(options.copy(speculativeDecoding = it))
                 }
@@ -114,6 +121,7 @@ internal fun AdvancedComputePanel(
             AdvancedChoices(listOf(false, true), options.prefillPrefaceOnInit, { if (it) "On" else "Off" }) {
                 onOptionsChange(options.copy(prefillPrefaceOnInit = it))
             }
+            Text(EXPERIMENT_WARNING, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         AdvancedField("Sampler", "Controls the reply's variation; it also changes fair speed comparisons.", "advanced_sampler") {
             NumberOption(sampler.temperature.toString(), "Temperature · 0–2", "sampler_temperature", validate) { text ->
@@ -195,10 +203,11 @@ internal fun ComputeSettingsDialog(
                 onBackendChange = { onOptionsChange(state.computeOptions.copy(backend = it)) },
                 onCpuThreadsChange = { onOptionsChange(state.computeOptions.copy(cpuThreads = it)) },
                 hardware = state.hardware, artifactSizeBytes = state.selectedArtifact?.sizeBytes ?: 0,
-                measuredSpeeds = state.measuredDecodeSpeeds, backendAdmissions = backendAdmissions,
+                measurements = state.decodeMeasurements, backendAdmissions = backendAdmissions,
                 options = state.computeOptions, sampler = state.sampler,
                 capabilities = state.computeCapabilities, activeCompute = state.activeCompute,
-                needsApply = state.computeNeedsApply, runtimeState = state.runtimeState, downloaded = state.downloadedPath != null,
+                needsApply = state.computeNeedsApply, loaded = state.appliedComputeOptions != null,
+                runtimeState = state.runtimeState, downloaded = state.downloadedPath != null,
                 onOptionsChange = onOptionsChange, onSamplerChange = onSamplerChange, onApply = onApply, onReset = onReset,
             )
         }

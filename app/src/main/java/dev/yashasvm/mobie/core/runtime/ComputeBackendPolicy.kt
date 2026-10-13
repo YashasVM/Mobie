@@ -26,10 +26,19 @@ internal object ComputeBackendPolicy {
     fun attempts(requested: ComputeBackend, gpuPlausible: Boolean, remembered: ComputeBackend?): List<ComputeBackend> =
         when (requested) {
             ComputeBackend.CPU -> listOf(ComputeBackend.CPU)
-            ComputeBackend.GPU -> listOf(ComputeBackend.GPU)
+            // An explicit GPU on an emulator or non-arm64 device is never attempted; see unavailableReason.
+            ComputeBackend.GPU -> if (gpuPlausible) listOf(ComputeBackend.GPU) else emptyList()
             ComputeBackend.NPU -> emptyList() // No qualified NPU artifacts in the v1 catalog.
             ComputeBackend.AUTO -> if (gpuPlausible) listOf(ComputeBackend.GPU, ComputeBackend.CPU) else listOf(ComputeBackend.CPU)
         }
+
+    /** Plain-language reason an explicit choice cannot run on this device, or null when it may run. */
+    fun unavailableReason(requested: ComputeBackend, gpuPlausible: Boolean): String? = when {
+        requested == ComputeBackend.NPU -> "NPU requires a qualified model build for this phone; none is available."
+        requested == ComputeBackend.GPU && !gpuPlausible ->
+            "GPU is not available on this device. Choose CPU or Auto to load this model."
+        else -> null
+    }
 }
 
 /** Result of a load that may have fallen back from an earlier backend. */

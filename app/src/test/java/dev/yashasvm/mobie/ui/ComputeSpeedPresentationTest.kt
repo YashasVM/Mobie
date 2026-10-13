@@ -47,6 +47,14 @@ class ComputeSpeedPresentationTest {
         assertEquals("measured on this phone · 4 recent runs", decodeSpeedSourceLabel(repeated))
     }
 
+    @Test fun `measurements from other thread or context settings are labelled as such`() {
+        val measured = DecodeSpeed(9.1, 12.2, DecodeSpeedSource.MEASURED, 4)
+        assertEquals("measured at different settings · 4 recent runs", decodeSpeedSourceLabel(measured, exactSettings = false))
+        assertEquals("measured at different settings · last run",
+            decodeSpeedSourceLabel(measured.copy(sampleCount = 1), exactSettings = false))
+        assertEquals("estimate", decodeSpeedSourceLabel(DecodeSpeed(8.3, 19.4, DecodeSpeedSource.ESTIMATED), exactSettings = false))
+    }
+
     @Test fun `backend RAM labels name the size and status, and stay silent for unknown size`() {
         val gib = 1024L * 1024L * 1024L
         assertEquals("needs ~3.0 GB RAM · Free memory first", backendRamLabel(result(Compatibility.WARNING, 3 * gib)))

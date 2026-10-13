@@ -68,9 +68,11 @@ import dev.yashasvm.mobie.core.model.MemoryAdmissionTier
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.device.BackendAdmission
 import dev.yashasvm.mobie.core.device.CompatibilityResolver
-import dev.yashasvm.mobie.core.device.DecodeSpeed
 import dev.yashasvm.mobie.core.device.CpuThreadPolicy
+import dev.yashasvm.mobie.core.device.DecodeMeasurement
+import dev.yashasvm.mobie.core.device.DecodeRunSettings
 import dev.yashasvm.mobie.core.device.DecodeSpeedEstimator
+import dev.yashasvm.mobie.core.device.matchDecodeMeasurement
 import dev.yashasvm.mobie.core.device.HardwareProfile
 import dev.yashasvm.mobie.core.runtime.ComputeBackend
 import dev.yashasvm.mobie.core.runtime.ComputeOptions
@@ -140,7 +142,7 @@ internal fun ModelScreen(
                     cpuThreads = state.cpuThreads,
                     hardware = state.hardware,
                     artifactSizeBytes = artifact.sizeBytes,
-                    measuredSpeeds = state.measuredDecodeSpeeds,
+                    measurements = state.decodeMeasurements,
                     backendAdmissions = backendAdmissions,
                     onBackendChange = onBackendChange,
                     onCpuThreadsChange = onCpuThreadsChange,
@@ -149,6 +151,7 @@ internal fun ModelScreen(
                     capabilities = state.computeCapabilities,
                     activeCompute = state.activeCompute,
                     needsApply = state.computeNeedsApply,
+                    loaded = state.appliedComputeOptions != null,
                     runtimeState = state.runtimeState,
                     downloaded = state.downloadedPath != null,
                     onOptionsChange = onComputeOptionsChange,
@@ -538,7 +541,8 @@ internal fun ComputeSettingsPanel(
     modifier: Modifier = Modifier,
     hardware: HardwareProfile? = null,
     artifactSizeBytes: Long = 0,
-    measuredSpeeds: Map<ComputeBackend, DecodeSpeed> = emptyMap(),
+    /** Past runs on this phone. Each speed row shows the closest run for the current thread and context settings. */
+    measurements: List<DecodeMeasurement> = emptyList(),
     /** Per requested backend: what it would run and its RAM. Empty hides the RAM lines. */
     backendAdmissions: Map<ComputeBackend, BackendAdmission> = emptyMap(),
     options: ComputeOptions = ComputeOptions(backend = backend, cpuThreads = cpuThreads),
@@ -546,6 +550,8 @@ internal fun ComputeSettingsPanel(
     capabilities: ComputeCapabilities? = null,
     activeCompute: ActiveCompute? = null,
     needsApply: Boolean = false,
+    /** Whether an engine is loaded with saved settings. Pending changes only ask for a reload then. */
+    loaded: Boolean = false,
     runtimeState: RuntimeState = RuntimeState.IDLE,
     downloaded: Boolean = false,
     onOptionsChange: (ComputeOptions) -> Unit = { onBackendChange(it.backend); onCpuThreadsChange(it.cpuThreads) },
@@ -554,6 +560,9 @@ internal fun ComputeSettingsPanel(
     onReset: () -> Unit = { onOptionsChange(ComputeOptions()); onSamplerChange(SamplerSettings()) },
 ) {
     val coreCount = hardware?.cpuCoreCount?.takeIf { it > 0 } ?: Runtime.getRuntime().availableProcessors()
+    // Speeds match the settings the next load would use, after this artifact's limits.
+    val effective = AdvancedComputePolicy.forArtifact(options, coreCount, capabilities)
+    val runSettings = DecodeRunSettings(cpuThreads = effective.cpuThreads, contextTokens = effective.contextTokens)
     var inputsValid by remember { mutableStateOf(true) }
     TuiWindow("compute", modifier.fillMaxWidth().testTag("compute_settings")) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -589,8 +598,9 @@ internal fun ComputeSettingsPanel(
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 FlagHeader("Generation speed", "tokens per second")
                 listOf(ComputeBackend.CPU, ComputeBackend.GPU).forEach { choice ->
-                    val prediction = remember(hardware, artifactSizeBytes, choice, measuredSpeeds[choice]) {
-                        DecodeSpeedEstimator.predict(hardware, artifactSizeBytes, choice, measuredSpeeds[choice])
+                    val match = remember(measurements, choice, runSettings) { matchDecodeMeasurement(measurements, choice, runSettings) }
+                    val prediction = remember(hardware, artifactSizeBytes, choice, match?.speed) {
+                        DecodeSpeedEstimator.predict(hardware, artifactSizeBytes, choice, match?.speed)
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text(choice.name, style = Mobie.numeric.small,
@@ -598,7 +608,7 @@ internal fun ComputeSettingsPanel(
                         Column(Modifier.weight(1f).testTag("decode_speed_${choice.name}")) {
                             Text(prediction.speed?.let(::decodeSpeedLabel) ?: "Speed unavailable",
                                 style = Mobie.numeric.small, color = MaterialTheme.colorScheme.onSurface)
-                            Text(prediction.speed?.let(::decodeSpeedSourceLabel) ?: prediction.unavailableReason.orEmpty(),
+                            Text(prediction.speed?.let { decodeSpeedSourceLabel(it, exactSettings = match?.exactSettings ?: true) } ?: prediction.unavailableReason.orEmpty(),
                                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             backendAdmissions[choice]?.result?.let { result ->
                                 backendRamLabel(result)?.let { ram ->
@@ -617,7 +627,11 @@ internal fun ComputeSettingsPanel(
             Text("Auto tries GPU when it fits, then CPU if needed. GPU support is checked when loading.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             AdvancedComputePanel(options, sampler, coreCount, capabilities, onOptionsChange, onSamplerChange, onReset) { inputsValid = it }
-            if (needsApply) {
+            if (!loaded) {
+                // Nothing is loaded, so there is no reload to ask for; the choices simply wait for the next load.
+                Text("Saved. Used next time you load a model.", modifier = Modifier.testTag("saved_settings"),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else if (needsApply) {
                 Text("Changes need a reload. Your saved conversation will be kept.", modifier = Modifier.testTag("reload_prompt"),
                     style = MaterialTheme.typography.bodySmall)
                 when {

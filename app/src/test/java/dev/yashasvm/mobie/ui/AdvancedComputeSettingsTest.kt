@@ -1,5 +1,6 @@
 package dev.yashasvm.mobie.ui
 
+import dev.yashasvm.mobie.core.runtime.ActiveCompute
 import dev.yashasvm.mobie.core.runtime.ActivationType
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
@@ -107,5 +108,52 @@ class AdvancedComputeSettingsTest {
         assertTrue(AdvancedComputePolicy.needsApply(loaded, SamplerSettings(temperature = 0.0), loaded, SamplerSettings()))
         assertFalse(AdvancedComputePolicy.needsApply(ComputeOptions(), SamplerSettings(), null, null))
         assertTrue(AdvancedComputePolicy.needsApply(ComputeOptions(), SamplerSettings(), loaded, SamplerSettings()))
+    }
+
+    @Test fun `saved choices with nothing loaded never ask for a reload`() {
+        val saved = ComputeOptions(ComputeBackend.GPU, 4, maxOutputTokens = 128, activationType = ActivationType.FP16)
+        assertFalse(AdvancedComputePolicy.needsApply(saved, SamplerSettings(temperature = 0.0), null, null))
+        val nothingLoaded = MobieUiState(computeOptions = saved, sampler = SamplerSettings(temperature = 0.0))
+        assertFalse(nothingLoaded.computeNeedsApply)
+        // Once an engine is loaded with these options, a later change does ask for a reload.
+        val loaded = nothingLoaded.copy(appliedComputeOptions = nothingLoaded.effectiveComputeOptions, appliedSampler = nothingLoaded.sampler,
+            runtimeState = RuntimeState.READY, chatting = true)
+        assertFalse(loaded.computeNeedsApply)
+        assertTrue(loaded.copy(computeOptions = saved.copy(maxOutputTokens = 64)).computeNeedsApply)
+    }
+
+    @Test fun `artifact limits are a view over saved choices, so a saved thinking override survives another artifact`() {
+        val saved = ComputeOptions(thinkingEnabled = true, thinkingTokenBudget = 256)
+        val withoutThinking = MobieUiState(computeOptions = saved, computeCapabilities = ComputeCapabilities(4_096, true, false, false))
+        assertNull(withoutThinking.effectiveComputeOptions.thinkingEnabled)
+        assertEquals(saved, withoutThinking.computeOptions)
+        // What was loaded is the effective view, so it is not a pending change.
+        val loaded = withoutThinking.copy(appliedComputeOptions = withoutThinking.effectiveComputeOptions,
+            appliedSampler = SamplerSettings(), runtimeState = RuntimeState.READY, chatting = true)
+        assertFalse(loaded.computeNeedsApply)
+        val withThinking = loaded.copy(computeCapabilities = ComputeCapabilities(4_096, true, true, false))
+        assertEquals(true, withThinking.effectiveComputeOptions.thinkingEnabled)
+        assertEquals(saved, withThinking.computeOptions)
+    }
+
+    @Test fun `a refused reload keeps the running engine and names it`() {
+        val running = ActiveCompute(ComputeBackend.CPU, cpuThreads = 4, contextTokens = 2_048)
+        val previous = MobieUiState(chatting = true, runtimeState = RuntimeState.READY, activeCompute = running)
+        val pending = previous.copy(chatting = true, runtimeState = RuntimeState.LOADING, activeCompute = null, error = null)
+        val refused = pending.afterRefusedReload(previous, running, "GPU needs more memory than is free.")
+        assertTrue(refused.chatting)
+        assertEquals(RuntimeState.READY, refused.runtimeState)
+        assertEquals(running, refused.activeCompute)
+        assertEquals("Kept running on CPU. GPU needs more memory than is free.", refused.error)
+    }
+
+    @Test fun `a refused reload with nothing loaded returns to idle with only the reason`() {
+        val previous = MobieUiState()
+        val pending = previous.copy(chatting = true, runtimeState = RuntimeState.LOADING)
+        val refused = pending.afterRefusedReload(previous, null, "Close other apps to free about 1.2 GB before loading.")
+        assertFalse(refused.chatting)
+        assertEquals(RuntimeState.IDLE, refused.runtimeState)
+        assertNull(refused.activeCompute)
+        assertEquals("Close other apps to free about 1.2 GB before loading.", refused.error)
     }
 }

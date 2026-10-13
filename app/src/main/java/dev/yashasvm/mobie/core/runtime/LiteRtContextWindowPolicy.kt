@@ -31,4 +31,47 @@ internal object LiteRtContextWindowPolicy {
         }
         return minOf(advertised, MIN_USEFUL_CONTEXT_TOKENS)
     }
+
+    /**
+     * The context LiteRT is given when [backend] loads an artifact. The pre-flight resolver and the
+     * native load both call this, so a verdict is never judged at one context and loaded at another.
+     * Each backend gets its own Auto context because GPU reserves graphics memory per token. Explicit
+     * requests are honoured as given, and fixed artifacts keep their own size.
+     */
+    fun contextFor(
+        maxContextTokens: Int,
+        dynamicContext: Boolean,
+        requestedContextTokens: Int?,
+        advertisedContextWindowTokens: Int,
+        modelWeightsBytes: Long,
+        totalRamBytes: Long,
+        availableRamBytes: Long,
+        lowMemoryThresholdBytes: Long,
+        isLowRamDevice: Boolean,
+        backend: ComputeBackend,
+    ): Int = resolveRequested(
+        maxContextTokens = maxContextTokens,
+        dynamicContext = dynamicContext,
+        requested = requestedContextTokens,
+        automatic = select(
+            advertisedContextWindowTokens = advertisedContextWindowTokens,
+            modelWeightsBytes = modelWeightsBytes,
+            totalRamBytes = totalRamBytes,
+            availableRamBytes = availableRamBytes,
+            lowMemoryThresholdBytes = lowMemoryThresholdBytes,
+            isLowRamDevice = isLowRamDevice,
+            backend = backend,
+        ),
+    )
+
+    /** Throws when a request cannot be honoured. Shared with [ComputeCapabilities.resolveContext]. */
+    fun resolveRequested(maxContextTokens: Int, dynamicContext: Boolean, requested: Int?, automatic: Int): Int {
+        require(maxContextTokens > 0) { "The artifact has no known context limit." }
+        if (!dynamicContext) {
+            require(requested == null || requested == maxContextTokens) { "This artifact requires a fixed $maxContextTokens-token context." }
+            return maxContextTokens
+        }
+        require(requested == null || requested <= maxContextTokens) { "The requested context exceeds the artifact's $maxContextTokens-token limit." }
+        return requested ?: minOf(automatic, maxContextTokens)
+    }
 }
