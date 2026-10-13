@@ -1,6 +1,10 @@
 package dev.yashasvm.mobie.core.runtime
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.FlowCollector
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.flow
 
 internal inline fun <T> recoverableRuntimeResult(block: () -> T): Result<T> = try {
     Result.success(block())
@@ -113,3 +117,15 @@ internal fun rethrowNonRecoverableRuntimeFailure(error: Throwable) {
     if (error is CancellationException) throw error
     if (isFatalRuntimeFailure(error)) throw error
 }
+
+/**
+ * A generation flow whose failures become one terminal [InferenceEvent.Error]. The failure is reported
+ * only by the outer `catch`, which never handles a failure thrown by the downstream collector, so a
+ * collector that throws during an emit (or cancels) reaches its caller unchanged. The [body] must not
+ * emit from a `catch` of its own; rethrow there and let this flow report it.
+ */
+internal fun generationEventFlow(body: suspend FlowCollector<InferenceEvent>.() -> Unit): Flow<InferenceEvent> =
+    flow(body).catch { error ->
+        rethrowNonRecoverableRuntimeFailure(error)
+        emit(runtimeFailureEvent(error))
+    }

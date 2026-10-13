@@ -31,8 +31,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.sync.Mutex
@@ -247,7 +245,7 @@ class LiteRtLmRuntimeAdapter(
         imagePath: String?,
         config: GenerationConfig,
     ): Flow<InferenceEvent> {
-        return flow {
+        return generationEventFlow {
             val generationStartedAt = SystemClock.elapsedRealtime()
             val partialAnswer = StringBuilder()
             val generationPermit = cancellationState.captureGenerationPermit()
@@ -394,8 +392,10 @@ class LiteRtLmRuntimeAdapter(
                                 ?.let(error::addSuppressed)
                         }
                         rememberInterruptedTurn(prompt, partialAnswer.toString().takeIf { it.isNotBlank() }, imagePath)
-                        rethrowNonRecoverableRuntimeFailure(error)
-                        emit(runtimeFailureEvent(error))
+                        // Rethrow instead of emitting. Emitting here would repeat an emit that just failed when
+                        // the collector threw, which breaks Flow exception transparency. generationEventFlow
+                        // reports the failure once, and only for failures that did not come from the collector.
+                        throw error
                     } finally {
                         activeHintTracker = null
                         hints.close()
@@ -405,9 +405,6 @@ class LiteRtLmRuntimeAdapter(
                     cancelRequested = false
                 }
             }
-        }.catch { error ->
-            rethrowNonRecoverableRuntimeFailure(error)
-            emit(runtimeFailureEvent(error))
         }.flowOn(Dispatchers.Default)
     }
 
