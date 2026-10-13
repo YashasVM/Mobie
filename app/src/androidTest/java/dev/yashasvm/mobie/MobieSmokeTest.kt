@@ -20,20 +20,20 @@ class MobieSmokeTest {
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText("continue").fetchSemanticsNodes().isNotEmpty() ||
                 composeRule.onAllNodesWithText("Connect Hugging Face").fetchSemanticsNodes().isNotEmpty() ||
-                composeRule.onAllNodesWithText("Models for this phone").fetchSemanticsNodes().isNotEmpty()
+                composeRule.onAllNodesWithText("Recommended").fetchSemanticsNodes().isNotEmpty()
         }
         if (composeRule.onAllNodesWithText("continue").fetchSemanticsNodes().isNotEmpty()) {
             composeRule.onNodeWithText("continue").performClick()
         }
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText("Connect Hugging Face").fetchSemanticsNodes().isNotEmpty() ||
-                composeRule.onAllNodesWithText("Models for this phone").fetchSemanticsNodes().isNotEmpty()
+                composeRule.onAllNodesWithText("Recommended").fetchSemanticsNodes().isNotEmpty()
         }
         if (composeRule.onAllNodesWithText("Connect Hugging Face").fetchSemanticsNodes().isNotEmpty()) {
             composeRule.onNodeWithText("Connect Hugging Face").assertIsDisplayed()
             composeRule.onNodeWithText("Use public models without a token").performClick()
         }
-        composeRule.onNodeWithText("Models for this phone").assertIsDisplayed()
+        composeRule.onNodeWithText("Recommended").assertIsDisplayed()
 
         composeRule.onNodeWithTag("bottom_nav_settings").performClick()
         composeRule.onNodeWithText("Hugging Face access").assertIsDisplayed()

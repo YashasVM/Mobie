@@ -60,12 +60,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithCache
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.RectangleShape
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
@@ -363,25 +359,7 @@ private fun Lead() {
 @Composable
 private fun AppBackdrop(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     val background = MaterialTheme.colorScheme.background
-    // A faint scanline texture, drawn once per size. Lines are light on dark and dark on light,
-    // at alpha 0.03, so they read as CRT texture rather than as a pattern.
-    val scanline = if (background.luminance() < .5f) Color.White.copy(alpha = .03f) else Color.Black.copy(alpha = .03f)
-    Box(
-        modifier
-            .background(background)
-            .drawWithCache {
-                val step = 4.dp.toPx()
-                val thickness = 1.dp.toPx()
-                val lines = Path().apply {
-                    var y = 0f
-                    while (y < size.height) {
-                        addRect(Rect(0f, y, size.width, y + thickness))
-                        y += step
-                    }
-                }
-                onDrawBehind { drawPath(lines, scanline) }
-            },
-    ) {
+    Box(modifier.background(background)) {
         CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground) {
             content()
         }
