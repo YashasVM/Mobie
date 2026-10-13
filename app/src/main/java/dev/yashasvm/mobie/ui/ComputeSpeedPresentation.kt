@@ -1,9 +1,11 @@
 package dev.yashasvm.mobie.ui
 
+import dev.yashasvm.mobie.core.device.BackendAdmission
 import dev.yashasvm.mobie.core.device.DecodeSpeed
 import dev.yashasvm.mobie.core.device.DecodeSpeedConfidence
 import dev.yashasvm.mobie.core.device.DecodeSpeedSource
 import dev.yashasvm.mobie.core.device.HardwareProfile
+import dev.yashasvm.mobie.core.model.CompatibilityResult
 import java.util.Locale
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -49,3 +51,12 @@ internal fun decodeSpeedSourceLabel(speed: DecodeSpeed): String = when (speed.so
     DecodeSpeedSource.ESTIMATED -> if (speed.confidence == DecodeSpeedConfidence.LOW) "estimate · lower confidence" else "estimate"
     DecodeSpeedSource.MEASURED -> "measured on this phone · ${if (speed.sampleCount == 1) "last run" else "${speed.sampleCount} recent runs"}"
 }
+
+/** One backend row's RAM, e.g. `needs ~3.6 GB RAM · Free memory first`; null when the size is unknown. */
+internal fun backendRamLabel(result: CompatibilityResult): String? =
+    result.estimatedRamBytes.takeIf { it > 0 }?.let { "needs ~${formatBytes(it)} RAM · ${statusLabel(result.status)}" }
+
+/** Auto's pick, e.g. `Auto uses GPU · needs ~3.6 GB RAM`. */
+internal fun autoPickLabel(admission: BackendAdmission): String =
+    "Auto uses ${admission.backend.name}" +
+        admission.result.estimatedRamBytes.takeIf { it > 0 }?.let { " · needs ~${formatBytes(it)} RAM" }.orEmpty()

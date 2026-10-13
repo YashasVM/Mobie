@@ -239,6 +239,8 @@ data class DeviceProfile(
     val swapTotalBytes: Long = 0,
     val swapFreeBytes: Long = 0,
     val appPssBytes: Long = 0,
+    /** Whether Auto may try GPU at all (real arm64 device, not an emulator). Unknown is treated as no. */
+    val gpuAttemptable: Boolean = false,
 )
 
 data class CompatibilityResult(
