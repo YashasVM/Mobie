@@ -72,15 +72,19 @@ internal fun runAllRuntimeCleanup(vararg cleanup: () -> Unit) {
     firstFailure?.let { throw it }
 }
 
-internal inline fun <T : Any> replaceRuntimeResourceBeforeClosingPrevious(
+/** Release the old native session before allocating another; failed creation leaves no session. */
+internal inline fun <T : Any> replaceRuntimeResourceAfterClosingPrevious(
     previous: T?,
+    clearPrevious: () -> Unit,
     createReplacement: () -> T,
     installReplacement: (T) -> Unit,
     closePrevious: (T) -> Unit,
 ) {
+    // Keep ownership if close fails, so no replacement can overlap an unreleased session.
+    previous?.let(closePrevious)
+    clearPrevious()
     val replacement = createReplacement()
     installReplacement(replacement)
-    previous?.let(closePrevious)
 }
 
 internal fun rethrowNonRecoverableRuntimeFailure(error: Throwable) {

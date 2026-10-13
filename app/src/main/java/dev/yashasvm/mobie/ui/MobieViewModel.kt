@@ -174,7 +174,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             current.copy(
                 device = device,
                 compatibility = current.selectedArtifact?.let { artifact ->
-                    container.compatibility.resolve(artifact, device,
+                    container.compatibility.resolve(admissionArtifact(artifact), device,
                         current.selected?.supportsVision == true, admissionBackend(current.computeBackend))
                 },
             )
@@ -228,6 +228,10 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     private fun admissionBackend(selected: ComputeBackend = state.value.computeBackend): ComputeBackend =
         selected.takeIf { it != ComputeBackend.AUTO } ?: ComputeBackend.CPU
 
+    private fun admissionArtifact(artifact: ModelArtifact?, options: ComputeOptions = state.value.computeOptions): ModelArtifact? =
+        AdvancedComputePolicy.compatibilityArtifact(artifact, options,
+            state.value.computeCapabilities.takeIf { artifact == state.value.selectedArtifact })
+
     fun setComputeBackend(backend: ComputeBackend) = updateComputeOptions(state.value.computeOptions.copy(backend = backend))
 
     fun setCpuThreads(threads: Int?) = updateComputeOptions(state.value.computeOptions.copy(cpuThreads = threads))
@@ -244,7 +248,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             val device = latest.device
             val artifact = latest.selectedArtifact
             if (device == null || artifact == null) updated else updated.copy(
-                compatibility = container.compatibility.resolve(artifact, device,
+                compatibility = container.compatibility.resolve(admissionArtifact(artifact, sanitized), device,
                     latest.selected?.supportsVision == true, admissionBackend(sanitized.backend)),
             )
         }
@@ -265,11 +269,12 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         cancelInference()
         val operation = nextRuntimeOperation()
         val revision = selectionRevision.get()
-        mutableState.update { it.copy(chatting = true, runtimeState = RuntimeState.LOADING, activeCompute = null, error = null) }
+        mutableState.update { it.copy(chatting = true, runtimeState = RuntimeState.LOADING, activeCompute = null,
+            stats = null, telemetry = RunTelemetry(), error = null) }
         inferenceJob = viewModelScope.launch {
             val device = readDeviceProfile()
             if (!isCurrentRuntimeOperation(operation) || selectionRevision.get() != revision || state.value.selectedArtifact != artifact) return@launch
-            val compatibility = container.compatibility.resolve(artifact, device,
+            val compatibility = container.compatibility.resolve(admissionArtifact(artifact), device,
                 model.supportsVision, admissionBackend())
             mutableState.update { it.copy(device = device, compatibility = compatibility) }
             if (compatibility.status == Compatibility.INCOMPATIBLE || compatibility.memoryTier == MemoryAdmissionTier.FITS_AFTER_RECLAIM) {
@@ -365,7 +370,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 recentModels = if (presentedModel == null) it.recentModels else {
                     (listOf(presentedModel) + it.recentModels.filterNot { recent -> recent.id == presentedModel.id }).take(5)
                 },
-                compatibility = artifact?.let { candidate -> container.compatibility.resolve(candidate, device, model?.supportsVision == true, admissionBackend()) },
+                compatibility = artifact?.let { candidate -> container.compatibility.resolve(admissionArtifact(candidate), device, model?.supportsVision == true, admissionBackend()) },
                 download = null,
                 downloadedPath = null,
                 chatting = false,
@@ -415,7 +420,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val artifact = current.selectedArtifact ?: return
         viewModelScope.launch {
             val device = readDeviceProfile()
-            val compatibility = container.compatibility.resolve(artifact, device, model.supportsVision, admissionBackend())
+            val compatibility = container.compatibility.resolve(admissionArtifact(artifact), device, model.supportsVision, admissionBackend())
             mutableState.update { it.copy(device = device, compatibility = compatibility, error = null) }
             if (model.gated && !state.value.tokenConfigured) {
                 mutableState.update { it.copy(error = "This gated model requires a Hugging Face token.") }
@@ -445,7 +450,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             viewModelScope.launch {
                 val current = state.value
                 val device = readDeviceProfile()
-                val compatibility = container.compatibility.resolve(current.selectedArtifact, device,
+                val compatibility = container.compatibility.resolve(admissionArtifact(current.selectedArtifact), device,
                     current.selected?.supportsVision == true, admissionBackend())
                 mutableState.update { it.copy(device = device, compatibility = compatibility) }
                 if (compatibility.status == Compatibility.INCOMPATIBLE) {

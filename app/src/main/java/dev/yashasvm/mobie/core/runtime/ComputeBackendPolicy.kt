@@ -52,8 +52,8 @@ internal fun describeBackendLoadFailure(backend: ComputeBackend, failure: Except
     }
 
 /**
- * Under Auto, drops backends that do not fit in memory right now (GPU keeps a private copy of
- * the weights) so Auto falls through to CPU instead of being blocked or pushing Android to kill
+ * Under Auto, drops backends that do not fit in memory right now (GPU needs graphics buffers and
+ * private weights) so Auto falls through to CPU instead of being blocked or pushing Android to kill
  * apps. The last attempt is always kept; the general load gate decides whether it may run.
  * Explicit choices are not filtered here.
  */
@@ -63,12 +63,16 @@ internal fun admitAttemptsForMemory(
     blockReasonFor: (ComputeBackend) -> String?,
 ): AdmittedAttempts {
     if (requested != ComputeBackend.AUTO || attempts.size < 2) return AdmittedAttempts(attempts, null)
-    val skipped = attempts.dropLast(1).filter { blockReasonFor(it) != null }
+    val skipped = attempts.dropLast(1).mapNotNull { backend ->
+        blockReasonFor(backend)?.let { reason -> backend to reason.trim().trimEnd('.') }
+    }
     if (skipped.isEmpty()) return AdmittedAttempts(attempts, null)
-    val kept = attempts - skipped.toSet()
+    val kept = attempts - skipped.map { it.first }.toSet()
     return AdmittedAttempts(
         kept,
-        "${skipped.joinToString { it.name }} skipped: not enough free memory for its copy of the weights. Using ${kept.first().name}.",
+        skipped.joinToString(" ") { (backend, reason) ->
+            "${backend.name} skipped: $reason."
+        } + " Using ${kept.first().name}.",
     )
 }
 

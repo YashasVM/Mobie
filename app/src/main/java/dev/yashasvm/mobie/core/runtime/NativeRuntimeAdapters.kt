@@ -196,41 +196,18 @@ class LiteRtLmRuntimeAdapter(
 
     override suspend fun resetConversation(history: List<RuntimeMessage>): Result<Unit> =
         withContext(Dispatchers.Default) {
-            val transition = cancellationState.beginLifecycleTransition()
-            try {
-                val cancellationFailure = requestCancellationForLifecycleTransition()
-                generation.withLock {
-                    lifecycle.withLock {
-                        recoverableRuntimeResult {
-                            val activeEngine = engine
-                                ?: throw IllegalStateException("Load a model before resetting the conversation")
-                            val restored = ConversationHistoryPolicy.select(history, contextWindowTokens)
-                            val previous = conversation
-                            conversationDirty = true
-                            val replaceConversation = {
-                                replaceRuntimeResourceBeforeClosingPrevious(
-                                    previous = previous,
-                                    createReplacement = { activeEngine.createConversation(conversationConfig(restored)) },
-                                    installReplacement = { replacement ->
-                                        conversation = replacement
-                                        committedHistory = restored
-                                        nativeConversationHasImage = hasRestorableHistoryImage(restored)
-                                        conversationDirty = false
-                                        cancelRequested = false
-                                    },
-                                    closePrevious = { stale -> stale.close() },
-                                )
-                            }
-                            if (cancellationFailure != null) {
-                                rethrowAfterRuntimeCleanup(cancellationFailure, replaceConversation)
-                            }
-                            replaceConversation()
-                            Unit
-                        }
-                    }
-                }
-            } finally {
-                cancellationState.endLifecycleTransition(transition)
+            resetRuntimeConversation(
+                cancellationState = cancellationState,
+                generation = generation,
+                lifecycle = lifecycle,
+                requestCancellation = ::requestCancellationForLifecycleTransition,
+            ) {
+                checkNotNull(engine) { "Load a model before resetting the conversation" }
+                // Persist the requested chat even if native allocation fails. The next send must
+                // replay this history, rather than resurrecting the previous chat.
+                committedHistory = ConversationHistoryPolicy.select(history, contextWindowTokens)
+                rebuildConversationFromCommittedHistory()
+                cancelRequested = false
             }
         }
 
@@ -258,7 +235,7 @@ class LiteRtLmRuntimeAdapter(
                             "Vision initialization failed on this device. The model is still available for text-only chat.",
                         )
                     }
-                    if (conversationDirty || requestedSampler != activeSampler || (imagePath != null && nativeConversationHasImage)) {
+                    if (conversation == null || conversationDirty || requestedSampler != activeSampler || (imagePath != null && nativeConversationHasImage)) {
                         rebuildConversationFromCommittedHistory(
                             restoreHistoryImage = imagePath == null,
                             sampler = requestedSampler,
@@ -605,8 +582,14 @@ class LiteRtLmRuntimeAdapter(
         // conversation loses its measured occupancy, so bound the actual pending preface again.
         val restored = ConversationHistoryPolicy.select(committedHistory, contextWindowTokens)
         val previous = conversation
-        replaceRuntimeResourceBeforeClosingPrevious(
+        conversationDirty = true
+        replaceRuntimeResourceAfterClosingPrevious(
             previous = previous,
+            clearPrevious = {
+                conversation = null
+                committedHistory = restored
+                nativeConversationHasImage = false
+            },
             createReplacement = {
                 activeEngine.createConversation(
                     conversationConfig(restored, restoreHistoryImage = restoreHistoryImage, sampler = sampler),

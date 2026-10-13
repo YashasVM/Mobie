@@ -1,6 +1,8 @@
 package dev.yashasvm.mobie.ui
 
 import dev.yashasvm.mobie.core.runtime.ActivationType
+import dev.yashasvm.mobie.core.model.ModelArtifact
+import dev.yashasvm.mobie.core.model.ModelFormat
 import dev.yashasvm.mobie.core.runtime.ComputeBackend
 import dev.yashasvm.mobie.core.runtime.ComputeCapabilities
 import dev.yashasvm.mobie.core.runtime.ComputeOptions
@@ -57,6 +59,16 @@ class AdvancedComputeSettingsTest {
         val fixed = ComputeCapabilities(1_280, false, false, false)
         assertNull(AdvancedComputePolicy.forArtifact(options.copy(contextTokens = 1_024), 4, fixed).contextTokens)
         assertEquals(1_280, AdvancedComputePolicy.forArtifact(options.copy(contextTokens = 1_280), 4, fixed).contextTokens)
+    }
+
+    @Test fun `memory presentation uses only a verified allowed context and preserves artifact identity`() {
+        val artifact = ModelArtifact("model.ctx4096.litertlm", "https://example.invalid/model", 344_671_744,
+            format = ModelFormat.LITERT_LM, contextWindowTokens = 4_096)
+        val smaller = ComputeOptions(contextTokens = 1_024)
+        assertEquals(artifact, AdvancedComputePolicy.compatibilityArtifact(artifact, smaller, null))
+        assertEquals(artifact.copy(contextWindowTokens = 1_024), AdvancedComputePolicy.compatibilityArtifact(artifact, smaller, supported))
+        assertEquals(artifact, AdvancedComputePolicy.compatibilityArtifact(artifact, smaller, supported.copy(dynamicContext = false)))
+        assertEquals(4_096, artifact.contextWindowTokens)
     }
 
     @Test fun `sampler sanitation preserves seed and finite safe boundaries`() {
