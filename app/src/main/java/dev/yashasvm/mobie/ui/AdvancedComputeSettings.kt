@@ -1,6 +1,7 @@
 package dev.yashasvm.mobie.ui
 
 import dev.yashasvm.mobie.core.device.CpuThreadPolicy
+import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.BuildConfig
 import java.security.MessageDigest
 import dev.yashasvm.mobie.core.runtime.ActivationType
@@ -72,6 +73,12 @@ internal object AdvancedComputePolicy {
         speculativeDecoding = options.speculativeDecoding.takeIf { capabilities?.supportsSpeculativeDecoding == true },
         artifactIdentity = "",
     )
+
+    /** Change the RAM estimate only when this exact artifact's metadata permits the override. */
+    fun compatibilityArtifact(artifact: ModelArtifact?, options: ComputeOptions, capabilities: ComputeCapabilities?): ModelArtifact? {
+        val context = options.contextTokens?.takeIf { it in capabilities?.contextChoices().orEmpty() } ?: return artifact
+        return artifact?.copy(contextWindowTokens = context)
+    }
 
     fun sampler(settings: SamplerSettings): SamplerSettings = SamplerSettings(
         temperature = settings.temperature.takeIf { it.isFinite() }?.coerceIn(0.0, 2.0) ?: 0.7,

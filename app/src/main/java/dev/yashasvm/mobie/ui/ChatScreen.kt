@@ -545,16 +545,17 @@ private fun RunDetails(
     }
 }
 
-private fun runJson(state: MobieUiState): String {
+internal fun runJson(state: MobieUiState): String {
     val stats = state.stats
     val live = state.telemetry
+    val sampler = state.appliedSampler ?: state.sampler
     fun value(value: Any?): Any = value ?: JSONObject.NULL
     return JSONObject().apply {
         put("modelId", value(state.selected?.id))
         put("artifact", value(state.selectedArtifact?.fileName))
         put("compute", value(state.activeCompute?.label))
-        put("sampler", JSONObject().put("temperature", state.sampler.temperature).put("topK", state.sampler.topK)
-            .put("topP", state.sampler.topP).put("seed", state.sampler.seed))
+        put("sampler", JSONObject().put("temperature", sampler.temperature).put("topK", sampler.topK)
+            .put("topP", sampler.topP).put("seed", sampler.seed))
         put("firstSdkChunkMs", value(live.firstChunkMs))
         put("sdkChunks", live.sdkChunks)
         put("liveSdkChunksPerSecond", value(live.liveSdkChunksPerSecond))

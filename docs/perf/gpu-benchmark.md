@@ -77,6 +77,18 @@ Peak PSS exceeds the current generic admission heuristic substantially. Before b
 Evidence is in `resume-sustained-gpu/`, including per-sample thermal/TTFT/decode/PSS under `samples`, native logs, before/after thermalservice output, and `mid-run-meminfo.txt`. Artifact, SHA, quantization, device, Android, and runtime are on the parent result record and apply to every nested sample.
 
 
+## Code changes after the sustained run
+
+A2 changed reset/rebuild to cancel and await active generation, close the old native conversation, then create the replacement. Failed allocation surfaces an error and leaves the selected history pending for the next send to retry. LiteRT-LM 0.18.0 supports this order through synchronous JNI conversation deletion and a still-live engine.
+
+GPU admission adds `contextTokens * max(576 KiB, artifactBytes / 1024)` for graphics buffers to existing weights, overhead, and KV budgets. This rounds up the measured context-sweep slope of about 518 KiB/token and covers the 2.26 GB GL allocation at 4096. The reference artifact's one-session estimates are 1.83 GiB at 1024 and 3.64 GiB at 4096. Auto preserves the admission reason when GPU is skipped for CPU.
+
+These changes are **unverified on the phone until re-run**. All measurements above predate them. Reset latency and driver memory release still need physical validation. Exact re-run commands and B's compatibility-estimator integration hook are in `/home/yvm/code/Mobie-research/handoff-A-gpu-runtime.md`. Backend defaults and benchmark harness are unchanged.
+
+
+A2's latest required gates after concurrent B edits passed in 13s with 425 unit tests and no failures/errors/skips, lint 0 errors and 48 warnings, and debug assembly. Log `/tmp/mobie-A2-shared-gates.log`; isolated reports and APKs under `/tmp/mobie-A2-build/app/`. Test APK assembly passed in the preceding 424-test build, logged in `/tmp/mobie-A2-final-gates.log`; rebuild it after B's UI edits before installing. A2 ran no device commands.
+
+
 ## Phone unavailable at session end
 
 The user requested an immediate stop before taking the phone. Agent A ran `adb -s RZCY81Q06XR shell am force-stop dev.yashasvm.mobie` successfully and stopped the local phone runner. No new phone command or instrumentation starts afterward. CPU4 instrumentation reported "Process crashed" after the force-stop; this is an interrupted test, not evidence of a spontaneous runtime failure.
@@ -99,3 +111,5 @@ Completed cases are frozen as `completed-results.jsonl` under `resume-sdk-contex
 `assembleRelease` passed in 1m33s using the isolated A build directory. The unsigned release APK contains the exact 0.18.0 AAR LICENSE, 16086 bytes, SHA-256 `ec40a2da15ab0e8b44a9f787ab210203d3cad32572f5f99744a88eb90ff9ba4e`, and THIRD_PARTY_NOTICE, 2198164 bytes, SHA-256 `52a70c82685debf85d4ea9d677615b8636ffd3b75435ce71f247bf5982fb2ba2`. Debug packaging also matches exactly. R8 warns that some dependency Kotlin metadata is newer than its parser; the build succeeds, but release runtime is unqualified.
 
 Final `ANDROID_HOME=/home/yvm/Android/Sdk ./gradlew --init-script /tmp/mobie-A.init.gradle testDebugUnitTest lintDebug assembleDebug` passed in 48 seconds: 414 unit tests, zero failures/errors/skips; lint zero errors and 48 warnings; debug assembly passed. The final log is `app/build/gpu-benchmark/resume-final-gates.log`. B owns Advanced UI and emulator checks. Agent A's physical evidence cannot substitute for their Compose/navigation test requirements.
+
+Subsequent B-reported validation passed with 415 unit tests, lint zero errors and 48 warnings, debug assembly, and 10 ComputeSettingsPanelTest cases on emulator-5554 only. This is separate from A's recorded 414-test run. Advanced controls preserve applied engine settings until explicit reload, and activation/speculative overrides remain unqualified on the phone. No additional physical evidence or performance result follows from the emulator checks.

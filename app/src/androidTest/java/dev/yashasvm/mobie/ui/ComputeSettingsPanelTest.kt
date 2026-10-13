@@ -39,6 +39,7 @@ import dev.yashasvm.mobie.core.runtime.SamplerSettings
 import dev.yashasvm.mobie.ui.theme.MobieTheme
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.json.JSONObject
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -284,6 +285,16 @@ class ComputeSettingsPanelTest {
                 }
             }.commit()
         }
+    }
+
+    @Test fun exportedRunUsesAppliedSamplerRatherThanPendingEdits() {
+        val applied = SamplerSettings(0.0, 1, 1.0, 77)
+        val state = MobieUiState(sampler = SamplerSettings(2.0, 64, 0.5, 99), appliedSampler = applied)
+        val exported = JSONObject(runJson(state)).getJSONObject("sampler")
+        assertEquals(0.0, exported.getDouble("temperature"), 0.0)
+        assertEquals(1, exported.getInt("topK"))
+        assertEquals(1.0, exported.getDouble("topP"), 0.0)
+        assertEquals(77, exported.getInt("seed"))
     }
 
     private fun captureUiFixture(name: String) {

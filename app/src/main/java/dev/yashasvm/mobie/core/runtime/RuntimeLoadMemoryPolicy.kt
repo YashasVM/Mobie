@@ -17,6 +17,32 @@ internal data class MemoryAdmission(val tier: MemoryAdmissionTier, val reason: S
 
 /** One admission policy for catalog and native load. All quantities are physical RAM estimates. */
 internal object RuntimeLoadMemoryPolicy {
+    /**
+     * One-session GPU admission, calibrated from the 0.18.0 Qwen3-0.6B INT4 context sweep.
+     * PSS rose from 1.535 GiB at 1024 tokens to 3.051 GiB at 4096, about 518 KiB/token.
+     * GL mtrack alone reached 2.26 GB at 4096. Round the graphics budget up to 576 KiB/token,
+     * in addition to the existing KV/overhead/private-weight budgets. Larger artifacts scale
+     * that allowance using file size as a conservative proxy for unknown model dimensions.
+     * This is an admission heuristic, not a guarantee for unmeasured artifacts or devices.
+     */
+    fun estimate(
+        artifact: ModelArtifact,
+        backend: ComputeBackend = ComputeBackend.CPU,
+        visionEncoderLoaded: Boolean = false,
+    ): LiteRtRuntimeMemoryEstimate? {
+        val base = estimateLiteRtRuntimeMemory(artifact, backend.privateWeightCopy, visionEncoderLoaded)
+            ?: return null
+        if (!backend.privateWeightCopy) return base
+        val graphicsBytesPerToken = max(576L * 1024L, artifact.sizeBytes / 1_024)
+        val graphicsBytes = graphicsBytesPerToken * base.contextWindowTokens.toLong()
+        return base.copy(
+            estimatedRamBytes = base.estimatedRamBytes + graphicsBytes,
+            anonymousBytes = base.anonymousBytes + graphicsBytes,
+            // Include graphics allocation in overhead so the displayed memory breakdown adds up.
+            runtimeOverheadBytes = base.runtimeOverheadBytes + graphicsBytes,
+        )
+    }
+
     fun admit(
         estimate: LiteRtRuntimeMemoryEstimate,
         totalRamBytes: Long,
@@ -73,9 +99,9 @@ internal object RuntimeLoadMemoryPolicy {
             return "This LiteRT package exposes only $contextWindowTokens context tokens, below Mobie's 1,024-token minimum for useful local chat."
         }
         if (modelWeightsBytes <= 0 || totalRamBytes <= 0) return "Model size or device RAM is unknown."
-        val estimate = estimateLiteRtRuntimeMemory(ModelArtifact("model.litertlm", "", modelWeightsBytes,
+        val estimate = estimate(ModelArtifact("model.litertlm", "", modelWeightsBytes,
             format = ModelFormat.LITERT_LM, contextWindowTokens = contextWindowTokens),
-            backend.privateWeightCopy, visionEncoderLoaded)
+            backend, visionEncoderLoaded)
             ?: return "Model memory could not be estimated."
         return admit(estimate, totalRamBytes, availableRamBytes, availableAfterReclaimBytes,
             lowMemoryThresholdBytes, isLowMemory, isLowRamDevice).blockReason(allowReclaim)
