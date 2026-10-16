@@ -175,11 +175,18 @@ class LiteRtLmRuntimeAdapter(
                             if (options.artifactIdentity.isNotBlank()) {
                                 computeSettings.memory.invalidate(options.artifactIdentity, backendFingerprint)
                             }
-                            runRuntimeCleanupUnlessFatal(error) { loadedEngine.engine.close() }
+                            // closeRuntime cleared the field above, so any conversation here belongs to the new
+                            // engine. Close it first: a session must never outlive the engine it was created on.
+                            val createdConversation = conversation
+                            conversation = null
+                            runRuntimeCleanupUnlessFatal(error) {
+                                runAllRuntimeCleanup({ createdConversation?.close() }, { loadedEngine.engine.close() })
+                            }
                             engine = null
                             visionReady = false
                             selectedCompute = null
                             selectedCapabilities = null
+                            activeOptions = ComputeOptions()
                             contextWindowTokens = DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS
                             committedHistory = emptyList()
                             conversationDirty = false
@@ -698,9 +705,8 @@ class LiteRtLmRuntimeAdapter(
         }
         return ConversationConfig(
             initialMessages = restored,
-            thinkingConfig = (activeOptions.thinkingEnabled ?: configuredThinking)?.let {
-                ThinkingConfig(enableThinking = it, thinkingTokenBudget = activeOptions.thinkingTokenBudget ?: -1)
-            } ?: activeOptions.thinkingTokenBudget?.let { ThinkingConfig(thinkingTokenBudget = it) },
+            thinkingConfig = (activeOptions.takeIf { it.thinkingEnabled != null } ?: activeOptions.copy(thinkingEnabled = configuredThinking))
+                .thinkingRequest()?.let { ThinkingConfig(enableThinking = it.enabled, thinkingTokenBudget = it.budget) },
             samplerConfig = SamplerConfig(
                 topK = sampler.topK,
                 topP = sampler.topP,

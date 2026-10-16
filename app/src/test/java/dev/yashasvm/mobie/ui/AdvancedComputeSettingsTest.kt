@@ -19,7 +19,7 @@ class AdvancedComputeSettingsTest {
 
     @Test fun `every option survives encode decode with the existing typed backend and thread keys`() {
         val options = ComputeOptions(ComputeBackend.GPU, 4, contextTokens = 2_048,
-            maxOutputTokens = 128, thinkingEnabled = false, thinkingTokenBudget = 64,
+            maxOutputTokens = 128, thinkingEnabled = true, thinkingTokenBudget = 64,
             activationType = ActivationType.FP16, speculativeDecoding = true, prefillPrefaceOnInit = true)
         val values = AdvancedComputeSettingsCodec.encode(options) + mapOf("selected_backend" to "GPU", "cpu_threads" to "4")
         assertEquals(options, AdvancedComputeSettingsCodec.decode(values, 8))
@@ -60,6 +60,15 @@ class AdvancedComputeSettingsTest {
         val fixed = ComputeCapabilities(1_280, false, false, false)
         assertNull(AdvancedComputePolicy.forArtifact(options.copy(contextTokens = 1_024), 4, fixed).contextTokens)
         assertEquals(1_280, AdvancedComputePolicy.forArtifact(options.copy(contextTokens = 1_280), 4, fixed).contextTokens)
+    }
+
+    @Test fun `a thinking budget is effective only when thinking is explicitly on`() {
+        val thinking = ComputeCapabilities(4_096, true, true, false)
+        assertNull(AdvancedComputePolicy.forArtifact(ComputeOptions(thinkingTokenBudget = 64), 4, thinking).thinkingTokenBudget)
+        assertNull(AdvancedComputePolicy.forArtifact(ComputeOptions(thinkingEnabled = false, thinkingTokenBudget = 64), 4, thinking)
+            .thinkingTokenBudget)
+        assertEquals(64, AdvancedComputePolicy.forArtifact(ComputeOptions(thinkingEnabled = true, thinkingTokenBudget = 64), 4, thinking)
+            .thinkingTokenBudget)
     }
 
     @Test fun `memory presentation uses only a verified allowed context and preserves artifact identity`() {

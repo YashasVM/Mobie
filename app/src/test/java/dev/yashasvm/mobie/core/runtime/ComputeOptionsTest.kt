@@ -76,4 +76,14 @@ class ComputeOptionsTest {
         basic.copy(supportsThinking = true, supportsSpeculativeDecoding = true)
             .validate(ComputeOptions(speculativeDecoding = true, thinkingTokenBudget = 64))
     }
+
+    @Test fun thinkingBudgetIsSentOnlyWithExplicitOn() {
+        // Model default sends no config, so the artifact's own reasoning default stands.
+        assertNull(ComputeOptions().thinkingRequest())
+        assertNull(ComputeOptions(thinkingTokenBudget = 64).thinkingRequest())
+        assertEquals(ThinkingRequest(true, 64), ComputeOptions(thinkingEnabled = true, thinkingTokenBudget = 64).thinkingRequest())
+        assertEquals(ThinkingRequest(true, UNLIMITED_THINKING_BUDGET), ComputeOptions(thinkingEnabled = true).thinkingRequest())
+        assertEquals(ThinkingRequest(false, UNLIMITED_THINKING_BUDGET),
+            ComputeOptions(thinkingEnabled = false, thinkingTokenBudget = 64).thinkingRequest())
+    }
 }

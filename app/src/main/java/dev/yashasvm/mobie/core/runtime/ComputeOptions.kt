@@ -31,7 +31,22 @@ data class ComputeOptions(
     }
 
     fun forCoreCount(coreCount: Int): ComputeOptions = copy(cpuThreads = CpuThreadPolicy.clamp(cpuThreads, coreCount))
+
+    /**
+     * The reasoning request for the SDK, or null to keep the artifact's own default. The SDK's
+     * thinking config always carries an on/off flag (it defaults to on), so a budget is sent only
+     * with an explicit On; a budget alone must not silently turn reasoning on.
+     */
+    internal fun thinkingRequest(): ThinkingRequest? = thinkingEnabled?.let { enabled ->
+        ThinkingRequest(enabled, if (enabled) thinkingTokenBudget ?: UNLIMITED_THINKING_BUDGET else UNLIMITED_THINKING_BUDGET)
+    }
 }
+
+/** [budget] of [UNLIMITED_THINKING_BUDGET] leaves reasoning bounded only by the shared output cap. */
+internal data class ThinkingRequest(val enabled: Boolean, val budget: Int)
+
+/** The SDK's own default budget value, meaning no separate reasoning limit. */
+internal const val UNLIMITED_THINKING_BUDGET = -1
 
 /** Metadata describes allowed experiments, not proof of native compatibility. */
 data class ComputeCapabilities(

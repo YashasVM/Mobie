@@ -73,7 +73,8 @@ internal object AdvancedComputePolicy {
         cpuThreads = CpuThreadPolicy.clamp(options.cpuThreads, coreCount),
         contextTokens = options.contextTokens?.takeIf { it in capabilities?.contextChoices().orEmpty() },
         thinkingEnabled = options.thinkingEnabled.takeIf { capabilities?.supportsThinking == true },
-        thinkingTokenBudget = options.thinkingTokenBudget.takeIf { capabilities?.supportsThinking == true },
+        // A budget only applies to explicit On; with Model default or Off it would change nothing truthful.
+        thinkingTokenBudget = options.thinkingTokenBudget.takeIf { capabilities?.supportsThinking == true && options.thinkingEnabled == true },
         speculativeDecoding = options.speculativeDecoding.takeIf { capabilities?.supportsSpeculativeDecoding == true },
         artifactIdentity = "",
     )
