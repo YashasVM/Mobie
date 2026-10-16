@@ -1,5 +1,12 @@
 # Agent progress
 
+## Hourly maintenance — 2026-10-13 (1 independent improvement)
+- Completed: restored legacy history and missing/stale active-session pointers now resolve to the existing chat instead of silently creating a duplicate or displaying an empty conversation.
+- Regression coverage added: Android instrumentation tests for legacy-session migration and stale active-session IDs.
+- Checks: Android CI required on the PR (`testDebugUnitTest lintDebug assembleDebug`, `connectedDebugAndroidTest`, and repository's runtime E2E gates); results not yet verified.
+- Blocker: this execution environment cannot clone GitHub over DNS and has no configured Android SDK/emulator, so local Gradle and device tests could not run.
+- Next: inspect PR CI, fix any failures, then audit one new reproducible chat/library issue; physical ARM64 validation remains required before runtime claims.
+
 ## Major changes completed this week
 - Hardened Hugging Face downloads and installs with immutable source identity, commit-pinned URLs, size/checksum validation, resumable partials, cancellation, storage checks, per-artifact metadata, crash recovery, and SHA-based WorkManager identities.
 - Made completed installs and deletion recover safely from corrupt or stale canonical/per-artifact metadata, including fallback to matching canonical metadata when a parseable stale artifact sidecar would otherwise force a redownload, while keeping ownership checks fail-closed.
