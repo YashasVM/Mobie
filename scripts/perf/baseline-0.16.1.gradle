@@ -1,0 +1,15 @@
+gradle.beforeProject { p ->
+    if (p.name == 'app') {
+        p.layout.buildDirectory.set(new File(p.rootDir, 'app/build/gpu-benchmark/baseline-build'))
+        p.configurations.configureEach { c ->
+            c.resolutionStrategy.eachDependency { d ->
+                if (d.requested.group == 'com.google.ai.edge.litertlm' && d.requested.name == 'litertlm-android') {
+                    d.useVersion('0.16.1')
+                }
+            }
+        }
+        p.afterEvaluate {
+            p.android.defaultConfig.buildConfigField('String', 'LITERT_LM_VERSION', '"0.16.1"')
+        }
+    }
+}

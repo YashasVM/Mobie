@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.PowerManager
 import android.os.StatFs
 import dev.yashasvm.mobie.core.model.DeviceProfile
+import dev.yashasvm.mobie.core.runtime.LiteRtVisionBackendPolicy
 
 class DeviceProfileProvider(private val context: Context) {
     fun current(): DeviceProfile {
@@ -37,6 +38,9 @@ class DeviceProfileProvider(private val context: Context) {
             socModel = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Build.SOC_MODEL.orEmpty() else "",
             mediaPerformanceClass = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Build.VERSION.MEDIA_PERFORMANCE_CLASS else 0,
             thermalStatus = thermalStatus,
+            gpuAttemptable = LiteRtVisionBackendPolicy.shouldAttemptGpu(
+                Build.SUPPORTED_ABIS, Build.FINGERPRINT, Build.MODEL, Build.HARDWARE, Build.PRODUCT,
+            ),
         )
     }
 }

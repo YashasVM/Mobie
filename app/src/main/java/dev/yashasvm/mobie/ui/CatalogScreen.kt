@@ -273,8 +273,8 @@ private fun LazyListScope.discoverTab(
             )
         }
         else -> itemsIndexed(state.models, key = { _, model -> model.id }) { index, model ->
-            val compatibility = remember(model, state.device) {
-                state.device?.let { resolver.resolve(model.bestArtifact, it) }
+            val compatibility = remember(model, state.device, state.computeBackend) {
+                state.device?.let { resolver.resolve(model.bestArtifact, it, backend = state.computeBackend) }
             }
             val installed = state.installedModels.any { it.model.id == model.id }
             Box(Modifier.animateItem(fadeInSpec = null, fadeOutSpec = tween(MotionShort))) {
@@ -619,8 +619,8 @@ private fun LazyListScope.installedTab(
             )
         }
         itemsIndexed(state.installedModels, key = { _, entry -> entry.model.id }) { index, entry ->
-            val compatibility = remember(entry.model, state.device) {
-                state.device?.let { resolver.resolve(entry.model.bestArtifact, it) }
+            val compatibility = remember(entry.model, state.device, state.computeBackend) {
+                state.device?.let { resolver.resolve(entry.model.bestArtifact, it, backend = state.computeBackend) }
             }
             // Placement animates when a neighbour is deleted; the entrance plays once on the content.
             Box(Modifier.animateItem(fadeInSpec = null, fadeOutSpec = tween(MotionShort))) {

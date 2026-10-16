@@ -13,12 +13,19 @@ import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.MemoryAdmissionTier
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.device.BatteryCurrentMath
+import dev.yashasvm.mobie.core.device.DecodeMeasurement
+import dev.yashasvm.mobie.core.device.DecodeRunSettings
+import dev.yashasvm.mobie.core.device.DecodeSpeedStore
+import dev.yashasvm.mobie.core.device.HardwareProfile
+import dev.yashasvm.mobie.core.device.HardwareProfileProvider
+import dev.yashasvm.mobie.core.device.modelPerformanceIdentity
 import dev.yashasvm.mobie.core.device.RunTelemetry
 import dev.yashasvm.mobie.core.runtime.GenerationConfig
 import dev.yashasvm.mobie.core.runtime.InferenceEvent
 import dev.yashasvm.mobie.core.runtime.ActiveCompute
 import dev.yashasvm.mobie.core.runtime.ComputeBackend
 import dev.yashasvm.mobie.core.runtime.ComputeOptions
+import dev.yashasvm.mobie.core.runtime.ComputeCapabilities
 import dev.yashasvm.mobie.core.runtime.InferenceStats
 import dev.yashasvm.mobie.core.runtime.RuntimeMessage
 import dev.yashasvm.mobie.core.runtime.RuntimeModelOwnership
@@ -85,10 +92,26 @@ data class MobieUiState(
     val telemetry: RunTelemetry = RunTelemetry(),
     val sampler: SamplerSettings = SamplerSettings(),
     val imageInputReady: Boolean = false,
-    val computeBackend: ComputeBackend = ComputeBackend.AUTO,
-    val cpuThreads: Int? = null,
+    /** The user's saved choices. Artifact limits are applied in [effectiveComputeOptions], never written back. */
+    val computeOptions: ComputeOptions = ComputeOptions(),
+    /** The options the loaded engine was started with; null when no engine was loaded with them. */
+    val appliedComputeOptions: ComputeOptions? = null,
+    val appliedSampler: SamplerSettings? = null,
+    val computeCapabilities: ComputeCapabilities? = null,
     val activeCompute: ActiveCompute? = null,
-)
+    val hardware: HardwareProfile? = null,
+    val decodeMeasurements: List<DecodeMeasurement> = emptyList(),
+    val memoryReliefInProgress: Boolean = false,
+) {
+    val computeBackend: ComputeBackend get() = computeOptions.backend
+    val cpuThreads: Int? get() = computeOptions.cpuThreads
+
+    /** What the next load of the selected artifact would run: saved choices after its metadata limits. */
+    val effectiveComputeOptions: ComputeOptions get() = AdvancedComputePolicy.forArtifact(
+        computeOptions, hardware?.cpuCoreCount?.takeIf { it > 0 } ?: Runtime.getRuntime().availableProcessors(), computeCapabilities,
+    )
+    val computeNeedsApply: Boolean get() = AdvancedComputePolicy.needsApply(effectiveComputeOptions, sampler, appliedComputeOptions, appliedSampler)
+}
 
 class MobieViewModel(private val container: AppContainer) : ViewModel() {
     private val mutableState = MutableStateFlow(
@@ -98,25 +121,39 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             tokenConfigured = container.tokenStore.read() != null,
             welcomeSeen = container.tokenStore.hasSeenWelcome(),
             onboardingComplete = container.tokenStore.hasCompletedOnboarding(),
-            sampler = container.samplerSettings.read(),
-            computeBackend = container.computeSettings.selectedBackend(),
-            cpuThreads = container.computeSettings.selectedCpuThreads(),
+            sampler = AdvancedComputePolicy.sampler(container.samplerSettings.read()).also(container.samplerSettings::write),
+            // Saved compute options are read on IO in init; recommended defaults show until then.
+            computeOptions = ComputeOptions(),
         ),
     )
+    /** Set on the main thread by an explicit edit, so a slower preference read cannot overwrite it. */
+    private var computeOptionsEdited = false
     val state: StateFlow<MobieUiState> = mutableState.asStateFlow()
     private var catalogJob: Job? = null
     private var downloadObserverJob: Job? = null
     private var inferenceJob: Job? = null
     private var telemetryJob: Job? = null
+    private var memoryRefreshJob: Job? = null
     private val runtimeLifecycle = Mutex()
     private val runtimeOperation = AtomicLong(0L)
     private val selectionRevision = AtomicLong(0L)
     private val runtimeOwnership = RuntimeModelOwnership()
+    private val decodeSpeeds = DecodeSpeedStore(container.appContext)
 
     init {
         viewModelScope.launch {
             val device = readDeviceProfile()
             mutableState.update { it.copy(device = it.device ?: device) }
+        }
+        viewModelScope.launch {
+            // Hardware detection and the preference read both touch disk, so they run on IO.
+            val (hardware, options) = withContext(Dispatchers.IO) {
+                val hardware = HardwareProfileProvider(container.appContext).detect()
+                hardware to container.computeSettings.readAdvancedOptions(hardware.cpuCoreCount)
+            }
+            mutableState.update {
+                it.copy(hardware = hardware, computeOptions = if (computeOptionsEdited) it.computeOptions else options)
+            }
         }
         container.runtimes.all().forEach { it.configureSampler(mutableState.value.sampler) }
         refreshInstalled()
@@ -140,33 +177,135 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     /** Device facts read /proc and binder, so they run on IO rather than the main thread. */
     private suspend fun readDeviceProfile(): DeviceProfile = withContext(Dispatchers.IO) { container.deviceProfile.current() }
 
+    /** Refreshes pre-flight admission from live RAM without changing the selected artifact. */
+    fun refreshMemory() {
+        if (state.value.memoryReliefInProgress) return
+        memoryRefreshJob?.cancel()
+        memoryRefreshJob = viewModelScope.launch { refreshMemorySnapshot() }
+    }
+
+    private suspend fun refreshMemorySnapshot() {
+        val device = readDeviceProfile()
+        mutableState.update { current ->
+            current.copy(
+                device = device,
+                compatibility = current.selectedArtifact?.let { artifact ->
+                    container.compatibility.resolve(admissionArtifact(artifact), device,
+                        current.selected?.supportsVision == true, current.computeBackend,
+                        contextTokens = admissionContextTokens(artifact))
+                },
+            )
+        }
+    }
+
+    /** Only idle native resources are released; generation and model loading are never interrupted. */
+    fun freeUpMemory(onReady: () -> Unit) {
+        if (state.value.memoryReliefInProgress) return
+        val revision = selectionRevision.get()
+        memoryRefreshJob?.cancel()
+        mutableState.update { it.copy(memoryReliefInProgress = true) }
+        viewModelScope.launch {
+            try {
+                runtimeLifecycle.withLock {
+                    val current = state.value
+                    if (current.chatting || current.runtimeState in setOf(RuntimeState.LOADING, RuntimeState.GENERATING, RuntimeState.STOPPING)) {
+                        return@launch
+                    }
+                    val operation = runtimeOperation.get()
+                    container.runtimes.all().forEach { it.unload() }
+                    runtimeOwnership.clear()
+                    if (isCurrentRuntimeOperation(operation)) {
+                        mutableState.update {
+                            it.copy(runtimeState = RuntimeState.IDLE, activeCompute = null, imageInputReady = false, stats = null)
+                        }
+                    }
+                }
+                withContext(Dispatchers.IO) { container.catalog.trimMemory() }
+                refreshMemorySnapshot()
+                if (selectionRevision.get() == revision && !state.value.chatting) onReady()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                mutableState.update {
+                    it.copy(error = error.message ?: "Mobie could not release its memory. Restart Mobie before loading a model.")
+                }
+            } finally {
+                mutableState.update { it.copy(memoryReliefInProgress = false) }
+            }
+        }
+    }
+
     /** Cancels generation or a load together with its telemetry sampler, so neither outlives the other. */
     private fun cancelInference() {
         inferenceJob?.cancel()
         telemetryJob?.cancel()
     }
 
-    /** Auto falls back to CPU when GPU does not fit, so only an explicit choice is admitted as that backend. */
-    private fun admissionBackend(selected: ComputeBackend = state.value.computeBackend): ComputeBackend =
-        selected.takeIf { it != ComputeBackend.AUTO } ?: ComputeBackend.CPU
+    private fun admissionArtifact(artifact: ModelArtifact?, options: ComputeOptions = state.value.computeOptions): ModelArtifact? =
+        AdvancedComputePolicy.compatibilityArtifact(artifact, options,
+            state.value.computeCapabilities.takeIf { artifact == state.value.selectedArtifact })
 
-    fun setComputeBackend(backend: ComputeBackend) {
-        container.computeSettings.setBackend(backend)
-        mutableState.update { current ->
-            val updated = current.copy(computeBackend = backend)
-            val device = current.device
-            val artifact = current.selectedArtifact
+    /** The explicit context the next load of [artifact] requests, or null for Auto. Pass with [admissionArtifact]. */
+    private fun admissionContextTokens(artifact: ModelArtifact?, options: ComputeOptions = state.value.computeOptions): Int? =
+        AdvancedComputePolicy.contextOverride(options,
+            state.value.computeCapabilities.takeIf { artifact == state.value.selectedArtifact })
+
+    fun setComputeBackend(backend: ComputeBackend) = updateComputeOptions(state.value.computeOptions.copy(backend = backend))
+
+    fun setCpuThreads(threads: Int?) = updateComputeOptions(state.value.computeOptions.copy(cpuThreads = threads))
+
+    /**
+     * Saves the user's explicit choice without mutating the loaded engine or an in-flight reply.
+     * Artifact limits are not written back, so a choice survives loading an artifact that lacks it.
+     */
+    fun updateComputeOptions(options: ComputeOptions) {
+        val cores = state.value.hardware?.cpuCoreCount ?: Runtime.getRuntime().availableProcessors()
+        val saved = options.forCoreCount(cores)
+        computeOptionsEdited = true
+        container.computeSettings.writeAdvancedOptions(saved, cores)
+        mutableState.update { latest ->
+            val updated = latest.copy(computeOptions = saved)
+            val device = latest.device
+            val artifact = latest.selectedArtifact
             if (device == null || artifact == null) updated else updated.copy(
-                // GPU keeps its own copy of the weights, so the memory verdict changes with the backend.
-                compatibility = container.compatibility.resolve(artifact, device,
-                    current.selected?.supportsVision == true, admissionBackend(backend)),
+                compatibility = container.compatibility.resolve(admissionArtifact(artifact, saved), device,
+                    latest.selected?.supportsVision == true, saved.backend,
+                    contextTokens = admissionContextTokens(artifact, saved)),
             )
         }
     }
 
-    fun setCpuThreads(threads: Int?) {
-        container.computeSettings.setCpuThreads(threads)
-        mutableState.update { it.copy(cpuThreads = threads) }
+    fun resetComputeSettings() {
+        updateComputeOptions(ComputeOptions())
+        updateSampler(SamplerSettings())
+    }
+
+    /** The explicit action claims the lifecycle before any asynchronous memory check. */
+    fun applyComputeSettings() {
+        val current = state.value
+        val path = current.downloadedPath ?: return
+        val model = current.selected ?: return
+        val artifact = current.selectedArtifact ?: return
+        if (!AdvancedComputePolicy.canApply(current.runtimeState, downloaded = true)) return
+        cancelInference()
+        val operation = nextRuntimeOperation()
+        val revision = selectionRevision.get()
+        mutableState.update { it.copy(chatting = true, runtimeState = RuntimeState.LOADING, activeCompute = null,
+            stats = null, telemetry = RunTelemetry(), error = null) }
+        inferenceJob = viewModelScope.launch {
+            val device = readDeviceProfile()
+            if (!isCurrentRuntimeOperation(operation) || selectionRevision.get() != revision || state.value.selectedArtifact != artifact) return@launch
+            val compatibility = container.compatibility.resolve(admissionArtifact(artifact), device,
+                model.supportsVision, state.value.computeBackend, contextTokens = admissionContextTokens(artifact))
+            mutableState.update { it.copy(device = device, compatibility = compatibility) }
+            if (compatibility.status == Compatibility.INCOMPATIBLE || compatibility.memoryTier == MemoryAdmissionTier.FITS_AFTER_RECLAIM) {
+                // Nothing was unloaded, so the previous engine (if any) is still the one answering.
+                val keptEngine = container.runtimes.adapterFor(artifact.format)?.activeCompute
+                mutableState.update { it.afterRefusedReload(current, keptEngine, compatibility.reason) }
+                return@launch
+            }
+            loadRuntimeConversation(model, artifact, path, current.messages, preferReset = false, operation = operation)
+        }
     }
 
     fun loadFeatured() = loadCatalog { container.catalog.featured() }
@@ -198,7 +337,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                             .sortedWith(
                                 compareBy<AiModel> { model ->
                                     val artifact = model.bestArtifact
-                                    when (container.compatibility.resolve(artifact, device).status) {
+                                    when (container.compatibility.resolve(artifact, device, backend = state.value.computeBackend).status) {
                                         Compatibility.COMPATIBLE -> 0
                                         Compatibility.WARNING -> 1
                                         else -> 2
@@ -244,6 +383,9 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val presentedModel = model?.preferArtifact(artifact)
         val sessions = presentedModel?.let { container.chatHistory.sessions(it.id) }.orEmpty()
         val currentSessionId = presentedModel?.let { container.chatHistory.currentSessionId(it.id) }
+        val capabilities = if (presentedModel != null && artifact != null) {
+            container.computeSettings.readCachedCapabilities(modelPerformanceIdentity(presentedModel.id, artifact))
+        } else null
         mutableState.update {
             it.copy(
                 selected = presentedModel,
@@ -251,7 +393,13 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 recentModels = if (presentedModel == null) it.recentModels else {
                     (listOf(presentedModel) + it.recentModels.filterNot { recent -> recent.id == presentedModel.id }).take(5)
                 },
-                compatibility = artifact?.let { candidate -> container.compatibility.resolve(candidate, device, model?.supportsVision == true, admissionBackend()) },
+                // The new selection's cached capabilities are not in state yet, so judge it from the local value.
+                compatibility = artifact?.let { candidate ->
+                    val options = state.value.computeOptions
+                    container.compatibility.resolve(AdvancedComputePolicy.compatibilityArtifact(candidate, options, capabilities),
+                        device, model?.supportsVision == true, state.value.computeBackend,
+                        contextTokens = AdvancedComputePolicy.contextOverride(options, capabilities))
+                },
                 download = null,
                 downloadedPath = null,
                 chatting = false,
@@ -260,13 +408,25 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 history = sessions,
                 sessionId = currentSessionId,
                 stats = null,
+                decodeMeasurements = emptyList(),
                 imageInputReady = false,
                 activeCompute = null,
+                computeCapabilities = capabilities,
+                appliedComputeOptions = null,
+                appliedSampler = null,
                 error = null,
                 device = device,
             )
         }
         if (presentedModel != null && artifact != null) {
+            viewModelScope.launch {
+                val measurements = decodeSpeeds.read(modelPerformanceIdentity(presentedModel.id, artifact))
+                mutableState.update {
+                    if (it.selected?.id == presentedModel.id && it.selectedArtifact == artifact) {
+                        it.copy(decodeMeasurements = measurements)
+                    } else it
+                }
+            }
             observeDownload(presentedModel, artifact)
             viewModelScope.launch(Dispatchers.IO) {
                 val downloaded = container.downloads.completedFile(presentedModel.id, artifact)?.absolutePath
@@ -287,7 +447,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val artifact = current.selectedArtifact ?: return
         viewModelScope.launch {
             val device = readDeviceProfile()
-            val compatibility = container.compatibility.resolve(artifact, device, model.supportsVision, admissionBackend())
+            val compatibility = container.compatibility.resolve(admissionArtifact(artifact), device, model.supportsVision, state.value.computeBackend)
             mutableState.update { it.copy(device = device, compatibility = compatibility, error = null) }
             if (model.gated && !state.value.tokenConfigured) {
                 mutableState.update { it.copy(error = "This gated model requires a Hugging Face token.") }
@@ -317,8 +477,9 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             viewModelScope.launch {
                 val current = state.value
                 val device = readDeviceProfile()
-                val compatibility = container.compatibility.resolve(current.selectedArtifact, device,
-                    current.selected?.supportsVision == true, admissionBackend())
+                val compatibility = container.compatibility.resolve(admissionArtifact(current.selectedArtifact), device,
+                    current.selected?.supportsVision == true, current.computeBackend, allowReclaim = allowReclaim,
+                    contextTokens = admissionContextTokens(current.selectedArtifact))
                 mutableState.update { it.copy(device = device, compatibility = compatibility) }
                 if (compatibility.status == Compatibility.INCOMPATIBLE) {
                     mutableState.update { it.copy(error = compatibility.reason) }
@@ -391,16 +552,19 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 imagePath = it.imagePath,
             )
         }
+        val loadState = state.value
+        val preserveLoadedSettings = preferReset && runtimeOwnership.owns(model.id)
+        val options = AdvancedComputePolicy.forArtifact(
+            if (preserveLoadedSettings) loadState.appliedComputeOptions ?: loadState.computeOptions else loadState.computeOptions,
+            loadState.hardware?.cpuCoreCount ?: Runtime.getRuntime().availableProcessors(), loadState.computeCapabilities)
+        val sampler = AdvancedComputePolicy.sampler(
+            if (preserveLoadedSettings) loadState.appliedSampler ?: loadState.sampler else loadState.sampler)
+        val settingsUnchanged = loadState.appliedComputeOptions == options && loadState.appliedSampler == sampler
         val result = runtimeLifecycle.withLock {
             if (!isCurrentRuntimeOperation(operation)) return
-            adapter.configureCompute(
-                ComputeOptions(
-                    backend = state.value.computeBackend,
-                    cpuThreads = state.value.cpuThreads,
-                    artifactIdentity = "${model.id}|${artifact.fileName}|${artifact.downloadUrl}|${artifact.sha256.orEmpty()}",
-                ),
-            )
-            if (preferReset && runtimeOwnership.owns(model.id)) {
+            adapter.configureCompute(options.copy(artifactIdentity = modelPerformanceIdentity(model.id, artifact)))
+            adapter.configureSampler(sampler)
+            if (preferReset && settingsUnchanged && runtimeOwnership.owns(model.id)) {
                 val reset = adapter.resetConversation(restored)
                 if (reset.isSuccess) {
                     reset
@@ -422,17 +586,31 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         if (!isCurrentRuntimeOperation(operation)) return
         result.fold(
             onSuccess = {
+                // Only the applied snapshot changes. Saved choices are not rewritten with this artifact's limits.
                 mutableState.update {
                     it.copy(
                         runtimeState = RuntimeState.READY,
                         imageInputReady = adapter.supportsImageInput,
                         activeCompute = adapter.activeCompute,
+                        computeCapabilities = adapter.computeCapabilities,
+                        appliedComputeOptions = options,
+                        appliedSampler = sampler,
                     )
+                }
+                adapter.computeCapabilities?.let { capabilities ->
+                    container.computeSettings.writeCachedCapabilities(modelPerformanceIdentity(model.id, artifact), capabilities)
                 }
             },
             onFailure = { error ->
+                // A refused reload can leave the previous engine running; chat must keep showing it.
+                val keptEngine = adapter.activeCompute
+                val message = error.message ?: "Model failed to load"
                 mutableState.update {
-                    it.copy(runtimeState = RuntimeState.ERROR, error = error.message ?: "Model failed to load")
+                    if (keptEngine != null) {
+                        it.copy(runtimeState = RuntimeState.READY, activeCompute = keptEngine, error = keptRunningMessage(keptEngine, message))
+                    } else {
+                        it.copy(runtimeState = RuntimeState.ERROR, error = message)
+                    }
                 }
             },
         )
@@ -460,7 +638,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val operation = runtimeOperation.get()
         val sessionId = current.sessionId
         inferenceJob = viewModelScope.launch {
-            adapter.generate(prompt.trim(), imagePath, GenerationConfig(sampler = current.sampler)).collectBatchedTokens { event ->
+            adapter.generate(prompt.trim(), imagePath, GenerationConfig(sampler = current.appliedSampler ?: current.sampler)).collectBatchedTokens { event ->
                 if (!isCurrentRuntimeOperation(operation) ||
                     state.value.selected?.id != model.id || state.value.sessionId != sessionId
                 ) return@collectBatchedTokens
@@ -468,17 +646,30 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                     is InferenceEvent.Token -> mutableState.update { currentState ->
                         currentState.copy(messages = currentState.messages.updateLastAssistant(event.text, event.thinking))
                     }
-                    is InferenceEvent.Stats -> mutableState.update {
-                        it.copy(
-                            stats = event.value,
-                            telemetry = it.telemetry.copy(
-                                estimatedEnergyPerTokenMilliWh = BatteryCurrentMath.milliWhPerToken(
-                                    it.telemetry.estimatedEnergyMilliWh,
-                                    event.value.decodeTokenCount,
+                    is InferenceEvent.Stats -> {
+                        mutableState.update {
+                            it.copy(
+                                stats = event.value,
+                                telemetry = it.telemetry.copy(
+                                    estimatedEnergyPerTokenMilliWh = BatteryCurrentMath.milliWhPerToken(
+                                        it.telemetry.estimatedEnergyMilliWh,
+                                        event.value.decodeTokenCount,
+                                    ),
                                 ),
-                            ),
-                            messages = it.messages.attachStatsToLastAssistant(event.value),
-                        )
+                                messages = it.messages.attachStatsToLastAssistant(event.value),
+                            )
+                        }
+                        viewModelScope.launch {
+                            // Settings are the requested ones the engine was loaded with, so the key matches what the user chose.
+                            val applied = current.appliedComputeOptions ?: current.effectiveComputeOptions
+                            val settings = DecodeRunSettings(cpuThreads = applied.cpuThreads, contextTokens = applied.contextTokens)
+                            val measurements = decodeSpeeds.record(modelPerformanceIdentity(model.id, artifact), event.value, settings)
+                            mutableState.update {
+                                if (it.selected?.id == model.id && it.selectedArtifact == artifact) {
+                                    it.copy(decodeMeasurements = measurements)
+                                } else it
+                            }
+                        }
                     }
                     is InferenceEvent.Progress -> mutableState.update {
                         it.copy(telemetry = it.telemetry.copy(
@@ -572,8 +763,8 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     fun updateSampler(settings: SamplerSettings): String? {
         val error = runCatching { settings.validated() }.exceptionOrNull()?.message
         if (error != null) return error
+        if (settings.topK > 64) return "Top-k must be between 1 and 64."
         container.samplerSettings.write(settings)
-        container.runtimes.all().forEach { it.configureSampler(settings) }
         mutableState.update { it.copy(sampler = settings) }
         return null
     }
@@ -695,7 +886,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val operation = nextRuntimeOperation()
         viewModelScope.launch { unloadRuntime(operation) }
         mutableState.update {
-            it.copy(chatting = false, runtimeState = RuntimeState.IDLE, stats = null, error = null)
+            it.copy(chatting = false, runtimeState = RuntimeState.IDLE, stats = null, error = null, appliedComputeOptions = null, appliedSampler = null)
         }
     }
 

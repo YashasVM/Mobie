@@ -8,12 +8,15 @@ import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
 import dev.yashasvm.mobie.core.model.MemoryAdmissionTier
-import dev.yashasvm.mobie.core.model.estimateLiteRtRuntimeMemory
 import dev.yashasvm.mobie.core.runtime.ComputeBackend
 import dev.yashasvm.mobie.core.runtime.LiteRtContextWindowPolicy
 import dev.yashasvm.mobie.core.runtime.RuntimeLoadMemoryPolicy
 import dev.yashasvm.mobie.core.runtime.RuntimeLoadStoragePolicy
+import java.util.Locale
 import kotlin.math.max
+
+/** The backend a load would run, with its admission. For AUTO, this is the backend Auto would pick. */
+data class BackendAdmission(val backend: ComputeBackend, val result: CompatibilityResult)
 
 class CompatibilityResolver {
     fun selectBestArtifact(model: AiModel, device: DeviceProfile): ModelArtifact? = model.artifacts
@@ -27,7 +30,8 @@ class CompatibilityResolver {
                 // download for this device until Hugging Face returns a concrete size.
                 it.sizeBytes > 0
         }
-        .map { artifact -> artifact to resolve(artifact, device, model.supportsVision) }
+        // Rank with the backend Auto would pick, so the recommendation matches the Auto line in the compute panel.
+        .map { artifact -> artifact to resolveBackend(artifact, device, model.supportsVision, ComputeBackend.AUTO).result }
         .filter { (_, result) ->
             result.status == Compatibility.COMPATIBLE || result.status == Compatibility.WARNING
         }
@@ -50,6 +54,54 @@ class CompatibilityResolver {
         device: DeviceProfile,
         visionEncoderLoaded: Boolean = false,
         backend: ComputeBackend = ComputeBackend.CPU,
+        allowReclaim: Boolean = false,
+        contextTokens: Int? = null,
+    ): CompatibilityResult = resolveBackend(artifact, device, visionEncoderLoaded, backend, allowReclaim, contextTokens).result
+
+    /**
+     * Admission for the backend a load would run. Explicit CPU and GPU are judged as requested.
+     * AUTO mirrors the native load gate: GPU runs when the device may try it and GPU is admitted
+     * now (or after reclaim, when the user has accepted it). Otherwise CPU runs and the reason says
+     * why GPU was skipped. Total RAM decides whether a backend can ever fit; current RAM decides
+     * whether it needs reclaim first.
+     */
+    fun resolveBackend(
+        artifact: ModelArtifact?,
+        device: DeviceProfile,
+        visionEncoderLoaded: Boolean = false,
+        backend: ComputeBackend = ComputeBackend.CPU,
+        allowReclaim: Boolean = false,
+        contextTokens: Int? = null,
+    ): BackendAdmission {
+        if (backend != ComputeBackend.AUTO) {
+            return BackendAdmission(backend, resolveFor(artifact, device, visionEncoderLoaded, backend, contextTokens))
+        }
+        val cpu = resolveFor(artifact, device, visionEncoderLoaded, ComputeBackend.CPU, contextTokens)
+        if (!device.gpuAttemptable || cpu.status == Compatibility.INCOMPATIBLE) {
+            return BackendAdmission(ComputeBackend.CPU, cpu)
+        }
+        val gpu = resolveFor(artifact, device, visionEncoderLoaded, ComputeBackend.GPU, contextTokens)
+        val gpuAdmitted = gpu.status != Compatibility.INCOMPATIBLE && when (gpu.memoryTier) {
+            MemoryAdmissionTier.FITS_NOW -> true
+            MemoryAdmissionTier.FITS_AFTER_RECLAIM -> allowReclaim
+            MemoryAdmissionTier.IMPOSSIBLE, null -> false
+        }
+        if (gpuAdmitted) return BackendAdmission(ComputeBackend.GPU, gpu)
+        val gpuNeed = String.format(Locale.US, "%.1f GB", gpu.estimatedRamBytes.toDouble() / GIB)
+        val note = if (gpu.memoryTier == MemoryAdmissionTier.IMPOSSIBLE) {
+            "GPU needs about $gpuNeed, more than this phone can provide safely, so Auto uses CPU."
+        } else {
+            "GPU needs about $gpuNeed, more than is free now, so Auto uses CPU."
+        }
+        return BackendAdmission(ComputeBackend.CPU, cpu.copy(reason = "$note ${cpu.reason}"))
+    }
+
+    private fun resolveFor(
+        artifact: ModelArtifact?,
+        device: DeviceProfile,
+        visionEncoderLoaded: Boolean,
+        backend: ComputeBackend,
+        contextTokens: Int?,
     ): CompatibilityResult {
         if (artifact == null || artifact.format != ModelFormat.LITERT_LM) {
             return CompatibilityResult(
@@ -80,15 +132,33 @@ class CompatibilityResolver {
         // to LiteRT. Extended-context packages are useful on smaller phones when their KV cache can
         // be bounded safely; judging them at the full advertised 32K/64K context can otherwise mark
         // a model incompatible even though Mobie would load the same artifact at a smaller context.
+        // The same policy the native load uses, per backend, so GPU is judged at its own context and an
+        // explicit override is neither shrunk here nor ignored at load. Catalog metadata cannot tell
+        // fixed-context packages apart, so they are treated as dynamic until the load reads ModelInfo.
         val advertisedContext = artifact.contextWindowTokens ?: DEFAULT_CONTEXT_TOKENS
-        val selectedContext = LiteRtContextWindowPolicy.select(
-            advertisedContextWindowTokens = advertisedContext,
-            modelWeightsBytes = artifact.sizeBytes,
-            totalRamBytes = device.totalRamBytes,
-            availableRamBytes = device.availableRamBytes,
-            lowMemoryThresholdBytes = device.lowMemoryThresholdBytes,
-            isLowRamDevice = device.isLowRamDevice,
-        )
+        val selectedContext = try {
+            LiteRtContextWindowPolicy.contextFor(
+                maxContextTokens = advertisedContext,
+                dynamicContext = true,
+                requestedContextTokens = contextTokens,
+                advertisedContextWindowTokens = advertisedContext,
+                modelWeightsBytes = artifact.sizeBytes,
+                totalRamBytes = device.totalRamBytes,
+                availableRamBytes = device.availableRamBytes,
+                lowMemoryThresholdBytes = device.lowMemoryThresholdBytes,
+                isLowRamDevice = device.isLowRamDevice,
+                backend = backend,
+            )
+        } catch (error: IllegalArgumentException) {
+            // The load would refuse this request with the same message, so the verdict says so up front.
+            return CompatibilityResult(
+                status = Compatibility.INCOMPATIBLE,
+                reason = error.message.orEmpty(),
+                estimatedRamBytes = 0,
+                modelWeightsBytes = artifact.sizeBytes,
+                contextWindowTokens = advertisedContext,
+            )
+        }
         if (selectedContext < LiteRtContextWindowPolicy.MIN_USEFUL_CONTEXT_TOKENS) {
             return CompatibilityResult(
                 status = Compatibility.INCOMPATIBLE,
@@ -98,9 +168,9 @@ class CompatibilityResolver {
                 contextWindowTokens = selectedContext,
             )
         }
+        // Same estimator as the native load gate, so pre-download, compute-panel and pre-load RAM agree.
         val memoryEstimate = requireNotNull(
-            estimateLiteRtRuntimeMemory(artifact.copy(contextWindowTokens = selectedContext),
-                privateWeightCopy = backend.privateWeightCopy, visionEncoderLoaded = visionEncoderLoaded),
+            RuntimeLoadMemoryPolicy.estimate(artifact.copy(contextWindowTokens = selectedContext), backend, visionEncoderLoaded),
         )
         val estimatedRam = memoryEstimate.estimatedRamBytes
         val requiredStorage = requiredStorageBytes(artifact.sizeBytes)
@@ -157,5 +227,6 @@ class CompatibilityResolver {
         const val PREFERRED_CONTEXT_TOKENS = 4_096
         const val THERMAL_STATUS_SEVERE = 3
         const val THERMAL_STATUS_CRITICAL = 4
+        const val GIB = 1024.0 * 1024.0 * 1024.0
     }
 }
