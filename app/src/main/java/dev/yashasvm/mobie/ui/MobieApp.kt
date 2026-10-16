@@ -120,7 +120,6 @@ fun MobieApp(
         }
     }
 
-
     BackHandler(enabled = state.selected != null) {
         if (state.chatting) viewModel.leaveChat() else viewModel.select(null)
     }
