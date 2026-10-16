@@ -7,11 +7,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import dev.yashasvm.mobie.core.attachment.DocumentAttachment
 import dev.yashasvm.mobie.core.model.AiModel
 import dev.yashasvm.mobie.core.model.Compatibility
 import dev.yashasvm.mobie.core.model.CompatibilityResult
@@ -25,6 +28,7 @@ import dev.yashasvm.mobie.ui.theme.MobieTheme
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
 import androidx.work.WorkInfo
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -162,8 +166,11 @@ class ModelScreensTest {
                 )
             }
         }
-        composeRule.onNodeWithContentDescription("Attach image").assertDoesNotExist()
         composeRule.onNodeWithText("This phone loaded text chat only. Photo input is unavailable for this session.").assertIsDisplayed()
+        // Text files can still be attached; the photo option is not offered.
+        composeRule.onNodeWithContentDescription("Add to message").performClick()
+        composeRule.onNodeWithText("File").assertIsDisplayed()
+        composeRule.onNodeWithText("Photo").assertDoesNotExist()
         captureEvidence("mobie-text-only-fallback.png")
     }
 
@@ -181,9 +188,85 @@ class ModelScreensTest {
                 )
             }
         }
-        composeRule.onNodeWithContentDescription("Attach image").assertIsDisplayed()
-        composeRule.onNodeWithText("Chat about text or an attached photo on this phone. Image generation isn't available.").assertIsDisplayed()
+        composeRule.onNodeWithText("Runs on this phone. Nothing leaves the device.").assertIsDisplayed()
+        composeRule.onNodeWithText("Describe an image").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Add to message").performClick()
+        composeRule.onNodeWithText("File").assertIsDisplayed()
+        composeRule.onNodeWithText("Photo").assertIsDisplayed()
         captureEvidence("mobie-image-input.png")
+    }
+
+    @Test
+    fun pendingAttachmentShowsAndSendsWithoutTypedText() {
+        val attachment = DocumentAttachment("notes.md", "text/markdown", 2_048, "# Notes", truncated = false)
+        var sent = false
+        var removed = -1
+        composeRule.setContent {
+            ScreenTheme {
+                ChatScreen(
+                    state = MobieUiState(
+                        selected = testModel(),
+                        runtimeState = RuntimeState.READY,
+                        pendingAttachments = listOf(attachment),
+                        attachmentError = "This file looks like binary data, not text.",
+                    ),
+                    onSend = { _, _ -> sent = true; true },
+                    onRemoveAttachment = { removed = it },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("notes.md").assertIsDisplayed()
+        composeRule.onNodeWithText("This file looks like binary data, not text.").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Remove notes.md").performClick()
+        composeRule.runOnIdle { assertEquals(0, removed) }
+        // A file alone is a valid message.
+        composeRule.onNodeWithContentDescription("Send message").performClick()
+        composeRule.runOnIdle { assertTrue(sent) }
+    }
+
+    @Test
+    fun modelChipOpensSwitcher() {
+        var switchRequested = false
+        composeRule.setContent {
+            ScreenTheme {
+                ChatScreen(
+                    state = MobieUiState(selected = testModel(), runtimeState = RuntimeState.READY),
+                    onSend = { _, _ -> true },
+                    onSwitchModel = { switchRequested = true },
+                )
+            }
+        }
+
+        composeRule.onNode(hasText("Test Model") and hasClickAction()).performClick()
+        composeRule.runOnIdle { assertTrue(switchRequested) }
+    }
+
+    @Test
+    fun switcherMarksActiveModelAndPicksAnother() {
+        val active = InstalledModelEntry(testModel(), "/private/test.litertlm")
+        val other = InstalledModelEntry(
+            testModel().copy(id = "example/other-model", title = "Other Model"),
+            "/private/other.litertlm",
+        )
+        var picked: InstalledModelEntry? = null
+        composeRule.setContent {
+            ScreenTheme {
+                ModelSwitcherSheet(
+                    installed = listOf(active, other),
+                    activeId = active.model.id,
+                    onPick = { picked = it },
+                    onGetMore = {},
+                    onDismiss = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("2 installed").assertIsDisplayed()
+        composeRule.onNodeWithText("active").assertIsDisplayed()
+        composeRule.onNodeWithText("get more models").assertIsDisplayed()
+        composeRule.onNodeWithText("Other Model").performClick()
+        composeRule.runOnIdle { assertEquals(other, picked) }
     }
 
     @Test

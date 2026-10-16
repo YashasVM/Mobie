@@ -108,8 +108,6 @@ data class MobieUiState(
 )
 
 class MobieViewModel(private val container: AppContainer) : ViewModel() {
-    /** Matches the runtime default used when a model reports no context window. */
-    private val DEFAULT_ATTACHMENT_CONTEXT_TOKENS = 4_096
     private val mutableState = MutableStateFlow(
         MobieUiState(
             // Device facts are read off the main thread in init; the UI already tolerates a null device.
@@ -373,8 +371,11 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val history = readHistory(model)
         val sessions = container.chatHistory.sessions(model.id)
         val operation = nextRuntimeOperation()
+        // Every way into chat (library, switcher, model page, launch) updates the model launch reopens.
+        container.lastUsedModel.write(model.id)
         mutableState.update {
             it.copy(
+                activeInstalledId = model.id,
                 chatting = true,
                 downloadedPath = path,
                 runtimeState = RuntimeState.LOADING,
@@ -725,8 +726,6 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun startInstalledChat(entry: InstalledModelEntry) {
-        container.lastUsedModel.write(entry.model.id)
-        mutableState.update { it.copy(activeInstalledId = entry.model.id) }
         beginSelection(entry.model) {
             container.chatHistory.startNewSession(entry.model.id)
             openChat(entry.localPath)
@@ -914,9 +913,10 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
      */
     private fun routeOnLaunch(installed: List<InstalledModelEntry>) {
         if (launchRouted) return
-        val current = state.value
-        if (!current.welcomeSeen) return
+        // Decided once: a later refresh (a finished download, a delete) must never pull the user
+        // into chat, including after a first run that started on the welcome screen.
         launchRouted = true
+        val current = state.value
         if (current.selected != null || current.chatting) return
         val destination = initialDestination(current.welcomeSeen, installed, current.activeInstalledId)
         if (destination is LaunchDestination.Chat) startInstalledChat(destination.entry)
@@ -965,6 +965,9 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     private fun isCurrentRuntimeOperation(operation: Long): Boolean = runtimeOperation.get() == operation
 
     companion object {
+        /** Matches the runtime default used when a model reports no context window. */
+        private const val DEFAULT_ATTACHMENT_CONTEXT_TOKENS = 4_096
+
         fun factory(container: AppContainer): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")

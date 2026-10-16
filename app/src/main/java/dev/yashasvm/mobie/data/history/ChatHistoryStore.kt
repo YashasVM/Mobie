@@ -69,11 +69,7 @@ class ChatHistoryStore(context: Context) {
         // than creating a duplicate when the user sends the next message.
         val id = resolvedSessionId(modelId, available) ?: UUID.randomUUID().toString()
         val existing = available.filterNot { it.id == id }
-        val title = messages.firstOrNull { it.fromUser && it.text.isNotBlank() }
-            ?.text
-            ?.replace("\n", " ")
-            ?.take(TITLE_LENGTH)
-            ?: "New local chat"
+        val title = sessionTitle(messages)
         val updated = (listOf(ChatHistorySession(id, title, now, messages.takeLast(MAX_MESSAGES))) + existing)
             .take(MAX_SESSIONS)
         sessionsCache[modelId] = updated
@@ -85,8 +81,7 @@ class ChatHistoryStore(context: Context) {
 
     fun startNewSession(modelId: String): String {
         val id = UUID.randomUUID().toString()
-        val sessions = (listOf(ChatHistorySession(id, "New local chat", System.currentTimeMillis())) + sessions(modelId))
-            .take(MAX_SESSIONS)
+        val sessions = sessionsAfterStart(ChatHistorySession(id, NEW_CHAT_TITLE, System.currentTimeMillis()), sessions(modelId))
         sessionsCache[modelId] = sessions
         preferences.edit()
             .putString(sessionsKey(modelId), json.encodeToString(sessions))
@@ -138,9 +133,29 @@ class ChatHistoryStore(context: Context) {
 
     private fun currentKey(modelId: String) = "current:$modelId"
 
-    private companion object {
+    internal companion object {
         const val MAX_MESSAGES = 100
         const val MAX_SESSIONS = 20
         const val TITLE_LENGTH = 48
+        const val NEW_CHAT_TITLE = "New local chat"
+
+        /**
+         * Puts [started] first and drops earlier sessions that never got a message. Launch opens a
+         * fresh chat every time, so without this, unused sessions would push real chats past
+         * [MAX_SESSIONS].
+         */
+        internal fun sessionsAfterStart(
+            started: ChatHistorySession,
+            existing: List<ChatHistorySession>,
+        ): List<ChatHistorySession> =
+            (listOf(started) + existing.filter { it.messages.isNotEmpty() }).take(MAX_SESSIONS)
+
+        /** First question, or the first attached file's name when the user sent only files. */
+        internal fun sessionTitle(messages: List<HistoryMessage>): String {
+            val firstUser = messages.firstOrNull { it.fromUser && (it.text.isNotBlank() || it.attachments.isNotEmpty()) }
+                ?: return NEW_CHAT_TITLE
+            val text = firstUser.text.ifBlank { firstUser.attachments.first().name }
+            return text.replace("\n", " ").take(TITLE_LENGTH)
+        }
     }
 }

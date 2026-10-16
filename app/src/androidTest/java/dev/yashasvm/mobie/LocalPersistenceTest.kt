@@ -140,6 +140,30 @@ class LocalPersistenceTest {
     }
 
     @Test
+    fun emptyLaunchSessionsDoNotPushOutSavedChats() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val modelId = "test/empty-launch-sessions"
+        val store = ChatHistoryStore(context)
+        store.clear(modelId)
+        try {
+            val savedId = store.startNewSession(modelId)
+            store.write(modelId, listOf(HistoryMessage(true, "Keep me")))
+            // Launch opens a fresh, unused chat each time.
+            repeat(30) { store.startNewSession(modelId) }
+
+            val recreated = ChatHistoryStore(context)
+            val sessions = recreated.sessions(modelId)
+            assertEquals(2, sessions.size)
+            assertTrue(sessions.first().messages.isEmpty())
+            assertEquals(savedId, sessions[1].id)
+            recreated.activate(modelId, savedId)
+            assertEquals(listOf(HistoryMessage(true, "Keep me")), recreated.read(modelId))
+        } finally {
+            store.clear(modelId)
+        }
+    }
+
+    @Test
     fun installedModelPreservesSourceArtifactIdentity() = kotlinx.coroutines.runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val modelId = "test/artifact-identity"

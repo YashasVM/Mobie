@@ -486,41 +486,42 @@ private fun ChatHeader(
             IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
                 LucideIcon(LucideR.drawable.lucide_ic_arrow_left, "Back", Modifier.size(22.dp))
             }
-            // Tappable model chip: name, a status dot, and the engine state in mono.
-            Row(
-                Modifier
-                    .weight(1f, fill = false)
-                    .heightIn(min = 40.dp)
-                    .clip(PillShape)
-                    .border(1.dp, Mobie.signals.hairline, PillShape)
-                    .clickable(role = Role.Button, onClickLabel = "Switch model", onClick = onSwitchModel)
-                    .padding(start = 14.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.semantics { heading() }.weight(1f, fill = false),
-                )
+            // Tappable model chip: name, a status dot, and the engine state in mono. The box takes
+            // the free width so long names ellipsize late while the actions stay right-aligned.
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                 Row(
-                    Modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
+                    Modifier
+                        .heightIn(min = 40.dp)
+                        .clip(PillShape)
+                        .border(1.dp, Mobie.signals.hairline, PillShape)
+                        .clickable(role = Role.Button, onClickLabel = "Switch model", onClick = onSwitchModel)
+                        .padding(start = 14.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    StatusDot(dotColor, pulsing = pulsing, size = 7.dp)
                     Text(
-                        engineStatusWord(runtimeState),
-                        style = Mobie.numeric.tiny,
-                        color = muted,
+                        title,
+                        style = MaterialTheme.typography.titleSmall,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.semantics { heading() }.weight(1f, fill = false),
                     )
+                    Row(
+                        Modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        StatusDot(dotColor, pulsing = pulsing, size = 7.dp)
+                        Text(
+                            engineStatusWord(runtimeState),
+                            style = Mobie.numeric.tiny,
+                            color = muted,
+                            maxLines = 1,
+                        )
+                    }
+                    LucideIcon(LucideR.drawable.lucide_ic_chevron_down, null, Modifier.size(14.dp), tint = muted)
                 }
-                LucideIcon(LucideR.drawable.lucide_ic_chevron_down, null, Modifier.size(14.dp), tint = muted)
             }
-            Spacer(Modifier.weight(1f))
             IconButton(onClick = onNewChat, modifier = Modifier.size(48.dp)) {
                 LucideIcon(LucideR.drawable.lucide_ic_message_square_plus, "Start a new chat", Modifier.size(22.dp))
             }
@@ -650,7 +651,6 @@ private fun RunDetails(
         Hairline()
     }
 }
-
 
 private fun runJson(state: MobieUiState): String {
     val stats = state.stats
@@ -872,7 +872,6 @@ private fun SuggestionChip(text: String, hint: String?, onClick: () -> Unit, mod
     }
 }
 
-
 // ---------------------------------------------------------------------------------------------
 // Messages
 
@@ -907,6 +906,8 @@ private val UserBubbleShape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.d
 internal fun AttachmentChip(meta: AttachmentMeta, modifier: Modifier = Modifier, onRemove: (() -> Unit)? = null) {
     Row(
         modifier
+            // Bounded so the name can ellipsize, also inside the composer's horizontally scrolling row.
+            .widthIn(max = 260.dp)
             .clip(PillShape)
             .border(1.dp, Mobie.signals.hairline, PillShape)
             .background(MaterialTheme.colorScheme.surfaceContainerHigh, PillShape)
@@ -1072,7 +1073,6 @@ private fun ReplyFooter(message: ChatMessage) {
         }
     }
 }
-
 
 /** "128 tok · 18.4 tok/s · ttft 0.9 s · 4.1 s", listing only fields that were measured. */
 private fun replyStatsLine(stats: InferenceStats): String? = buildList {
@@ -1459,9 +1459,6 @@ private fun List<MdSpan>.toAnnotated(codeStyle: SpanStyle): AnnotatedString = bu
 // ---------------------------------------------------------------------------------------------
 // Composer
 
-// ---------------------------------------------------------------------------------------------
-// Composer
-
 @Composable
 private fun ComposerDock(
     prompt: String,
@@ -1766,7 +1763,6 @@ private fun SendStopButton(generating: Boolean, canSubmit: Boolean, onSubmit: ()
         }
     }
 }
-
 
 // ---------------------------------------------------------------------------------------------
 // Files

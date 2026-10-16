@@ -206,7 +206,7 @@ private fun ChecklistPanel(model: AiModel, artifact: ModelArtifact, state: Mobie
     val storageShort = needed > 0 && free != null && needed > free
     Panel(modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp)) {
-            SectionLabel("Before you download")
+            SectionLabel(if (state.downloadedPath != null) "On this phone" else "Before you download")
             Spacer(Modifier.height(6.dp))
             StatRow("Download size", if (artifact.sizeBytes > 0) formatBytes(artifact.sizeBytes) else "Unknown")
             Hairline()
