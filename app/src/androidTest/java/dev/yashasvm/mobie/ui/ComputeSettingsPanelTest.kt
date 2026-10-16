@@ -16,6 +16,8 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -24,7 +26,10 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.platform.app.InstrumentationRegistry
+import dev.yashasvm.mobie.core.device.BackendAdmission
 import dev.yashasvm.mobie.core.device.CpuCluster
+import dev.yashasvm.mobie.core.model.Compatibility
+import dev.yashasvm.mobie.core.model.CompatibilityResult
 import dev.yashasvm.mobie.core.device.DecodeMeasurement
 import dev.yashasvm.mobie.core.device.DecodeRunSettings
 import dev.yashasvm.mobie.core.device.DecodeSpeed
@@ -92,7 +97,7 @@ class ComputeSettingsPanelTest {
                 }
             }
         }
-        composeRule.onNodeWithTag("decode_speed_GPU").assertIsDisplayed()
+        composeRule.onNodeWithTag("decode_speed_GPU", useUnmergedTree = true).assertIsDisplayed()
         composeRule.onNodeWithText("Speed unavailable").assertIsDisplayed()
         composeRule.onNodeWithText("OpenCL driver was not found. Run GPU to measure support and speed.").assertIsDisplayed()
         composeRule.onNodeWithTag("backend_GPU").performClick()
@@ -135,7 +140,7 @@ class ComputeSettingsPanelTest {
                 }
             }
         }
-        composeRule.onNodeWithTag("decode_speed_CPU").assertIsDisplayed()
+        composeRule.onNodeWithTag("decode_speed_CPU", useUnmergedTree = true).assertIsDisplayed()
         composeRule.onNodeWithText("measured at different settings · last run").assertIsDisplayed()
         composeRule.onNodeWithText("measured on this phone · last run").assertDoesNotExist()
     }
@@ -335,6 +340,50 @@ class ComputeSettingsPanelTest {
                 }
             }.commit()
         }
+    }
+
+    @Test fun eachBackendRowCarriesItsOwnRamAndAutoNamesItsPick() {
+        val gib = 1024L * 1024L * 1024L
+        var selected by mutableStateOf(ComputeBackend.AUTO)
+        val admissions = mapOf(
+            ComputeBackend.AUTO to BackendAdmission(ComputeBackend.GPU, CompatibilityResult(Compatibility.COMPATIBLE, "Fits in free memory.", 3 * gib)),
+            ComputeBackend.CPU to BackendAdmission(ComputeBackend.CPU, CompatibilityResult(Compatibility.COMPATIBLE, "", gib)),
+            ComputeBackend.GPU to BackendAdmission(ComputeBackend.GPU, CompatibilityResult(Compatibility.WARNING, "", 3 * gib)),
+        )
+        composeRule.setContent {
+            MobieTheme {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    ComputeSettingsPanel(selected, null, { selected = it }, {}, hardware = hardware,
+                        artifactSizeBytes = 344_671_744, backendAdmissions = admissions)
+                }
+            }
+        }
+        composeRule.onNodeWithTag("backend_AUTO").assertIsSelected()
+        composeRule.onNode(hasText("Uses GPU · needs ~3.0 GB RAM") and hasAnyAncestor(hasTestTag("auto_admission")), useUnmergedTree = true)
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("ram_CPU", useUnmergedTree = true).assertTextEquals("needs ~1.0 GB RAM · Runs here")
+        composeRule.onNodeWithTag("ram_GPU", useUnmergedTree = true).assertTextEquals("needs ~3.0 GB RAM · Free memory first")
+        // The whole row is the touch target, not just the option name.
+        composeRule.onNodeWithTag("ram_CPU", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithTag("backend_CPU").assertIsSelected()
+        composeRule.onNodeWithTag("backend_AUTO").assertIsNotSelected()
+        composeRule.runOnIdle { assertEquals(ComputeBackend.CPU, selected) }
+        captureUiFixture("compute-rows-fixture.png")
+    }
+
+    @Test fun loadedSettingsWithoutChangesSayTheyAreInUse() {
+        composeRule.setContent {
+            MobieTheme {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    ComputeSettingsPanel(ComputeBackend.GPU, null, {}, {}, hardware = hardware, artifactSizeBytes = 344_671_744,
+                        activeCompute = ActiveCompute(ComputeBackend.GPU), needsApply = false, loaded = true,
+                        runtimeState = RuntimeState.READY, downloaded = true)
+                }
+            }
+        }
+        composeRule.onNodeWithText("These settings are in use.").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("running · GPU").assertIsDisplayed()
+        composeRule.onNodeWithTag("apply_compute").assertDoesNotExist()
     }
 
     @Test fun exportedRunUsesAppliedSamplerRatherThanPendingEdits() {

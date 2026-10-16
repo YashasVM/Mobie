@@ -59,9 +59,19 @@ class ComputeSpeedPresentationTest {
         val gib = 1024L * 1024L * 1024L
         assertEquals("needs ~3.0 GB RAM · Free memory first", backendRamLabel(result(Compatibility.WARNING, 3 * gib)))
         assertEquals(null, backendRamLabel(result(Compatibility.WARNING, 0)))
-        assertEquals("Auto uses GPU · needs ~3.0 GB RAM",
+        assertEquals("Uses GPU · needs ~3.0 GB RAM",
             autoPickLabel(BackendAdmission(ComputeBackend.GPU, result(Compatibility.COMPATIBLE, 3 * gib))))
-        assertEquals("Auto uses CPU", autoPickLabel(BackendAdmission(ComputeBackend.CPU, result(Compatibility.COMPATIBLE, 0))))
+        assertEquals("Uses CPU", autoPickLabel(BackendAdmission(ComputeBackend.CPU, result(Compatibility.COMPATIBLE, 0))))
+    }
+
+    @Test fun `dock summary names the saved choice, Auto's pick, and RAM only when known`() {
+        val gib = 1024L * 1024L * 1024L
+        assertEquals("Auto · GPU · ~3.0 GB RAM",
+            runOnSummary(ComputeBackend.AUTO, BackendAdmission(ComputeBackend.GPU, result(Compatibility.COMPATIBLE, 3 * gib))))
+        assertEquals("CPU · ~1.0 GB RAM",
+            runOnSummary(ComputeBackend.CPU, BackendAdmission(ComputeBackend.CPU, result(Compatibility.WARNING, gib))))
+        assertEquals("GPU", runOnSummary(ComputeBackend.GPU, BackendAdmission(ComputeBackend.GPU, result(Compatibility.COMPATIBLE, 0))))
+        assertEquals("Auto", runOnSummary(ComputeBackend.AUTO, null))
     }
 
     private fun result(status: Compatibility, ramBytes: Long) = CompatibilityResult(status, "", ramBytes)

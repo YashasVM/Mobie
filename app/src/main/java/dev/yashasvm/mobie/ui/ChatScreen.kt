@@ -36,6 +36,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -470,7 +471,11 @@ private fun ChatHeader(
     }
 }
 
-/** Live callbacks are SDK chunks; final token rates come from LiteRT benchmark data. */
+/**
+ * The strip under the chat header. Left: what the model is running on, as a chip that opens the
+ * run settings for this model. Right: the latest speed, which expands the run details. Live
+ * callbacks are SDK chunks; final token rates come from LiteRT benchmark data.
+ */
 @Composable
 private fun RunDetails(
     activeCompute: ActiveCompute?,
@@ -482,54 +487,54 @@ private fun RunDetails(
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     var expanded by rememberSaveable { mutableStateOf(false) }
-    val decode = stats?.tokensPerSecond?.takeIf { it > 0 }?.let { String.format(Locale.US, "%.1f tok/s", it) }
-        ?: live.liveSdkChunksPerSecond?.let { String.format(Locale.US, "%.1f SDK chunks/s", it) }
-        ?: "Waiting for output"
+    val measured = stats?.tokensPerSecond?.takeIf { it > 0 }
+    val decode = measured?.let { String.format(Locale.US, "%.1f tok/s", it) }
+        ?: live.liveSdkChunksPerSecond?.let { String.format(Locale.US, "%.1f chunks/s", it) }
+        ?: "no reply yet"
     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerLow)) {
-        activeCompute?.let { selected ->
-            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            ComputeChip(activeCompute, onComputeSettings)
+            Spacer(Modifier.weight(1f))
+            Row(
+                Modifier
+                    .heightIn(min = 44.dp)
+                    .clickable(role = Role.Button, onClickLabel = if (expanded) "Hide run details" else "Show run details") { expanded = !expanded }
+                    .padding(horizontal = 8.dp)
+                    .testTag("run_details_toggle"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 Text(
-                    "Running on ${selected.label}",
-                    style = Mobie.numeric.tiny,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    decode,
+                    style = Mobie.numeric.small,
+                    color = if (measured != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
                 )
-                selected.fallbackReason?.let { reason ->
-                    Text(reason, style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+                Text(if (expanded) "▾" else "▸", style = Mobie.numeric.small, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        // One readout line, like a status bar cell: the section name on the left, live speed on the right.
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .heightIn(min = 44.dp)
-                .clickable(role = Role.Button) { expanded = !expanded }
-                .padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
+        activeCompute?.fallbackReason?.let { reason ->
             Text(
-                "run details ${if (expanded) "▾" else "▸"}",
-                style = Mobie.numeric.small,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                decode,
-                style = Mobie.numeric.small,
-                color = if (stats?.tokensPerSecond?.let { it > 0 } == true) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
+                reason,
+                style = Mobie.numeric.tiny,
+                color = Mobie.signals.caution,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp).testTag("chat_compute_fallback"),
             )
         }
         if (expanded) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 val first = live.firstChunkMs ?: stats?.timeToFirstTokenMs?.takeIf { it > 0 }
-                Text("First SDK chunk: ${first?.let(::formatMillis) ?: "—"}", style = Mobie.numeric.tiny)
-                Text("Prefill: ${stats?.prefillTokensPerSecond?.takeIf { it > 0 }?.let { String.format(Locale.US, "%.1f tok/s (%d tokens)", it, stats.prefillTokenCount) } ?: "—"}", style = Mobie.numeric.tiny)
-                Text("Decode: ${stats?.tokensPerSecond?.takeIf { it > 0 }?.let { String.format(Locale.US, "%.1f tok/s (%d tokens)", it, stats.decodeTokenCount) } ?: "—"}", style = Mobie.numeric.tiny)
-                Text("App PSS: ${live.pssBytes?.let(::formatBytes) ?: "—"} · Thermal status: ${live.thermalStatus?.toString() ?: "—"}", style = Mobie.numeric.tiny)
+                Text("First text: ${first?.let(::formatMillis) ?: "—"}", style = Mobie.numeric.tiny)
+                Text("Reading prompt: ${stats?.prefillTokensPerSecond?.takeIf { it > 0 }?.let { String.format(Locale.US, "%.1f tok/s (%d tokens)", it, stats.prefillTokenCount) } ?: "—"}", style = Mobie.numeric.tiny)
+                Text("Writing reply: ${stats?.tokensPerSecond?.takeIf { it > 0 }?.let { String.format(Locale.US, "%.1f tok/s (%d tokens)", it, stats.decodeTokenCount) } ?: "—"}", style = Mobie.numeric.tiny)
+                Text("App memory: ${live.pssBytes?.let(::formatBytes) ?: "—"} · Thermal status: ${live.thermalStatus?.toString() ?: "—"}", style = Mobie.numeric.tiny)
                 Text("Battery current: ${live.batteryCurrentMilliAmps?.let { String.format(Locale.US, "%.0f mA", it) } ?: "—"}", style = Mobie.numeric.tiny)
-                Text("Estimated whole-device energy/token: ${live.estimatedEnergyPerTokenMilliWh?.let { String.format(Locale.US, "%.5f mWh", it) } ?: "—"}", style = Mobie.numeric.tiny)
-                Text("Live speed uses SDK chunks; final token counts use LiteRT.", style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Energy per token (whole phone, estimate): ${live.estimatedEnergyPerTokenMilliWh?.let { String.format(Locale.US, "%.5f mWh", it) } ?: "—"}", style = Mobie.numeric.tiny)
+                Text("Live speed counts text chunks as they arrive; final token counts come from LiteRT.", style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TermButton(
                     "Copy run as JSON",
                     onClick = { scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Run JSON", runJson()))) } },
@@ -537,11 +542,40 @@ private fun RunDetails(
                     enabled = stats != null || live.sdkChunks > 0,
                     modifier = Modifier.padding(vertical = 4.dp),
                 )
-                TermButton("Compute settings", onClick = onComputeSettings, style = TermButtonStyle.Ghost,
-                    modifier = Modifier.padding(vertical = 4.dp).testTag("open_compute_settings"))
             }
         }
         Hairline()
+    }
+}
+
+/**
+ * `[≡ GPU ›]`: the active backend as a bordered chip. One tap opens the run settings for the loaded
+ * model, so switching CPU / GPU or tuning Advanced never needs a trip back to the model page.
+ */
+@Composable
+private fun ComputeChip(activeCompute: ActiveCompute?, onClick: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val accent = MaterialTheme.colorScheme.primary
+    val ink = if (pressed) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurface
+    val label = activeCompute?.label ?: "Run settings"
+    Row(
+        Modifier
+            .heightIn(min = 40.dp)
+            .background(if (pressed) accent else Color.Transparent)
+            .border(1.dp, if (pressed) accent else MaterialTheme.colorScheme.outline)
+            .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClickLabel = "Open run settings", onClick = onClick)
+            .semantics(mergeDescendants = true) {
+                contentDescription = activeCompute?.let { "Run settings. Running on ${it.label}" } ?: "Run settings"
+            }
+            .padding(horizontal = 10.dp)
+            .testTag("open_compute_settings"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        LucideIcon(LucideR.drawable.lucide_ic_sliders_horizontal, null, Modifier.size(14.dp), tint = if (pressed) ink else accent)
+        Text(label, style = Mobie.numeric.small, color = ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text("›", style = Mobie.numeric.small, color = if (pressed) ink else MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

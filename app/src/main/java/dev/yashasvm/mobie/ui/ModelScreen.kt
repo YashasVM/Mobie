@@ -15,6 +15,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,7 +33,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -41,6 +44,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -83,6 +87,7 @@ import dev.yashasvm.mobie.data.download.DownloadProgress
 import dev.yashasvm.mobie.data.download.isCancellable
 import dev.yashasvm.mobie.ui.theme.Mobie
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 /**
  * Pre-flight spec sheet for one model, styled as a terminal screen: a verdict box, a memory budget
@@ -118,11 +123,14 @@ internal fun ModelScreen(
     val gatedWithoutToken = model.gated && !state.tokenConfigured
     // Sections stagger in once; scrolling back up does not replay the entrance.
     val entrance = rememberEntranceTracker()
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         ModelTopBar(path = model.id, runtime = artifact.runtimeLabel, onBack = onBack)
         LazyColumn(
             modifier = Modifier.weight(1f).fillMaxWidth(),
+            state = listState,
             verticalArrangement = Arrangement.spacedBy(14.dp),
             contentPadding = PaddingValues(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 24.dp),
         ) {
@@ -132,10 +140,6 @@ internal fun ModelScreen(
                 MemoryPanel(state.compatibility, state.device, Modifier.entrance(entrance, "memory", 2),
                     state.memoryReliefInProgress, onFreeMemory)
             }
-            item(key = "storage") {
-                StoragePanel(artifact, state.compatibility, state.device, Modifier.entrance(entrance, "storage", 3))
-            }
-            item(key = "artifact") { ArtifactPanel(artifact, model, Modifier.entrance(entrance, "artifact", 4)) }
             item(key = "compute") {
                 ComputeSettingsPanel(
                     backend = state.computeBackend,
@@ -158,9 +162,13 @@ internal fun ModelScreen(
                     onSamplerChange = onSamplerChange,
                     onApply = onApplyCompute,
                     onReset = onResetCompute,
-                    modifier = Modifier.entrance(entrance, "compute", 5),
+                    modifier = Modifier.entrance(entrance, "compute", 3),
                 )
             }
+            item(key = "storage") {
+                StoragePanel(artifact, state.compatibility, state.device, Modifier.entrance(entrance, "storage", 4))
+            }
+            item(key = "artifact") { ArtifactPanel(artifact, model, Modifier.entrance(entrance, "artifact", 5)) }
         }
         ActionDock(
             state = state,
@@ -178,6 +186,8 @@ internal fun ModelScreen(
                 else onRun(false)
             },
             onCancelDownload = onCancelDownload,
+            runOn = runOnSummary(state.computeBackend, backendAdmissions[state.computeBackend]),
+            onRunSettings = { scope.launch { listState.animateScrollToItem(COMPUTE_ITEM_INDEX) } },
         )
     }
 
@@ -204,6 +214,9 @@ internal fun ModelScreen(
         )
     }
 }
+
+/** Position of the run settings window in the model page list; the dock's "change" link scrolls to it. */
+private const val COMPUTE_ITEM_INDEX = 3
 
 /** Top bar: back, the model as a path (`model/<id>`), and the runtime tag. */
 @Composable
@@ -532,6 +545,12 @@ private fun middleEllipsis(text: String, maxChars: Int = 44): String {
     return text.take(head) + "…" + text.takeLast(tail)
 }
 
+/**
+ * Where and how the model runs. The primary choice is a short list of Auto / CPU / GPU rows, each
+ * carrying its own speed and RAM so they can be compared at a glance; every expert knob lives
+ * under [AdvancedComputePanel]. [framed] draws the terminal window; a host that already names the
+ * section (the chat's run-settings sheet) passes false.
+ */
 @Composable
 internal fun ComputeSettingsPanel(
     backend: ComputeBackend,
@@ -558,62 +577,60 @@ internal fun ComputeSettingsPanel(
     onSamplerChange: (SamplerSettings) -> String? = { null },
     onApply: () -> Unit = {},
     onReset: () -> Unit = { onOptionsChange(ComputeOptions()); onSamplerChange(SamplerSettings()) },
+    framed: Boolean = true,
 ) {
     val coreCount = hardware?.cpuCoreCount?.takeIf { it > 0 } ?: Runtime.getRuntime().availableProcessors()
     // Speeds match the settings the next load would use, after this artifact's limits.
     val effective = AdvancedComputePolicy.forArtifact(options, coreCount, capabilities)
     val runSettings = DecodeRunSettings(cpuThreads = effective.cpuThreads, contextTokens = effective.contextTokens)
     var inputsValid by remember { mutableStateOf(true) }
-    TuiWindow("compute", modifier.fillMaxWidth().testTag("compute_settings")) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(hardwareSummary(hardware), style = Mobie.numeric.small,
-                    color = MaterialTheme.colorScheme.onSurface)
-                hardware?.let { profile ->
-                    val details = hardwareDetails(profile)
-                    if (details.isNotEmpty()) Text(details, style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
+    val body: @Composable () -> Unit = {
+        Column(Modifier.padding(if (framed) 12.dp else 0.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                FlagHeader("Run on", "where the model runs")
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(ComputeBackend.AUTO, ComputeBackend.CPU, ComputeBackend.GPU).forEach { choice ->
-                        FlagChoice(
-                            label = if (choice == ComputeBackend.AUTO) "Auto" else choice.name,
+                FlagHeader("Run on", "speed and memory for this model")
+                Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    BackendOption(
+                        label = "Auto",
+                        selected = backend == ComputeBackend.AUTO,
+                        onClick = { onBackendChange(ComputeBackend.AUTO) },
+                        modifier = Modifier.testTag("backend_AUTO"),
+                        badge = "recommended",
+                    ) {
+                        val auto = backendAdmissions[ComputeBackend.AUTO]
+                        if (auto != null) {
+                            Column(Modifier.testTag("auto_admission"), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(autoPickLabel(auto), style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurface)
+                                Text(auto.result.reason, style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        } else {
+                            Text("Tries GPU when it fits, then CPU.", style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    listOf(ComputeBackend.CPU, ComputeBackend.GPU).forEach { choice ->
+                        val match = remember(measurements, choice, runSettings) { matchDecodeMeasurement(measurements, choice, runSettings) }
+                        val prediction = remember(hardware, artifactSizeBytes, choice, match?.speed) {
+                            DecodeSpeedEstimator.predict(hardware, artifactSizeBytes, choice, match?.speed)
+                        }
+                        BackendOption(
+                            label = choice.name,
                             selected = backend == choice,
                             onClick = { onBackendChange(choice) },
                             modifier = Modifier.testTag("backend_${choice.name}"),
-                        )
-                    }
-                }
-                backendAdmissions[ComputeBackend.AUTO]?.let { auto ->
-                    Column(Modifier.testTag("auto_admission"), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(autoPickLabel(auto), style = Mobie.numeric.small, color = MaterialTheme.colorScheme.onSurface)
-                        Text(auto.result.reason, style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                FlagHeader("Generation speed", "tokens per second")
-                listOf(ComputeBackend.CPU, ComputeBackend.GPU).forEach { choice ->
-                    val match = remember(measurements, choice, runSettings) { matchDecodeMeasurement(measurements, choice, runSettings) }
-                    val prediction = remember(hardware, artifactSizeBytes, choice, match?.speed) {
-                        DecodeSpeedEstimator.predict(hardware, artifactSizeBytes, choice, match?.speed)
-                    }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text(choice.name, style = Mobie.numeric.small,
-                            color = if (backend == choice) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-                        Column(Modifier.weight(1f).testTag("decode_speed_${choice.name}")) {
-                            Text(prediction.speed?.let(::decodeSpeedLabel) ?: "Speed unavailable",
-                                style = Mobie.numeric.small, color = MaterialTheme.colorScheme.onSurface)
-                            Text(prediction.speed?.let { decodeSpeedSourceLabel(it, exactSettings = match?.exactSettings ?: true) } ?: prediction.unavailableReason.orEmpty(),
-                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            backendAdmissions[choice]?.result?.let { result ->
-                                backendRamLabel(result)?.let { ram ->
-                                    Text(ram, modifier = Modifier.testTag("ram_${choice.name}"),
-                                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            trailing = prediction.speed?.let(::decodeSpeedLabel) ?: "Speed unavailable",
+                            trailingMuted = prediction.speed == null,
+                        ) {
+                            Column(Modifier.testTag("decode_speed_${choice.name}"), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(prediction.speed?.let { decodeSpeedSourceLabel(it, exactSettings = match?.exactSettings ?: true) }
+                                    ?: prediction.unavailableReason.orEmpty(),
+                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                backendAdmissions[choice]?.result?.let { result ->
+                                    backendRamLabel(result)?.let { ram ->
+                                        Text(ram, modifier = Modifier.testTag("ram_${choice.name}"), style = Mobie.numeric.tiny,
+                                            color = if (result.status == Compatibility.COMPATIBLE) MaterialTheme.colorScheme.onSurfaceVariant
+                                            else result.status.signalColor())
+                                    }
                                 }
                             }
                         }
@@ -622,31 +639,119 @@ internal fun ComputeSettingsPanel(
             }
             activeCompute?.fallbackReason?.let { reason ->
                 Text(reason, modifier = Modifier.testTag("compute_fallback"), style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    color = Mobie.signals.caution)
             }
-            Text("Auto tries GPU when it fits, then CPU if needed. GPU support is checked when loading.",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(hardwareSummary(hardware), style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                val details = hardware?.let(::hardwareDetails).orEmpty()
+                Text(listOf(details, "GPU support is checked when loading.").filter { it.isNotEmpty() }.joinToString(" · "),
+                    style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             AdvancedComputePanel(options, sampler, coreCount, capabilities, onOptionsChange, onSamplerChange, onReset) { inputsValid = it }
-            if (!loaded) {
-                // Nothing is loaded, so there is no reload to ask for; the choices simply wait for the next load.
-                Text("Saved. Used next time you load a model.", modifier = Modifier.testTag("saved_settings"),
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } else if (needsApply) {
-                Text("Changes need a reload. Your saved conversation will be kept.", modifier = Modifier.testTag("reload_prompt"),
-                    style = MaterialTheme.typography.bodySmall)
-                when {
-                    !inputsValid -> Text("Fix the highlighted fields before applying.", style = MaterialTheme.typography.bodySmall)
-                    runtimeState == RuntimeState.GENERATING || runtimeState == RuntimeState.STOPPING ->
-                        Text("Wait for the reply to finish, or stop it before applying changes.", style = MaterialTheme.typography.bodySmall)
-                    runtimeState == RuntimeState.LOADING -> Text("Wait for the model to finish loading.", style = MaterialTheme.typography.bodySmall)
-                    !downloaded -> Text("Download this model before applying. These settings are saved for its next load.", style = MaterialTheme.typography.bodySmall)
-                }
-                TermButton("Apply & reload", onClick = onApply, enabled = inputsValid && AdvancedComputePolicy.canApply(runtimeState, downloaded),
-                    modifier = Modifier.fillMaxWidth().testTag("apply_compute"))
-            } else {
-                Text("Settings apply when you load the model.", style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            ComputeApplyStatus(needsApply, loaded, inputsValid, runtimeState, downloaded, onApply)
+        }
+    }
+    if (framed) {
+        TuiWindow(
+            "run settings",
+            modifier.fillMaxWidth().testTag("compute_settings"),
+            meta = activeCompute?.let { "running · ${it.label}" },
+            metaColor = Mobie.signals.ready,
+        ) { body() }
+    } else {
+        Box(modifier.fillMaxWidth().testTag("compute_settings")) { body() }
+    }
+}
+
+/** What happens to the choices above: saved for the next load, in use now, or waiting for a reload. */
+@Composable
+private fun ComputeApplyStatus(
+    needsApply: Boolean,
+    loaded: Boolean,
+    inputsValid: Boolean,
+    runtimeState: RuntimeState,
+    downloaded: Boolean,
+    onApply: () -> Unit,
+) {
+    val dim = MaterialTheme.colorScheme.onSurfaceVariant
+    if (!loaded) {
+        // Nothing is loaded, so there is no reload to ask for; the choices simply wait for the next load.
+        Text("Saved. Used next time you load a model.", modifier = Modifier.testTag("saved_settings"),
+            style = MaterialTheme.typography.bodySmall, color = dim)
+    } else if (needsApply) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .6f))
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = .06f))
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Changes need a reload. Your saved conversation will be kept.", modifier = Modifier.testTag("reload_prompt"),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+            when {
+                !inputsValid -> Text("Fix the highlighted fields before applying.", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error)
+                runtimeState == RuntimeState.GENERATING || runtimeState == RuntimeState.STOPPING ->
+                    Text("Wait for the reply to finish, or stop it before applying changes.", style = MaterialTheme.typography.bodySmall, color = dim)
+                runtimeState == RuntimeState.LOADING -> Text("Wait for the model to finish loading.", style = MaterialTheme.typography.bodySmall, color = dim)
+                !downloaded -> Text("Download this model before applying. These settings are saved for its next load.",
+                    style = MaterialTheme.typography.bodySmall, color = dim)
             }
+            TermButton("Apply & reload", onClick = onApply, enabled = inputsValid && AdvancedComputePolicy.canApply(runtimeState, downloaded),
+                modifier = Modifier.fillMaxWidth().testTag("apply_compute"))
+        }
+    } else {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatusDot(Mobie.signals.ready, size = 6.dp)
+            Text("These settings are in use.", style = MaterialTheme.typography.bodySmall, color = dim)
+        }
+    }
+}
+
+/**
+ * One row of the Auto / CPU / GPU choice: a `(•)` radio mark, the option name, its headline figure
+ * on the right, and [details] underneath. The whole row is the touch target.
+ */
+@Composable
+private fun BackendOption(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    trailing: String? = null,
+    trailingMuted: Boolean = false,
+    badge: String? = null,
+    details: @Composable () -> Unit = {},
+) {
+    val accent = MaterialTheme.colorScheme.primary
+    val border by animateColorAsState(if (selected) accent else MaterialTheme.colorScheme.outline.copy(alpha = .55f),
+        tween(MotionShort), label = "backend border")
+    val fill by animateColorAsState(if (selected) accent.copy(alpha = .08f) else Color.Transparent,
+        tween(MotionShort), label = "backend fill")
+    Row(
+        modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .background(fill)
+            .border(1.dp, border)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(if (selected) "(•)" else "( )", style = Mobie.numeric.small,
+            color = if (selected) accent else MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(label, style = Mobie.numeric.small, color = if (selected) accent else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f))
+                if (badge != null) Tag(badge)
+                if (trailing != null) {
+                    Text(trailing, style = Mobie.numeric.small, maxLines = 1,
+                        color = if (trailingMuted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
+                }
+            }
+            details()
         }
     }
 }
@@ -695,6 +800,8 @@ private fun ActionDock(
     onDownloadClick: () -> Unit,
     onRun: () -> Unit,
     onCancelDownload: () -> Unit,
+    runOn: String,
+    onRunSettings: () -> Unit,
 ) {
     val downloaded = state.downloadedPath != null
     // While a download runs, its progress line and Cancel say everything; a disabled button would not.
@@ -735,6 +842,13 @@ private fun ActionDock(
                 exit = shrinkVertically(tween(MotionMedium, easing = EmphasizedEase)) + fadeOut(tween(MotionShort)),
             ) {
                 AccessNotice()
+            }
+            AnimatedVisibility(
+                visible = downloaded && showPrimary,
+                enter = expandVertically(tween(MotionMedium, easing = EmphasizedEase)) + fadeIn(tween(MotionMedium)),
+                exit = shrinkVertically(tween(MotionMedium, easing = EmphasizedEase)) + fadeOut(tween(MotionShort)),
+            ) {
+                RunOnLine(runOn, onRunSettings)
             }
             AnimatedVisibility(
                 visible = showPrimary,
@@ -782,6 +896,26 @@ private fun ActionDock(
                 )
             }
         }
+    }
+}
+
+/** `run on  Auto · GPU · ~3.0 GB RAM   change ›`: what Run will use, one tap from changing it. */
+@Composable
+private fun RunOnLine(summary: String, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 40.dp)
+            .clickable(role = Role.Button, onClickLabel = "Change run settings", onClick = onClick)
+            .testTag("dock_run_on"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        LucideIcon(LucideR.drawable.lucide_ic_cpu, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("run on", style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(summary, style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurface, maxLines = 1,
+            overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        Text("change ›", style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.primary)
     }
 }
 

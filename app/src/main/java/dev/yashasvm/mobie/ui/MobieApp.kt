@@ -120,11 +120,6 @@ fun MobieApp(
         }
     }
 
-    if (showComputeSettings && state.chatting) {
-        ComputeSettingsDialog(state, viewModel::updateComputeOptions, viewModel::updateSampler,
-            onApply = { viewModel.applyComputeSettings(); showComputeSettings = false },
-            onReset = viewModel::resetComputeSettings, onClose = { showComputeSettings = false })
-    }
 
     BackHandler(enabled = state.selected != null) {
         if (state.chatting) viewModel.leaveChat() else viewModel.select(null)
@@ -191,6 +186,11 @@ fun MobieApp(
                 )
             }
         }
+    }
+    if (showComputeSettings && state.chatting) {
+        ComputeSettingsSheet(state, viewModel::updateComputeOptions, viewModel::updateSampler,
+            onApply = { viewModel.applyComputeSettings(); showComputeSettings = false },
+            onReset = viewModel::resetComputeSettings, onClose = { showComputeSettings = false })
     }
     if (showHistory) {
         HistorySheet(

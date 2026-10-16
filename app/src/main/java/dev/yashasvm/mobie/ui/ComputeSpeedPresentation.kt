@@ -6,6 +6,7 @@ import dev.yashasvm.mobie.core.device.DecodeSpeedConfidence
 import dev.yashasvm.mobie.core.device.DecodeSpeedSource
 import dev.yashasvm.mobie.core.device.HardwareProfile
 import dev.yashasvm.mobie.core.model.CompatibilityResult
+import dev.yashasvm.mobie.core.runtime.ComputeBackend
 import java.util.Locale
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -60,7 +61,17 @@ internal fun decodeSpeedSourceLabel(speed: DecodeSpeed, exactSettings: Boolean =
 internal fun backendRamLabel(result: CompatibilityResult): String? =
     result.estimatedRamBytes.takeIf { it > 0 }?.let { "needs ~${formatBytes(it)} RAM · ${statusLabel(result.status)}" }
 
-/** Auto's pick, e.g. `Auto uses GPU · needs ~3.6 GB RAM`. */
+/** Auto's pick, e.g. `Uses GPU · needs ~3.6 GB RAM`. Shown inside the Auto row, so it does not repeat "Auto". */
 internal fun autoPickLabel(admission: BackendAdmission): String =
-    "Auto uses ${admission.backend.name}" +
+    "Uses ${admission.backend.name}" +
         admission.result.estimatedRamBytes.takeIf { it > 0 }?.let { " · needs ~${formatBytes(it)} RAM" }.orEmpty()
+
+/**
+ * The saved choice in a few words for the model page dock, e.g. `Auto · GPU · ~3.6 GB RAM` or
+ * `CPU · ~1.1 GB RAM`. Without an admission (device not read yet) only the choice is named.
+ */
+internal fun runOnSummary(backend: ComputeBackend, admission: BackendAdmission?): String = buildList {
+    add(if (backend == ComputeBackend.AUTO) "Auto" else backend.name)
+    if (admission != null && backend == ComputeBackend.AUTO) add(admission.backend.name)
+    admission?.result?.estimatedRamBytes?.takeIf { it > 0 }?.let { add("~${formatBytes(it)} RAM") }
+}.joinToString(" · ")
