@@ -55,18 +55,20 @@ class ChatHistoryStore(context: Context) {
     private val sessionsCache = HashMap<String, List<ChatHistorySession>>()
 
     fun read(modelId: String): List<HistoryMessage> {
-        val activeId = currentId(modelId)
-        return sessions(modelId).firstOrNull { activeId == null || it.id == activeId }
-            ?.messages.orEmpty()
+        val available = sessions(modelId)
+        val activeId = resolvedSessionId(modelId, available)
+        return available.firstOrNull { it.id == activeId }?.messages.orEmpty()
     }
 
-    fun currentSessionId(modelId: String): String? = currentId(modelId)
-        ?: sessions(modelId).firstOrNull()?.id
+    fun currentSessionId(modelId: String): String? = resolvedSessionId(modelId, sessions(modelId))
 
     fun write(modelId: String, messages: List<HistoryMessage>) {
         val now = System.currentTimeMillis()
-        val id = currentId(modelId) ?: UUID.randomUUID().toString()
-        val existing = sessions(modelId).filterNot { it.id == id }
+        val available = sessions(modelId)
+        // Older installs had no active-session key. Reuse their restored conversation rather
+        // than creating a duplicate when the user sends the next message.
+        val id = resolvedSessionId(modelId, available) ?: UUID.randomUUID().toString()
+        val existing = available.filterNot { it.id == id }
         val title = messages.firstOrNull { it.fromUser && it.text.isNotBlank() }
             ?.text
             ?.replace("\n", " ")
@@ -125,6 +127,10 @@ class ChatHistoryStore(context: Context) {
             ChatHistorySession("legacy", "Previous local chat", 0L, legacy),
         )
     }
+
+    private fun resolvedSessionId(modelId: String, available: List<ChatHistorySession>): String? =
+        currentId(modelId)?.takeIf { id -> available.any { it.id == id } }
+            ?: available.firstOrNull()?.id
 
     private fun currentId(modelId: String): String? = preferences.getString(currentKey(modelId), null)
 
