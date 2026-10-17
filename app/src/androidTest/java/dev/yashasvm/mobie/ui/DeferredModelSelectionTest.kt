@@ -132,27 +132,27 @@ class DeferredModelSelectionTest {
         }
     }
 
-    // These bytes validate installed-file metadata only; no test loads them into a model engine.
-    private fun writeInstalledFixture(modelId: String, directory: File) {
-        directory.deleteRecursively()
-        check(directory.mkdirs())
-        val sourceFileName = "model.litertlm"
-        val modelFile = File(directory, DownloadFilePolicy.storageFileName(sourceFileName))
-        modelFile.writeBytes(ByteArray(64 * 1024) { index -> (index * 29).toByte() })
-        Properties().apply {
-            setProperty("modelId", modelId)
-            setProperty("title", modelId.substringAfterLast('/'))
-            setProperty("author", "Mobie test")
-            setProperty("description", "Deferred model selection fixture")
-            setProperty("type", "TEXT_GENERATION")
-            setProperty("gated", "false")
-            setProperty("fileName", modelFile.name)
-            setProperty("sourceFileName", sourceFileName)
-            setProperty("quantization", "int4")
-            DownloadSourceIdentity.stamp(this, "https://huggingface.co/$modelId/resolve/0123456789abcdef0123456789abcdef01234567/$sourceFileName")
-            ModelFileVerification.stampInstalledLength(this, modelFile)
-            DownloadFilePolicy.artifactMetadataFile(directory, sourceFileName).outputStream().use { store(it, null) }
-        }
-    }
+}
 
+// These bytes validate installed-file metadata only; no test loads them into a model engine.
+internal fun writeInstalledFixture(modelId: String, directory: File) {
+    directory.deleteRecursively()
+    check(directory.mkdirs())
+    val sourceFileName = "model.litertlm"
+    val modelFile = File(directory, DownloadFilePolicy.storageFileName(sourceFileName))
+    modelFile.writeBytes(ByteArray(64 * 1024) { index -> (index * 29).toByte() })
+    Properties().apply {
+        setProperty("modelId", modelId)
+        setProperty("title", modelId.substringAfterLast('/'))
+        setProperty("author", "Mobie test")
+        setProperty("description", "Deferred model selection fixture")
+        setProperty("type", "TEXT_GENERATION")
+        setProperty("gated", "false")
+        setProperty("fileName", modelFile.name)
+        setProperty("sourceFileName", sourceFileName)
+        setProperty("quantization", "int4")
+        DownloadSourceIdentity.stamp(this, "https://huggingface.co/$modelId/resolve/0123456789abcdef0123456789abcdef01234567/$sourceFileName")
+        ModelFileVerification.stampInstalledLength(this, modelFile)
+        DownloadFilePolicy.artifactMetadataFile(directory, sourceFileName).outputStream().use { store(it, null) }
+    }
 }

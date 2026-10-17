@@ -2,6 +2,10 @@ package dev.yashasvm.mobie
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.test.platform.app.InstrumentationRegistry
 import android.graphics.Bitmap
 import java.io.File
@@ -31,6 +35,9 @@ class MobieSmokeTest {
         navigate("models")
         composeRule.onNodeWithText("Browse").assertIsDisplayed()
         capture("models-dark")
+        composeRule.onNodeWithTag("model_search").performTextInput("Qwen")
+        closeSoftKeyboard()
+        composeRule.onNodeWithTag("bottom_nav_installed").performClick()
         navigate("settings")
         capture("settings-dark")
         composeRule.onNodeWithTag("theme_light").performClick()
@@ -39,6 +46,14 @@ class MobieSmokeTest {
         navigate("chat")
         composeRule.onNodeWithTag("chat_input").assertTextContains("Draft stays here")
         capture("chat-light")
+        navigate("recents")
+        composeRule.onNodeWithText("No chats yet").assertIsDisplayed()
+        capture("recents-light")
+        navigate("models")
+        composeRule.onNodeWithTag("bottom_nav_installed").assertIsSelected()
+        composeRule.onNodeWithTag("models_browse").performClick()
+        composeRule.onNodeWithTag("model_search").assertTextContains("Qwen")
+        capture("models-light")
         navigate("settings")
         composeRule.onNodeWithTag("theme_dark").performClick()
         composeRule.onNodeWithText("Add token").performClick()
@@ -64,6 +79,9 @@ class MobieSmokeTest {
 
     private fun navigate(page: String) {
         composeRule.onNodeWithContentDescription("Open navigation").performClick()
+        composeRule.onAllNodes(SemanticsMatcher("Primary destination") {
+            it.config.getOrElse(SemanticsProperties.TestTag) { "" }.startsWith("nav_")
+        }).assertCountEquals(4)
         composeRule.onNodeWithTag("nav_$page").performClick()
     }
 }
