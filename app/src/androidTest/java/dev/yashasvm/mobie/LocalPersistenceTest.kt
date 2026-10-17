@@ -146,7 +146,7 @@ class LocalPersistenceTest {
         val first = "test/all-sessions-a"
         val second = "test/all-sessions-b"
         val store = ChatHistoryStore(context)
-        listOf(first, second).forEach(store::clear)
+        listOf(first, second).forEach { store.clear(it) }
         try {
             val older = store.writeSession(first, null, listOf(HistoryMessage(true, "Older chat")), modelTitle = "Model A")
             Thread.sleep(5)
@@ -160,7 +160,7 @@ class LocalPersistenceTest {
             assertEquals("Model B", threads.first().session.modelTitle)
             assertEquals(1, store.sessions(first).size)
         } finally {
-            listOf(first, second).forEach(store::clear)
+            listOf(first, second).forEach { store.clear(it) }
         }
     }
 
