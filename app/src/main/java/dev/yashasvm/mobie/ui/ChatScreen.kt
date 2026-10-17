@@ -199,7 +199,7 @@ internal fun ChatScreen(
     }
     var followLatest by remember { mutableStateOf(true) }
     var automaticScroll by remember { mutableStateOf(false) }
-    var previousMessageCount by remember { mutableStateOf(0) }
+    var previousUserIndex by remember { mutableStateOf(-1) }
     LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
             if (!scrolling && !automaticScroll) followLatest = !listState.canScrollForward
@@ -207,11 +207,12 @@ internal fun ChatScreen(
     }
     // Follow replies only while the reader stays at the bottom. A new prompt resumes following.
     val streamedLengthBucket = state.messages.lastOrNull()?.let { (it.text.length + it.thinking.length) / 120 } ?: 0
-    LaunchedEffect(state.messages.size, streamedLengthBucket) {
-        if (state.messages.size > previousMessageCount && state.messages.lastOrNull()?.fromUser == true) {
+    LaunchedEffect(state.messages.size, streamedLengthBucket, state.runtimeState) {
+        val newestUserIndex = state.messages.indexOfLast { it.fromUser }
+        if (newestUserIndex > previousUserIndex) {
             followLatest = true
         }
-        previousMessageCount = state.messages.size
+        previousUserIndex = newestUserIndex
         if (state.messages.isNotEmpty() && followLatest) {
             automaticScroll = true
             try {
