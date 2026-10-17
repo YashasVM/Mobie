@@ -43,6 +43,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 
 enum class RuntimeState { IDLE, LOADING, READY, GENERATING, STOPPING, ERROR }
@@ -74,6 +75,7 @@ data class MobieUiState(
     val tokenConfigured: Boolean = false,
     val welcomeSeen: Boolean = false,
     val onboardingComplete: Boolean = false,
+    val preferencesLoaded: Boolean = false,
     val download: DownloadProgress? = null,
     val downloadedPath: String? = null,
     val chatting: Boolean = false,
@@ -95,9 +97,6 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         MobieUiState(
             // Device facts are read off the main thread in init; the UI already tolerates a null device.
             device = null,
-            tokenConfigured = container.tokenStore.read() != null,
-            welcomeSeen = container.tokenStore.hasSeenWelcome(),
-            onboardingComplete = container.tokenStore.hasCompletedOnboarding(),
             sampler = container.samplerSettings.read(),
             computeBackend = container.computeSettings.selectedBackend(),
             cpuThreads = container.computeSettings.selectedCpuThreads(),
@@ -112,29 +111,50 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     private val runtimeOperation = AtomicLong(0L)
     private val selectionRevision = AtomicLong(0L)
     private val runtimeOwnership = RuntimeModelOwnership()
+    private val credentialAccess = Mutex()
 
     init {
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            credentialAccess.withLock {
+                val saved = withContext(Dispatchers.IO) {
+                    val store = container.tokenStore
+                    Triple(store.read() != null, store.hasSeenWelcome(), store.hasCompletedOnboarding())
+                }
+                mutableState.update {
+                    it.copy(tokenConfigured = saved.first, welcomeSeen = saved.second,
+                        onboardingComplete = saved.third, preferencesLoaded = true)
+                }
+            }
+            if (state.value.welcomeSeen || state.value.onboardingComplete) loadFeatured()
+        }
         viewModelScope.launch {
             val device = readDeviceProfile()
             mutableState.update { it.copy(device = it.device ?: device) }
         }
         container.runtimes.all().forEach { it.configureSampler(mutableState.value.sampler) }
         refreshInstalled()
-        if (mutableState.value.welcomeSeen || mutableState.value.onboardingComplete) loadFeatured()
     }
 
     fun finishOnboarding(token: String?) {
-        container.tokenStore.completeOnboarding(token)
-        mutableState.update {
-            it.copy(onboardingComplete = true, tokenConfigured = !token.isNullOrBlank(), error = null)
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            credentialAccess.withLock {
+                withContext(Dispatchers.IO) { container.tokenStore.completeOnboarding(token) }
+                mutableState.update {
+                    it.copy(onboardingComplete = true, tokenConfigured = !token.isNullOrBlank(), error = null)
+                }
+            }
+            loadFeatured()
         }
-        loadFeatured()
     }
 
     fun finishWelcome() {
-        container.tokenStore.markWelcomeSeen()
-        mutableState.update { it.copy(welcomeSeen = true) }
-        loadFeatured()
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            credentialAccess.withLock {
+                withContext(Dispatchers.IO) { container.tokenStore.markWelcomeSeen() }
+                mutableState.update { it.copy(welcomeSeen = true) }
+            }
+            loadFeatured()
+        }
     }
 
     /** Device facts read /proc and binder, so they run on IO rather than the main thread. */
@@ -225,7 +245,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
      * Stops the previous model's work now, then applies the new selection once the device profile
      * is read off the main thread. A newer selection made in the meantime supersedes this one.
      */
-    private fun beginSelection(model: AiModel?, afterSelect: (() -> Unit)? = null) {
+    private fun beginSelection(model: AiModel?, afterSelect: (suspend (Long) -> Unit)? = null) {
         downloadObserverJob?.cancel()
         cancelInference()
         val operation = nextRuntimeOperation()
@@ -234,16 +254,19 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             val device = readDeviceProfile()
             if (selectionRevision.get() != revision) return@launch
-            applySelection(model, device)
-            afterSelect?.invoke()
+            applySelection(model, device, revision)
+            if (selectionRevision.get() == revision) afterSelect?.invoke(revision)
         }
     }
 
-    private fun applySelection(model: AiModel?, device: DeviceProfile) {
+    private suspend fun applySelection(model: AiModel?, device: DeviceProfile, revision: Long) {
         val artifact = model?.let { artifactForDevice(it, device) }
         val presentedModel = model?.preferArtifact(artifact)
         val sessions = presentedModel?.let { container.chatHistory.sessions(it.id) }.orEmpty()
         val currentSessionId = presentedModel?.let { container.chatHistory.currentSessionId(it.id) }
+        val messages = presentedModel?.let { readHistory(it) }.orEmpty()
+        // The history reads suspend, so a newer selection may have started meanwhile.
+        if (selectionRevision.get() != revision) return
         mutableState.update {
             it.copy(
                 selected = presentedModel,
@@ -256,7 +279,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 downloadedPath = null,
                 chatting = false,
                 runtimeState = RuntimeState.IDLE,
-                messages = presentedModel?.let(::readHistory).orEmpty(),
+                messages = messages,
                 history = sessions,
                 sessionId = currentSessionId,
                 stats = null,
@@ -341,26 +364,27 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    private fun openChat(path: String, allowReclaim: Boolean = false) {
+    private suspend fun openChat(path: String, allowReclaim: Boolean = false) {
         val current = state.value
         val model = current.selected ?: return
         val artifact = current.selectedArtifact ?: return
-        val history = readHistory(model)
-        val sessions = container.chatHistory.sessions(model.id)
+        cancelInference()
         val operation = nextRuntimeOperation()
+        // LOADING is set before the history reads so the composer stays disabled while they run.
         mutableState.update {
             it.copy(
                 chatting = true,
                 downloadedPath = path,
                 runtimeState = RuntimeState.LOADING,
                 activeCompute = null,
-                messages = history,
-                history = sessions,
-                sessionId = container.chatHistory.currentSessionId(model.id),
                 error = null,
             )
         }
-        cancelInference()
+        val history = readHistory(model)
+        val sessions = container.chatHistory.sessions(model.id)
+        val sessionId = container.chatHistory.currentSessionId(model.id)
+        if (!isCurrentRuntimeOperation(operation)) return
+        mutableState.update { it.copy(messages = history, history = sessions, sessionId = sessionId) }
         inferenceJob = viewModelScope.launch {
             loadRuntimeConversation(model, artifact, path, history, preferReset = false,
                 operation = operation, allowReclaim = allowReclaim)
@@ -446,9 +470,11 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         if (prompt.isBlank() || current.runtimeState != RuntimeState.READY) return false
         if (imagePath != null && (!model.supportsVision || !current.imageInputReady)) return false
         val adapter = container.runtimes.adapterFor(artifact.format) ?: return false
+        val sessionId = current.sessionId ?: UUID.randomUUID().toString()
         mutableState.update {
             it.copy(
                 runtimeState = RuntimeState.GENERATING,
+                sessionId = sessionId,
                 messages = it.messages + ChatMessage(true, prompt.trim(), imagePath) + ChatMessage(false, ""),
                 stats = null,
                 telemetry = RunTelemetry(),
@@ -458,7 +484,6 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         cancelInference()
         telemetryJob = startTelemetrySampling()
         val operation = runtimeOperation.get()
-        val sessionId = current.sessionId
         inferenceJob = viewModelScope.launch {
             adapter.generate(prompt.trim(), imagePath, GenerationConfig(sampler = current.sampler)).collectBatchedTokens { event ->
                 if (!isCurrentRuntimeOperation(operation) ||
@@ -492,30 +517,28 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                     is InferenceEvent.Error -> {
                         telemetryJob?.cancel()
                         val messages = state.value.messages.finishInterruptedReply()
-                        persistHistory(model.id, messages)
                         mutableState.update {
                             it.copy(
                                 runtimeState = if (event.requiresReload) RuntimeState.ERROR else RuntimeState.READY,
                                 // Cancellation can disable image support in the stall guard; the UI must follow it.
                                 imageInputReady = adapter.supportsImageInput,
                                 messages = messages,
-                                history = container.chatHistory.sessions(model.id),
                                 error = event.message,
                             )
                         }
+                        persistHistoryAndRefresh(model.id, sessionId, messages)
                     }
                     InferenceEvent.Complete -> {
                         telemetryJob?.cancel()
                         val messages = state.value.messages.finishReply()
-                        persistHistory(model.id, messages)
                         mutableState.update {
                             it.copy(
                                 runtimeState = RuntimeState.READY,
                                 imageInputReady = adapter.supportsImageInput,
                                 messages = messages,
-                                history = container.chatHistory.sessions(model.id),
                             )
                         }
+                        persistHistoryAndRefresh(model.id, sessionId, messages)
                     }
                 }
             }
@@ -537,7 +560,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         }
         viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
             if (modelId != null) {
-                saveBeforeCancellation(current.messages, activeInference) { persistHistory(modelId, it) }
+                saveBeforeCancellation(current.messages, activeInference) { persistHistory(modelId, sessionId, it) }
             } else {
                 activeInference?.cancelAndJoin()
             }
@@ -546,8 +569,9 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             ) {
                 val messages = state.value.messages.finishInterruptedReply()
                 mutableState.update { it.copy(messages = messages) }
-                persistHistory(modelId, messages)
+                persistHistory(modelId, sessionId, messages)
             }
+            val sessions = modelId?.let { container.chatHistory.sessions(it) }.orEmpty()
             mutableState.update { latest ->
                 if (
                     latest.runtimeState == RuntimeState.STOPPING &&
@@ -559,7 +583,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                         runtimeState = RuntimeState.READY,
                         imageInputReady = latest.selectedArtifact
                             ?.let { container.runtimes.adapterFor(it.format)?.supportsImageInput } == true,
-                        history = modelId?.let { container.chatHistory.sessions(it) }.orEmpty(),
+                        history = sessions,
                     )
                 } else {
                     latest
@@ -611,11 +635,11 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val canReuseLoadedModel = current.runtimeState == RuntimeState.READY
         cancelInference()
         val operation = nextRuntimeOperation()
-        val sessionId = container.chatHistory.startNewSession(model.id)
+        // The id is chosen here so the state can switch synchronously; the write itself runs on IO.
+        val sessionId = UUID.randomUUID().toString()
         mutableState.update {
             it.copy(
                 messages = emptyList(),
-                history = container.chatHistory.sessions(model.id),
                 sessionId = sessionId,
                 runtimeState = RuntimeState.LOADING,
                 stats = null,
@@ -623,14 +647,17 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             )
         }
         inferenceJob = viewModelScope.launch {
+            container.chatHistory.startNewSession(model.id, sessionId)
+            val sessions = container.chatHistory.sessions(model.id)
+            if (isCurrentRuntimeOperation(operation)) mutableState.update { it.copy(history = sessions) }
             loadRuntimeConversation(model, artifact, path, emptyList(), preferReset = canReuseLoadedModel, operation = operation)
         }
     }
 
     fun startInstalledChat(entry: InstalledModelEntry) {
-        beginSelection(entry.model) {
+        beginSelection(entry.model) { revision ->
             container.chatHistory.startNewSession(entry.model.id)
-            openChat(entry.localPath)
+            if (selectionRevision.get() == revision) openChat(entry.localPath)
         }
     }
 
@@ -725,28 +752,35 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val artifact = current.selectedArtifact ?: return
         val path = current.downloadedPath ?: return
         val canReuseLoadedModel = current.runtimeState == RuntimeState.READY
-        container.chatHistory.activate(model.id, sessionId)
-        val history = readHistory(model)
         cancelInference()
         val operation = nextRuntimeOperation()
         mutableState.update {
             it.copy(
-                messages = history,
-                history = container.chatHistory.sessions(model.id),
                 sessionId = sessionId,
                 runtimeState = RuntimeState.LOADING,
                 stats = null,
                 error = null,
             )
         }
-        inferenceJob = viewModelScope.launch {
-            loadRuntimeConversation(model, artifact, path, history, preferReset = canReuseLoadedModel, operation = operation)
+        viewModelScope.launch {
+            container.chatHistory.activate(model.id, sessionId)
+            val history = readHistory(model)
+            val sessions = container.chatHistory.sessions(model.id)
+            if (!isCurrentRuntimeOperation(operation)) return@launch
+            mutableState.update { it.copy(messages = history, history = sessions) }
+            inferenceJob = viewModelScope.launch {
+                loadRuntimeConversation(model, artifact, path, history, preferReset = canReuseLoadedModel, operation = operation)
+            }
         }
     }
 
     fun saveToken(token: String) {
-        container.tokenStore.save(token.ifBlank { null })
-        mutableState.update { it.copy(tokenConfigured = token.isNotBlank()) }
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            credentialAccess.withLock {
+                withContext(Dispatchers.IO) { container.tokenStore.save(token.ifBlank { null }) }
+                mutableState.update { it.copy(tokenConfigured = token.isNotBlank()) }
+            }
+        }
     }
 
     private fun observeDownload(model: AiModel, artifact: ModelArtifact) {
@@ -790,17 +824,30 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     private fun artifactForDevice(model: AiModel, device: DeviceProfile): ModelArtifact? =
         container.compatibility.selectBestArtifact(model, device) ?: model.bestArtifact
 
-    private fun readHistory(model: AiModel): List<ChatMessage> = container.chatHistory.read(model.id).map {
+    private suspend fun readHistory(model: AiModel): List<ChatMessage> = container.chatHistory.read(model.id).map {
         ChatMessage(it.fromUser, it.text, it.imagePath, it.thinking, interrupted = it.interrupted)
     }
 
-    private fun persistHistory(modelId: String, messages: List<ChatMessage>) {
-        container.chatHistory.write(
+    private suspend fun persistHistory(modelId: String, sessionId: String?, messages: List<ChatMessage>) {
+        container.chatHistory.writeSession(
             modelId,
+            sessionId,
             messages.map {
                 HistoryMessage(it.fromUser, it.text, it.imagePath, it.thinking, it.interrupted)
             },
         )
+    }
+
+    /**
+     * Writes the transcript off the main thread, then refreshes the session list. Each call is launched
+     * on the main dispatcher, so the store's FIFO lock keeps writes in the order they were requested.
+     */
+    private fun persistHistoryAndRefresh(modelId: String, sessionId: String?, messages: List<ChatMessage>) {
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            persistHistory(modelId, sessionId, messages)
+            val sessions = container.chatHistory.sessions(modelId)
+            mutableState.update { if (it.selected?.id == modelId) it.copy(history = sessions) else it }
+        }
     }
 
     private fun nextRuntimeOperation(): Long = runtimeOperation.incrementAndGet()
@@ -877,7 +924,7 @@ internal fun List<ChatMessage>.finishInterruptedReply(): List<ChatMessage> =
 internal suspend fun saveBeforeCancellation(
     messages: List<ChatMessage>,
     inference: Job?,
-    persist: (List<ChatMessage>) -> Unit,
+    persist: suspend (List<ChatMessage>) -> Unit,
 ) {
     persist(messages.finishInterruptedReply())
     inference?.cancelAndJoin()
