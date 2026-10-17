@@ -74,6 +74,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -121,6 +122,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -134,6 +136,7 @@ import dev.yashasvm.mobie.core.runtime.SamplerSettings
 import dev.yashasvm.mobie.core.device.RunTelemetry
 import org.json.JSONObject
 import dev.yashasvm.mobie.ui.theme.Mobie
+import dev.yashasvm.mobie.ui.theme.MobieTheme
 import java.io.File
 import java.util.Locale
 import kotlin.math.PI
@@ -1556,6 +1559,40 @@ private fun SendStopButton(generating: Boolean, canSubmit: Boolean, onSubmit: ()
             } else {
                 LucideIcon(LucideR.drawable.lucide_ic_arrow_up, "Send message", iconModifier.size(20.dp))
             }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Previews
+
+@Preview(name = "Chat messages · dark", showBackground = true, backgroundColor = 0xFF1C1C1A, widthDp = 380)
+@Composable
+private fun ChatMessagesDarkPreview() {
+    MobieTheme(darkTheme = true) { ChatMessagesSample() }
+}
+
+@Preview(name = "Chat messages · light", showBackground = true, backgroundColor = 0xFFFBFAF7, widthDp = 380)
+@Composable
+private fun ChatMessagesLightPreview() {
+    MobieTheme(darkTheme = false) { ChatMessagesSample() }
+}
+
+@Composable
+private fun ChatMessagesSample() {
+    Surface {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+            UserMessage(ChatMessage(fromUser = true, text = "How do I reverse a list in Kotlin?"))
+            AssistantMessage(
+                message = ChatMessage(
+                    fromUser = false,
+                    text = "Use **reversed()** for a new list, or `reverse()` to change a mutable list in place:\n\n" +
+                        "```kotlin\nval items = listOf(1, 2, 3)\nprintln(items.reversed())\n```\n\n" +
+                        "- `reversed()` keeps the original\n- `asReversed()` is a live view",
+                ),
+                modelTitle = "Gemma 3 1B",
+                streaming = false,
+            )
         }
     }
 }
