@@ -51,6 +51,24 @@ class LocalPersistenceTest {
     }
 
     @Test
+    fun emptyChatsDoNotEvictSavedConversations() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val id = "test/empty-session-retention"
+        val store = ChatHistoryStore(context)
+        store.clear(id)
+        try {
+            val saved = store.startNewSession(id)
+            store.write(id, listOf(HistoryMessage(true, "Keep this conversation")))
+            repeat(30) { store.startNewSession(id) }
+            assertEquals(2, store.sessions(id).size)
+            store.activate(id, saved)
+            assertEquals("Keep this conversation", store.read(id).single().text)
+        } finally {
+            store.clear(id)
+        }
+    }
+
+    @Test
     fun repeatedHistoryWritesPreserveInactiveSessionsAndSurviveRecreation() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val modelId = "test/cached-session-writes"
