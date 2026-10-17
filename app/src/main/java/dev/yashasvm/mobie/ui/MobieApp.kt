@@ -46,10 +46,6 @@ fun MobieApp(
         AppBackdrop(Modifier.fillMaxSize()) {}
         return
     }
-    if (!state.welcomeSeen) {
-        WelcomeScreen(viewModel::finishWelcome)
-        return
-    }
 
     var warningOverride by remember { mutableStateOf(false) }
     val notificationPermission = rememberLauncherForActivityResult(

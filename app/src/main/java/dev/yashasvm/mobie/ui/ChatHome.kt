@@ -1,10 +1,12 @@
 package dev.yashasvm.mobie.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -34,9 +37,12 @@ import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -65,8 +71,7 @@ import dev.yashasvm.mobie.ui.theme.Mobie
 import kotlinx.coroutines.launch
 
 /**
- * The app's home: the current chat with a chats drawer on the left and a model picker in the top
- * bar, the way familiar chat apps are laid out. With no model installed it shows how to get one.
+ * Chat stays in front, with history in a drawer and model selection beside the composer.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -86,6 +91,8 @@ internal fun ChatHome(
 ) {
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    var draft by rememberSaveable { mutableStateOf("") }
+    var activeDraft by rememberSaveable { mutableStateOf("") }
     var showPicker by rememberSaveable { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<ChatThread?>(null) }
     var deleting by remember { mutableStateOf<ChatThread?>(null) }
@@ -105,14 +112,18 @@ internal fun ChatHome(
             ModalDrawerSheet(
                 drawerState = drawerState,
                 drawerShape = RectangleShape,
-                drawerContainerColor = MaterialTheme.colorScheme.surface,
+                drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
                 drawerTonalElevation = 0.dp,
                 modifier = Modifier.widthIn(max = 340.dp).testTag("chats_drawer"),
             ) {
                 ChatsDrawer(
                     state = state,
-                    onNewChat = { closeDrawerThen(onNewChat) },
-                    onOpenThread = { thread -> closeDrawerThen { onOpenThread(thread) } },
+                    onNewChat = { draft = ""; activeDraft = ""; closeDrawerThen(onNewChat) },
+                    onOpenThread = { thread ->
+                        draft = ""
+                        activeDraft = ""
+                        closeDrawerThen { onOpenThread(thread) }
+                    },
                     onRename = { renaming = it },
                     onDelete = { deleting = it },
                     onOpenModels = { tab -> closeDrawerThen { onOpenModels(tab) } },
@@ -121,6 +132,10 @@ internal fun ChatHome(
         },
     ) {
         val showChat = state.readOnlyChat != null || (state.chatting && state.selected != null)
+        // Hand the pre-selection draft to ChatScreen once; later sessions own their own drafts.
+        LaunchedEffect(showChat, state.sessionId, state.selected?.id) {
+            if (showChat) draft = ""
+        }
         if (showChat) {
             key(state.readOnlyChat?.modelId ?: state.selected?.id, state.sessionId) {
                 ChatScreen(
@@ -129,10 +144,12 @@ internal fun ChatHome(
                     onStop = onStop,
                     onOpenDrawer = openDrawer,
                     onOpenModelPicker = { showPicker = true },
-                    onNewChat = onNewChat,
+                    onNewChat = { draft = ""; activeDraft = ""; onNewChat() },
                     onSamplerChange = onSamplerChange,
                     onLoadAnyway = onLoadAnyway,
                     onGetModel = onGetModel,
+                    initialDraft = draft,
+                    onDraftChange = { activeDraft = it },
                 )
             }
         } else {
@@ -141,7 +158,8 @@ internal fun ChatHome(
                 hasInstalledModels = state.installedModels.isNotEmpty(),
                 onOpenDrawer = openDrawer,
                 onOpenModelPicker = { showPicker = true },
-                onBrowseModels = { onOpenModels(CatalogTab.DISCOVER) },
+                draft = draft,
+                onDraftChange = { draft = it },
             )
         }
     }
@@ -152,6 +170,7 @@ internal fun ChatHome(
             activeModelId = state.selected?.id?.takeIf { state.chatting && state.readOnlyChat == null },
             onDismiss = { showPicker = false },
             onPick = { entry ->
+                if (state.chatting && state.readOnlyChat == null) draft = activeDraft
                 showPicker = false
                 onPickModel(entry)
             },
@@ -216,7 +235,7 @@ private fun ChatsDrawer(
             Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(horizontal = 20.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            MobieMark()
+            MobieWordmark()
         }
         DrawerAction(
             text = "New chat",
@@ -242,7 +261,7 @@ private fun ChatsDrawer(
                 }
             } else null,
             singleLine = true,
-            shape = RectangleShape,
+            shape = RoundedCornerShape(16.dp),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
         )
         LazyColumn(
@@ -414,7 +433,7 @@ private fun RenameChatDialog(thread: ChatThread, onDismiss: () -> Unit, onRename
                 value = title,
                 onValueChange = { title = it.replace("\n", " ") },
                 singleLine = true,
-                shape = RectangleShape,
+                shape = RoundedCornerShape(16.dp),
                 label = { Text("Name") },
                 modifier = Modifier.fillMaxWidth().testTag("rename_chat_input"),
             )
@@ -442,7 +461,7 @@ private fun ModelPickerSheet(
         onDismissRequest = onDismiss,
         containerColor = MaterialTheme.colorScheme.surface,
         scrimColor = MaterialTheme.colorScheme.background.copy(alpha = .6f),
-        shape = RectangleShape,
+        shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp),
         tonalElevation = 0.dp,
         modifier = Modifier.testTag("model_picker"),
     ) {
@@ -539,75 +558,68 @@ private fun EmptyHome(
     hasInstalledModels: Boolean,
     onOpenDrawer: () -> Unit,
     onOpenModelPicker: () -> Unit,
-    onBrowseModels: () -> Unit,
+    draft: String,
+    onDraftChange: (String) -> Unit,
 ) {
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).testTag("chat_home_empty")) {
-        Column(Modifier.fillMaxWidth().statusBarsPadding()) {
-            Row(
-                Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = onOpenDrawer, modifier = Modifier.testTag("open_chats")) {
-                    LucideIcon(LucideR.drawable.lucide_ic_menu, "Open chats", Modifier.size(22.dp))
-                }
-                MobieMark(Modifier.padding(horizontal = 8.dp))
-                Spacer(Modifier.weight(1f))
-            }
-            Hairline()
-        }
-        Box(Modifier.weight(1f).fillMaxWidth().navigationBarsPadding().padding(24.dp), contentAlignment = Alignment.Center) {
-            when {
-                pending -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatusDot(MaterialTheme.colorScheme.primary, pulsing = true)
-                    Text(
-                        "Getting your chat ready…",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                hasInstalledModels -> EmptyHomeMessage(
-                    title = "Choose a model to start chatting",
-                    body = "Your downloaded models run right on this phone.",
-                    action = "Choose a model",
-                    icon = LucideR.drawable.lucide_ic_box,
-                    onAction = onOpenModelPicker,
-                )
-                else -> EmptyHomeMessage(
-                    title = "Download a model to start chatting",
-                    body = "Mobie runs AI models right on this phone. Pick one that fits, download it once, and chat offline. Nothing you type leaves your phone.",
-                    action = "Browse models",
-                    icon = LucideR.drawable.lucide_ic_download,
-                    onAction = onBrowseModels,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun EmptyHomeMessage(title: String, body: String, action: String, icon: Int, onAction: () -> Unit) {
     Column(
-        Modifier.widthIn(max = 420.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
+            .imePadding().testTag("chat_home_empty"),
     ) {
-        Text(
-            title,
-            style = MaterialTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.onSurface,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.semantics { heading() },
-        )
-        Text(
-            body,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-        )
-        TermButton(action, onClick = onAction, icon = icon, modifier = Modifier.padding(top = 6.dp))
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            LucideIcon(LucideR.drawable.lucide_ic_lock, null, Modifier.size(12.dp), tint = Mobie.signals.ready)
-            Text("Private and offline", style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        ChatHeader(onOpenDrawer = onOpenDrawer, onNewChat = { onDraftChange("") })
+        Box(Modifier.weight(1f).fillMaxWidth()) { EmptyChat() }
+        Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp)) {
+            if (!pending) {
+                Text(
+                    if (hasInstalledModels) "Choose a model to send your message." else "Download a model to chat on this phone.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
+                )
+            }
+            Column(
+                Modifier.fillMaxWidth()
+                    .border(1.dp, Mobie.signals.hairline, RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainer, RoundedCornerShape(8.dp)),
+            ) {
+                TextField(
+                    value = draft,
+                    onValueChange = onDraftChange,
+                    placeholder = { Text("Message Mobie", style = MaterialTheme.typography.bodyLarge) },
+                    textStyle = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.fillMaxWidth().testTag("chat_input"),
+                    maxLines = 6,
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                    ),
+                )
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(
+                        onClick = onOpenModelPicker,
+                        modifier = Modifier.weight(1f).testTag("model_picker_button"),
+                    ) {
+                        Text(
+                            when {
+                                pending -> "Preparing chat…"
+                                hasInstalledModels -> "Choose model"
+                                else -> "Download model"
+                            },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        LucideIcon(LucideR.drawable.lucide_ic_chevron_down, null, Modifier.size(16.dp))
+                    }
+                    IconButton(onClick = {}, enabled = false) {
+                        LucideIcon(LucideR.drawable.lucide_ic_arrow_up, "Send message", Modifier.size(20.dp))
+                    }
+                }
+            }
         }
     }
 }

@@ -26,7 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.yashasvm.mobie.ui.theme.MobieTheme
 
-// The Mobie mark: a lowercase "m" made of two arches, followed by a full stop, on a soft amber
+// The Mobie mark: a lowercase "m" made of two arches, followed by a full stop, on a terracotta
 // tile. The "m." reads as a finished sentence typed on the phone itself, which is the product:
 // a private assistant that answers locally. Geometry is on a 24-unit grid; the launcher icon
 // (res/drawable/ic_launcher_foreground.xml) uses the same glyph paths.
@@ -40,7 +40,7 @@ private const val M_PATH =
 private const val DOT_PATH = "M16.45,15.1A1.25,1.25 0 1 1 18.95,15.1A1.25,1.25 0 1 1 16.45,15.1Z"
 
 /** Brand colors. Fixed across light and dark themes so the mark is always recognizable. */
-private val MarkAmber = Color(0xFFF2A93B)
+private val MarkAmber = Color(0xFFFFB547)
 private val MarkInk = Color(0xFF1B1A17)
 
 private val MobieMarkVector: ImageVector by lazy {

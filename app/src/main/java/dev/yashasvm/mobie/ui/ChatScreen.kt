@@ -28,7 +28,6 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -57,7 +56,6 @@ import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -70,6 +68,9 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -82,7 +83,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -90,12 +90,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.RectangleShape
@@ -117,7 +113,6 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -127,7 +122,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.composables.icons.lucide.R as LucideR
-import dev.yashasvm.mobie.core.model.AiModel
 import dev.yashasvm.mobie.core.model.Compatibility
 import dev.yashasvm.mobie.core.model.MemoryAdmissionTier
 import dev.yashasvm.mobie.core.runtime.ActiveCompute
@@ -150,10 +144,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Local inference chat: header with engine status, live telemetry from the last measured reply,
- * the conversation, and a composer dock. Nothing here talks to the network; prompts go to [onSend],
+ * Local inference chat with the model picker and optional controls in the composer. Nothing here talks to the network; prompts go to [onSend],
  * which hands them to the on-device runtime.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ChatScreen(
     state: MobieUiState,
@@ -165,13 +159,17 @@ internal fun ChatScreen(
     onSamplerChange: (SamplerSettings) -> String? = { null },
     onLoadAnyway: () -> Unit = {},
     onGetModel: (String) -> Unit = {},
+    initialDraft: String = "",
+    onDraftChange: (String) -> Unit = {},
 ) {
     val readOnly = state.readOnlyChat
     val model = state.selected
     if (model == null && readOnly == null) return
     val modelTitle = model?.title ?: readOnly?.modelTitle.orEmpty()
     val context = LocalContext.current
-    var prompt by rememberSaveable { mutableStateOf("") }
+    var prompt by rememberSaveable { mutableStateOf(initialDraft) }
+    LaunchedEffect(Unit) { onDraftChange(prompt) }
+    var showDetails by rememberSaveable { mutableStateOf(false) }
     var imagePath by rememberSaveable { mutableStateOf<String?>(null) }
     var imageError by remember { mutableStateOf<String?>(null) }
     var imageCopying by remember { mutableStateOf(false) }
@@ -249,6 +247,7 @@ internal fun ChatScreen(
         // Keep the draft unless the ViewModel accepted the prompt.
         if (canSubmit && onSend(prompt, imagePath)) {
             prompt = ""
+            onDraftChange("")
             imagePath = null
             imageError = null
         }
@@ -261,37 +260,9 @@ internal fun ChatScreen(
             .testTag("chat_screen"),
     ) {
         ChatHeader(
-            title = modelTitle,
-            status = if (readOnly != null) "Model not on this phone" else engineStatus(state.runtimeState, runtimeLabel).text,
-            statusColor = if (readOnly != null) Mobie.signals.caution else state.runtimeState.signal(),
-            statusPulsing = readOnly == null && engineStatus(state.runtimeState, runtimeLabel).pulsing,
             onOpenDrawer = onOpenDrawer,
-            onOpenModelPicker = onOpenModelPicker,
             onNewChat = onNewChat,
         )
-        AnimatedVisibility(
-            visible = readOnly == null && state.runtimeState == RuntimeState.LOADING,
-            enter = fadeIn(tween(MotionMedium)) + expandVertically(tween(MotionMedium, easing = EmphasizedEase)),
-            exit = fadeOut(tween(MotionShort)) + shrinkVertically(tween(MotionShort)),
-        ) {
-            LoadingBanner(modelTitle)
-        }
-        AnimatedVisibility(
-            visible = readOnly == null && state.runtimeState != RuntimeState.LOADING && state.runtimeState != RuntimeState.ERROR,
-            enter = fadeIn(tween(MotionMedium)) + expandVertically(tween(MotionMedium, easing = EmphasizedEase)),
-            exit = fadeOut(tween(MotionShort)) + shrinkVertically(tween(MotionShort)),
-        ) {
-            // Only the run telemetry and sampler fields are passed, so token-only updates skip this panel.
-            val latestState by rememberUpdatedState(state)
-            RunDetails(
-                activeCompute = state.activeCompute,
-                stats = state.stats,
-                live = state.telemetry,
-                sampler = state.sampler,
-                runJson = { runJson(latestState) },
-                onSamplerChange = onSamplerChange,
-            )
-        }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
                 readOnly == null && state.runtimeState == RuntimeState.ERROR && state.messages.isEmpty() -> ErrorPanel(
@@ -299,15 +270,7 @@ internal fun ChatScreen(
                     onChooseModel = onOpenModelPicker,
                     onLoadAnyway = reclaimRetry,
                 )
-                state.messages.isEmpty() && model != null -> EmptyChat(
-                    model = model,
-                    loaded = ready || generating,
-                    imageInputReady = state.imageInputReady,
-                    onStarter = { starter ->
-                        prompt = starter
-                        if (ready || state.runtimeState == RuntimeState.LOADING) inputFocus.requestFocus()
-                    },
-                )
+                state.messages.isEmpty() -> EmptyChat()
                 else -> LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize().testTag("chat_messages"),
@@ -351,17 +314,24 @@ internal fun ChatScreen(
         if (readOnly != null) {
             ReadOnlyBanner(readOnly.modelTitle, onGetModel = { onGetModel(readOnly.modelId) })
         } else ComposerDock(
+            modelTitle = modelTitle,
+            onOpenModelPicker = onOpenModelPicker,
+            status = engineStatus(state.runtimeState, runtimeLabel).text,
+            statusColor = state.runtimeState.signal(),
             prompt = prompt,
-            onPromptChange = { prompt = it },
+            onPromptChange = { prompt = it; onDraftChange(it) },
             runtimeState = state.runtimeState,
-            runtimeLabel = runtimeLabel,
             supportsVision = imageAllowed,
+            capabilityNotice = if (ready && model?.supportsVision == true && !imageAllowed) {
+                "This phone loaded text chat only. Photo input is unavailable for this session."
+            } else null,
             imagePath = imagePath,
             imageCopying = imageCopying,
             canSubmit = canSubmit,
             error = state.error.takeIf { state.runtimeState != RuntimeState.ERROR || state.messages.isNotEmpty() },
             imageError = imageError,
             focusRequester = inputFocus,
+            onOpenDetails = { showDetails = true },
             onAttach = { imagePicker.launch("image/*") },
             onRemoveImage = {
                 val stale = imagePath
@@ -372,6 +342,28 @@ internal fun ChatScreen(
             onStop = onStop,
         )
     }
+    if (showDetails && readOnly == null) {
+        ModalBottomSheet(
+            onDismissRequest = { showDetails = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = MaterialTheme.colorScheme.surface,
+        ) {
+            Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding()) {
+                RunDetails(
+                    capabilityDescription = if (imageAllowed) {
+                        "Chat about text or an attached photo on this phone. Image generation isn't available."
+                    } else null,
+                    activeCompute = state.activeCompute,
+                    stats = state.stats,
+                    live = state.telemetry,
+                    sampler = state.sampler,
+                    runJson = { runJson(state) },
+                    onSamplerChange = onSamplerChange,
+                )
+            }
+        }
+    }
+
 }
 
 internal const val PHOTO_REMOVED_MESSAGE = "Photo removed: this model can't read images right now."
@@ -436,11 +428,11 @@ private fun Modifier.messageEntrance(animate: Boolean, fromUser: Boolean): Modif
 private data class EngineStatus(val text: String, val pulsing: Boolean)
 
 private fun engineStatus(runtimeState: RuntimeState, runtimeLabel: String): EngineStatus = when (runtimeState) {
-    RuntimeState.IDLE -> EngineStatus("Not loaded · $runtimeLabel", false)
-    RuntimeState.LOADING -> EngineStatus("Loading weights · $runtimeLabel", true)
+    RuntimeState.IDLE -> EngineStatus("Choose a model to start", false)
+    RuntimeState.LOADING -> EngineStatus("Loading model…", true)
     RuntimeState.READY -> EngineStatus("Ready · on-device · $runtimeLabel", false)
-    RuntimeState.GENERATING -> EngineStatus("Generating · on-device · $runtimeLabel", true)
-    RuntimeState.STOPPING -> EngineStatus("Stopping · $runtimeLabel", true)
+    RuntimeState.GENERATING -> EngineStatus("Replying…", true)
+    RuntimeState.STOPPING -> EngineStatus("Stopping…", true)
     RuntimeState.ERROR -> EngineStatus("Error · $runtimeLabel", false)
 }
 
@@ -452,91 +444,37 @@ private fun RuntimeState.signal() = when (this) {
     RuntimeState.IDLE -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
-/**
- * Chat top bar in the shape people know from other chat apps: the chats menu on the left, the
- * current model as a tappable title with a ▾ that opens the model picker, and a new-chat button.
- */
+/** A quiet top bar leaves model selection and chat controls beside the input. */
 @Composable
 internal fun ChatHeader(
-    title: String,
-    status: String?,
-    statusColor: Color,
-    statusPulsing: Boolean,
     onOpenDrawer: () -> Unit,
-    onOpenModelPicker: () -> Unit,
     onNewChat: () -> Unit,
     newChatEnabled: Boolean = true,
 ) {
-    val dotColor by animateColorAsState(statusColor, tween(MotionMedium), label = "engine dot")
-    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).statusBarsPadding()) {
-        Row(
-            Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onOpenDrawer, modifier = Modifier.testTag("open_chats")) {
-                LucideIcon(LucideR.drawable.lucide_ic_menu, "Open chats", Modifier.size(22.dp))
-            }
-            Column(
-                Modifier
-                    .weight(1f)
-                    .heightIn(min = 48.dp)
-                    .clickable(role = Role.Button, onClickLabel = "Choose a model", onClick = onOpenModelPicker)
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                    .testTag("model_picker_button"),
-                verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        title,
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false).semantics { heading() },
-                    )
-                    LucideIcon(
-                        LucideR.drawable.lucide_ic_chevron_down,
-                        null,
-                        Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (status != null) {
-                    Row(
-                        Modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(7.dp),
-                    ) {
-                        StatusDot(dotColor, pulsing = statusPulsing, size = 7.dp)
-                        AnimatedContent(
-                            targetState = status,
-                            transitionSpec = {
-                                fadeIn(tween(MotionMedium, delayMillis = 60)) togetherWith fadeOut(tween(MotionShort)) using
-                                    SizeTransform(clip = false)
-                            },
-                            label = "engine status",
-                        ) { text ->
-                            Text(
-                                text,
-                                style = Mobie.numeric.tiny,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                }
-            }
-            IconButton(onClick = onNewChat, enabled = newChatEnabled, modifier = Modifier.testTag("new_chat")) {
-                LucideIcon(LucideR.drawable.lucide_ic_square_pen, "New chat", Modifier.size(22.dp))
-            }
+    Row(
+        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)
+            .statusBarsPadding().heightIn(min = 60.dp).padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onOpenDrawer, modifier = Modifier.testTag("open_chats")) {
+            LucideIcon(LucideR.drawable.lucide_ic_menu, "Open chats", Modifier.size(22.dp))
         }
-        Hairline()
+        Text(
+            "mobie_",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.weight(1f).padding(start = 6.dp).semantics { heading() },
+        )
+        IconButton(onClick = onNewChat, enabled = newChatEnabled, modifier = Modifier.testTag("new_chat")) {
+            LucideIcon(LucideR.drawable.lucide_ic_square_pen, "New chat", Modifier.size(22.dp))
+        }
     }
 }
 
 /** Live callbacks are SDK chunks; final token rates come from LiteRT benchmark data. */
 @Composable
 private fun RunDetails(
+    capabilityDescription: String?,
     activeCompute: ActiveCompute?,
     stats: InferenceStats?,
     live: RunTelemetry,
@@ -556,17 +494,38 @@ private fun RunDetails(
         ?: live.liveSdkChunksPerSecond?.let { String.format(Locale.US, "%.1f SDK chunks/s", it) }
         ?: "Waiting for output"
     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerLow)) {
-        activeCompute?.let { selected ->
-            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                Text(
-                    "Running on ${selected.label}",
-                    style = Mobie.numeric.tiny,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                selected.fallbackReason?.let { reason ->
-                    Text(reason, style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text("Chat controls", style = MaterialTheme.typography.titleLarge)
+            capabilityDescription?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            Text(
+                "Reasoning is determined by the model. When available, you can expand it in the reply.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SectionLabel("Sampling", Modifier.padding(top = 6.dp))
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(temperature, { temperature = it }, label = { Text("Temperature") }, singleLine = true, modifier = Modifier.width(120.dp), shape = RectangleShape)
+                OutlinedTextField(topK, { topK = it }, label = { Text("Top-k") }, singleLine = true, modifier = Modifier.width(100.dp), shape = RectangleShape)
+                OutlinedTextField(topP, { topP = it }, label = { Text("Top-p") }, singleLine = true, modifier = Modifier.width(100.dp), shape = RectangleShape)
+                OutlinedTextField(seed, { seed = it }, label = { Text("Seed") }, singleLine = true, modifier = Modifier.width(120.dp), shape = RectangleShape)
+            }
+            TermButton(
+                "Apply sampling",
+                onClick = {
+                    val parsed = listOfNotNull(temperature.toDoubleOrNull(), topK.toIntOrNull(), topP.toDoubleOrNull(), seed.toIntOrNull())
+                    settingsError = if (parsed.size != 4) "Enter valid numbers for all sampling fields." else {
+                        onSamplerChange(SamplerSettings(temperature.toDouble(), topK.toInt(), topP.toDouble(), seed.toInt()))
+                    }
+                },
+                style = TermButtonStyle.Ghost,
+                modifier = Modifier.padding(vertical = 4.dp),
+            )
+            settingsError?.let { Text("[!] $it", style = Mobie.numeric.tiny, color = Mobie.signals.blocked) }
         }
         // One readout line, like a status bar cell: the section name on the left, live speed on the right.
         Row(
@@ -579,7 +538,7 @@ private fun RunDetails(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text(
-                "run details ${if (expanded) "▾" else "▸"}",
+                "Performance ${if (expanded) "▾" else "▸"}",
                 style = Mobie.numeric.small,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -591,6 +550,18 @@ private fun RunDetails(
             )
         }
         if (expanded) {
+            activeCompute?.let { selected ->
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                    Text(
+                        "Running on ${selected.label}",
+                        style = Mobie.numeric.tiny,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    selected.fallbackReason?.let { reason ->
+                        Text(reason, style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 val first = live.firstChunkMs ?: stats?.timeToFirstTokenMs?.takeIf { it > 0 }
                 Text("First SDK chunk: ${first?.let(::formatMillis) ?: "—"}", style = Mobie.numeric.tiny)
@@ -607,25 +578,6 @@ private fun RunDetails(
                     enabled = stats != null || live.sdkChunks > 0,
                     modifier = Modifier.padding(vertical = 4.dp),
                 )
-                SectionLabel("Sampling", Modifier.padding(top = 6.dp))
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(temperature, { temperature = it }, label = { Text("Temperature") }, singleLine = true, modifier = Modifier.width(120.dp), shape = RectangleShape)
-                    OutlinedTextField(topK, { topK = it }, label = { Text("Top-k") }, singleLine = true, modifier = Modifier.width(100.dp), shape = RectangleShape)
-                    OutlinedTextField(topP, { topP = it }, label = { Text("Top-p") }, singleLine = true, modifier = Modifier.width(100.dp), shape = RectangleShape)
-                    OutlinedTextField(seed, { seed = it }, label = { Text("Seed") }, singleLine = true, modifier = Modifier.width(120.dp), shape = RectangleShape)
-                }
-                TermButton(
-                    "Apply sampling",
-                    onClick = {
-                        val parsed = listOfNotNull(temperature.toDoubleOrNull(), topK.toIntOrNull(), topP.toDoubleOrNull(), seed.toIntOrNull())
-                        settingsError = if (parsed.size != 4) "Enter valid numbers for all sampling fields." else {
-                            onSamplerChange(SamplerSettings(temperature.toDouble(), topK.toInt(), topP.toDouble(), seed.toInt()))
-                        }
-                    },
-                    style = TermButtonStyle.Ghost,
-                    modifier = Modifier.padding(vertical = 4.dp),
-                )
-                settingsError?.let { Text("[!] $it", style = Mobie.numeric.tiny, color = Mobie.signals.blocked) }
             }
         }
         Hairline()
@@ -674,29 +626,6 @@ private fun TelemetryValue(label: String?, value: String, unit: String? = null) 
 // ---------------------------------------------------------------------------------------------
 // Non-conversation states
 
-/** Slim notice under the top bar while the model loads; the conversation stays visible below it. */
-@Composable
-private fun LoadingBanner(modelTitle: String) {
-    Column(Modifier.fillMaxWidth()) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                "Loading $modelTitle. The first load can take a while.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            IndeterminateTrack(Mobie.signals.caution)
-        }
-        Hairline()
-    }
-}
-
 /** Replaces the composer for a saved chat whose model was removed from this phone. */
 @Composable
 private fun ReadOnlyBanner(modelTitle: String, onGetModel: () -> Unit) {
@@ -723,31 +652,6 @@ private fun ReadOnlyBanner(modelTitle: String, onGetModel: () -> Unit) {
                 icon = LucideR.drawable.lucide_ic_download,
                 modifier = Modifier.fillMaxWidth(),
             )
-        }
-    }
-}
-
-/** A short rounded segment sweeping across a thin track while the model loads. */
-@Composable
-private fun IndeterminateTrack(color: Color) {
-    val track = Mobie.signals.track
-    val transition = rememberInfiniteTransition(label = "load track")
-    // Read in the draw phase so the sweep never recomposes the panel.
-    val position by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(1400, easing = EmphasizedEase), RepeatMode.Restart),
-        label = "load track position",
-    )
-    Canvas(Modifier.fillMaxWidth().height(6.dp).clip(PillShape)) {
-        val radius = CornerRadius(size.height / 2, size.height / 2)
-        drawRoundRect(track, cornerRadius = radius)
-        val segment = size.width * .28f
-        val start = (size.width + segment) * position - segment
-        val left = start.coerceAtLeast(0f)
-        val right = (start + segment).coerceAtMost(size.width)
-        if (right > left) {
-            drawRoundRect(color, topLeft = Offset(left, 0f), size = Size(right - left, size.height), cornerRadius = radius)
         }
     }
 }
@@ -781,94 +685,27 @@ private fun ErrorPanel(message: String, onChooseModel: () -> Unit, onLoadAnyway:
     }
 }
 
-/**
- * A new chat: a short greeting, what this model can do here, and a few starters. Shown while the
- * model is still loading too, so the home is usable straight away.
- */
+/** The empty conversation leaves room to start writing. */
 @Composable
-private fun EmptyChat(model: AiModel, loaded: Boolean, imageInputReady: Boolean, onStarter: (String) -> Unit) {
-    val starters = remember(model.supportsVision, imageInputReady) {
-        buildList {
-            add("Explain how on-device AI works")
-            add("Write a short poem about the sea")
-            add("Summarize the pros and cons of electric cars")
-            if (model.supportsVision && imageInputReady) add("Describe an image") else add("Help me plan a weekend trip")
-        }
-    }
+internal fun EmptyChat() {
     Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 24.dp)
+        Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 24.dp)
             .testTag("new_chat_greeting"),
-        verticalArrangement = Arrangement.spacedBy(28.dp, Alignment.CenterVertically),
+        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            MobieMark(Modifier.appear(), size = 40.dp)
-            Text(
-                "What can I help with?",
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.appear(delayMillis = 60).semantics { heading() },
-            )
-            Text(
-                model.title,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.appear(delayMillis = 90),
-            )
-            Column(Modifier.padding(top = 4.dp).appear(delayMillis = 120), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                CheckLine(
-                    if (!loaded) {
-                        "Chat stays on this phone. You can write your message while the model loads."
-                    } else if (model.supportsVision && imageInputReady) {
-                        "Chat about text or an attached photo on this phone. Image generation isn't available."
-                    } else if (model.supportsVision) {
-                        "This phone loaded text chat only. Photo input is unavailable for this session."
-                    } else {
-                        "Chat about text on this phone. Nothing you type leaves it."
-                    },
-                    if (loaded && model.supportsVision && !imageInputReady) "!" else "✓",
-                    if (loaded && model.supportsVision && !imageInputReady) Mobie.signals.caution else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            SectionLabel("Try asking", Modifier.appear(delayMillis = 160))
-            starters.forEachIndexed { index, starter ->
-                val vision = starter == "Describe an image"
-                Panel(
-                    Modifier.fillMaxWidth().appear(delayMillis = 200 + index * 60),
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                    onClick = { onStarter(if (vision) "Describe this image in detail." else starter) },
-                ) {
-                    Row(
-                        Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(starter, style = MaterialTheme.typography.bodyLarge)
-                            if (vision) {
-                                Text(
-                                    "Attach a photo with the image button first",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                        LucideIcon(
-                            if (vision) LucideR.drawable.lucide_ic_image else LucideR.drawable.lucide_ic_arrow_up_right,
-                            null,
-                            Modifier.size(18.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-        }
+        Text(
+            ">_",
+            style = MaterialTheme.typography.displaySmall,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Text(
+            "What's on your mind?",
+            style = MaterialTheme.typography.headlineLarge,
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.semantics { heading() },
+        )
     }
 }
 
@@ -892,7 +729,7 @@ private fun UserMessage(message: ChatMessage, modifier: Modifier = Modifier) {
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier
                         .widthIn(max = 560.dp)
-                        .background(MaterialTheme.colorScheme.surfaceContainerHighest, UserBubbleShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainer, UserBubbleShape)
                         .padding(horizontal = 16.dp, vertical = 10.dp),
                 )
             }
@@ -900,7 +737,7 @@ private fun UserMessage(message: ChatMessage, modifier: Modifier = Modifier) {
     }
 }
 
-private val UserBubbleShape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomEnd = 6.dp, bottomStart = 20.dp)
+private val UserBubbleShape = RoundedCornerShape(4.dp)
 
 @Composable
 private fun AttachedImage(path: String) {
@@ -927,19 +764,11 @@ private fun AttachedImage(path: String) {
 @Composable
 private fun AssistantMessage(message: ChatMessage, modelTitle: String, streaming: Boolean, modifier: Modifier = Modifier) {
     val waitingForAnswer = streaming && message.text.isBlank()
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            MobieMark(size = 20.dp)
-            Text(
-                modelTitle,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false),
-            )
-            if (message.interrupted) Tag("Interrupted", color = Mobie.signals.caution)
-        }
+    Column(
+        modifier.fillMaxWidth().semantics { contentDescription = "Reply from $modelTitle" },
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        if (message.interrupted) Tag("Interrupted", color = Mobie.signals.caution)
         if (message.thinking.isNotBlank()) {
             ThinkingPanel(message.thinking, active = waitingForAnswer)
         }
@@ -1151,7 +980,7 @@ private fun MarkdownBlock(block: MdBlock, codeStyle: SpanStyle) {
     when (block) {
         is MdBlock.Paragraph -> Text(
             remember(block, codeStyle) { block.spans.toAnnotated(codeStyle) },
-            style = MaterialTheme.typography.bodyLarge,
+            style = MaterialTheme.typography.bodyLarge.copy(fontSize = 18.sp, lineHeight = 28.sp),
             color = onSurface,
         )
         is MdBlock.Heading -> Text(
@@ -1167,7 +996,7 @@ private fun MarkdownBlock(block: MdBlock, codeStyle: SpanStyle) {
         is MdBlock.ListItem -> Row(Modifier.padding(start = (block.depth * 18).dp)) {
             Text(
                 block.marker,
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyLarge.copy(fontSize = 18.sp, lineHeight = 28.sp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.End,
                 modifier = Modifier.width(if (block.ordered) 28.dp else 18.dp).padding(end = 8.dp),
@@ -1175,7 +1004,7 @@ private fun MarkdownBlock(block: MdBlock, codeStyle: SpanStyle) {
             )
             Text(
                 remember(block, codeStyle) { block.spans.toAnnotated(codeStyle) },
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyLarge.copy(fontSize = 18.sp, lineHeight = 28.sp),
                 color = onSurface,
                 modifier = Modifier.weight(1f),
             )
@@ -1197,7 +1026,7 @@ private fun CodeBlock(block: MdBlock.Code) {
             copied = false
         }
     }
-    val shape = RoundedCornerShape(12.dp)
+    val shape = RoundedCornerShape(4.dp)
     Column(
         Modifier
             .fillMaxWidth()
@@ -1275,17 +1104,22 @@ private fun List<MdSpan>.toAnnotated(codeStyle: SpanStyle): AnnotatedString = bu
 
 @Composable
 private fun ComposerDock(
+    modelTitle: String,
+    onOpenModelPicker: () -> Unit,
+    status: String,
+    statusColor: Color,
     prompt: String,
     onPromptChange: (String) -> Unit,
     runtimeState: RuntimeState,
-    runtimeLabel: String,
     supportsVision: Boolean,
+    capabilityNotice: String?,
     imagePath: String?,
     imageCopying: Boolean,
     canSubmit: Boolean,
     error: String?,
     imageError: String?,
     focusRequester: FocusRequester,
+    onOpenDetails: () -> Unit,
     onAttach: () -> Unit,
     onRemoveImage: () -> Unit,
     onSubmit: () -> Unit,
@@ -1293,15 +1127,8 @@ private fun ComposerDock(
 ) {
     val ready = runtimeState == RuntimeState.READY
     val generating = runtimeState == RuntimeState.GENERATING
-    val placeholder = when (runtimeState) {
-        RuntimeState.READY -> "Ask anything"
-        RuntimeState.LOADING -> "Ask anything (model is loading)"
-        RuntimeState.GENERATING -> "Generating…"
-        RuntimeState.STOPPING -> "Stopping…"
-        RuntimeState.ERROR -> "Model unavailable"
-        RuntimeState.IDLE -> "Model not loaded"
-    }
-    val fieldShape = RoundedCornerShape(24.dp)
+    val placeholder = "Message Mobie"
+    val fieldShape = RoundedCornerShape(6.dp)
     val fieldInteraction = remember { MutableInteractionSource() }
     val focused by fieldInteraction.collectIsFocusedAsState()
     val fieldBorder by animateColorAsState(
@@ -1323,6 +1150,14 @@ private fun ComposerDock(
             Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            capabilityNotice?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Mobie.signals.caution,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                )
+            }
             AnimatedVisibility(
                 visible = imageCopying,
                 enter = fadeIn(tween(MotionShort)) + expandVertically(tween(MotionShort)),
@@ -1374,66 +1209,98 @@ private fun ComposerDock(
                     modifier = Modifier.appear(offsetDp = 6f).semantics { liveRegion = LiveRegionMode.Polite },
                 )
             }
-            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                Modifier.fillMaxWidth()
+                    .clip(fieldShape)
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow, fieldShape)
+                    .border(1.dp, fieldBorder, fieldShape),
+            ) {
+                BasicTextField(
+                    value = prompt,
+                    onValueChange = onPromptChange,
+                    // Drafts remain editable while a reply runs or the model loads.
+                    enabled = true,
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        color = MaterialTheme.colorScheme.onSurface,
+                    ),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    maxLines = 6,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { onSubmit() }),
+                    interactionSource = fieldInteraction,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 54.dp)
+                        .padding(horizontal = 18.dp, vertical = 16.dp)
+                        .focusRequester(focusRequester)
+                        .testTag("chat_input"),
+                    decorationBox = { inner ->
+                        Box {
+                            if (prompt.isEmpty()) {
+                                Text(
+                                    placeholder,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            inner()
+                        }
+                    },
+                )
                 Row(
-                    Modifier
-                        .weight(1f)
-                        .heightIn(min = 52.dp)
-                        .clip(fieldShape)
-                        .background(MaterialTheme.colorScheme.surfaceContainer, fieldShape)
-                        .border(1.dp, fieldBorder, fieldShape)
-                        .padding(start = if (supportsVision) 4.dp else 18.dp, end = 16.dp),
-                    verticalAlignment = Alignment.Bottom,
+                    Modifier.fillMaxWidth().padding(start = 6.dp, end = 8.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (supportsVision) {
                         IconButton(onClick = onAttach, enabled = ready && !imageCopying) {
-                            LucideIcon(LucideR.drawable.lucide_ic_image, "Attach image", Modifier.size(20.dp))
+                            LucideIcon(LucideR.drawable.lucide_ic_plus, "Attach image", Modifier.size(22.dp))
                         }
                     }
-                    BasicTextField(
-                        value = prompt,
-                        onValueChange = onPromptChange,
-                        // Typing is allowed while the model loads; sending waits until it is ready.
-                        enabled = ready || runtimeState == RuntimeState.LOADING,
-                        textStyle = MaterialTheme.typography.bodyLarge.copy(
-                            color = if (ready) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                        ),
-                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                        maxLines = 6,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                        keyboardActions = KeyboardActions(onSend = { onSubmit() }),
-                        interactionSource = fieldInteraction,
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(vertical = 14.dp)
-                            .focusRequester(focusRequester)
-                            .testTag("chat_input"),
-                        decorationBox = { inner ->
-                            Box {
-                                if (prompt.isEmpty()) {
-                                    Text(
-                                        placeholder,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                                inner()
-                            }
-                        },
-                    )
+                    Row(
+                        Modifier.weight(1f).heightIn(min = 48.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .clickable(role = Role.Button, onClickLabel = "Choose a model", onClick = onOpenModelPicker)
+                            .padding(horizontal = 10.dp)
+                            .testTag("model_picker_button"),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        StatusDot(statusColor, pulsing = runtimeState == RuntimeState.LOADING, size = 6.dp)
+                        Text(
+                            modelTitle,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        LucideIcon(LucideR.drawable.lucide_ic_chevron_down, null, Modifier.size(14.dp))
+                    }
+                    Row(
+                        Modifier.heightIn(min = 48.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .clickable(role = Role.Button, onClickLabel = "Chat settings", onClick = onOpenDetails)
+                            .padding(horizontal = 10.dp)
+                            .testTag("chat_settings"),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        LucideIcon(LucideR.drawable.lucide_ic_sliders_horizontal, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Controls", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    SendStopButton(generating = generating, canSubmit = canSubmit, onSubmit = onSubmit, onStop = onStop)
                 }
-                SendStopButton(generating = generating, canSubmit = canSubmit, onSubmit = onSubmit, onStop = onStop)
             }
-            Row(
+            if (runtimeState != RuntimeState.READY) Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 LucideIcon(LucideR.drawable.lucide_ic_lock, null, Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
-                    "Stays on this phone · $runtimeLabel",
+                    status,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -1485,7 +1352,7 @@ private fun SendStopButton(generating: Boolean, canSubmit: Boolean, onSubmit: ()
                 scaleY = scale
             }
             .pressScale(interaction, pressedScale = .9f),
-        shape = CircleShape,
+        shape = RoundedCornerShape(4.dp),
         colors = IconButtonDefaults.filledIconButtonColors(
             containerColor = container,
             contentColor = content,

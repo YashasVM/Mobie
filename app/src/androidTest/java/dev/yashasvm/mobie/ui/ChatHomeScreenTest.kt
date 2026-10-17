@@ -6,7 +6,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.graphics.asAndroidBitmap
@@ -34,6 +37,7 @@ import dev.yashasvm.mobie.data.history.ChatThread
 import dev.yashasvm.mobie.data.history.HistoryMessage
 import dev.yashasvm.mobie.ui.theme.MobieTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import java.io.File
@@ -54,10 +58,54 @@ class ChatHomeScreenTest {
     @Test
     fun newChatShowsGreetingWhileModelLoads() {
         setHome(MobieUiState(selected = model, chatting = true, runtimeState = RuntimeState.LOADING))
-        composeRule.onNodeWithText("What can I help with?").assertIsDisplayed()
-        composeRule.onNodeWithText("Loading Test Model. The first load can take a while.").assertIsDisplayed()
-        composeRule.onNodeWithTag("chat_input").assertIsDisplayed()
+        composeRule.onNodeWithText("What's on your mind?").assertIsDisplayed()
         captureEvidence("mobie-chat-home.png")
+        composeRule.onNodeWithTag("chat_input").assertIsDisplayed().performTextInput("A question while loading")
+        composeRule.onNodeWithContentDescription("Send message").assertIsNotEnabled()
+        composeRule.onNodeWithTag("model_picker_button").assertIsDisplayed()
+    }
+
+    @Test
+    fun lightChatShowsReadableMessagesAndComposer() {
+        setHome(darkTheme = false) { loadedState() }
+        composeRule.onNodeWithText("Here is a plan").assertIsDisplayed()
+        composeRule.onNodeWithTag("chat_input").assertIsDisplayed()
+        captureEvidence("mobie-chat-light.png")
+    }
+
+    @Test
+    fun readyChatGreetsTheUserAndAcceptsDraft() {
+        setHome(loadedState().copy(messages = emptyList()))
+        captureEvidence("mobie-chat-ready.png")
+        composeRule.onNodeWithText("What's on your mind?").assertIsDisplayed()
+        composeRule.onNodeWithTag("chat_input").performTextInput("Explain how on-device AI works")
+        composeRule.onNodeWithTag("chat_input").assert(
+            SemanticsMatcher.expectValue(
+                SemanticsProperties.EditableText,
+                AnnotatedString("Explain how on-device AI works"),
+            ),
+        )
+    }
+
+    @Test
+    fun modelAndControlsAreInTheComposer() {
+        setHome(loadedState().copy(messages = emptyList()))
+        val input = composeRule.onNodeWithTag("chat_input").getUnclippedBoundsInRoot()
+        val modelPicker = composeRule.onNodeWithTag("model_picker_button").getUnclippedBoundsInRoot()
+        val controls = composeRule.onNodeWithTag("chat_settings").getUnclippedBoundsInRoot()
+        assertTrue("Model selection belongs beneath the message field", modelPicker.top >= input.bottom)
+        assertTrue("Chat controls belong beneath the message field", controls.top >= input.bottom)
+        composeRule.onNodeWithContentDescription("Open chats").assertIsDisplayed()
+        composeRule.onNodeWithTag("chats_drawer").assertIsNotDisplayed()
+    }
+
+    @Test
+    fun composerOpensSamplingAndPerformanceSettings() {
+        setHome(loadedState())
+        composeRule.onNodeWithText("Temperature").assertDoesNotExist()
+        composeRule.onNodeWithTag("chat_settings").performClick()
+        composeRule.onNodeWithText("Temperature").assertIsDisplayed()
+        composeRule.onNodeWithText("Apply sampling").assertIsDisplayed()
     }
 
     @Test
@@ -139,12 +187,69 @@ class ChatHomeScreenTest {
     }
 
     @Test
-    fun homeWithoutModelsExplainsHowToStart() {
+    fun homeWithoutModelsKeepsTheGreetingAndDraftComposer() {
         setHome(MobieUiState())
-        composeRule.onNodeWithText("Download a model to start chatting").assertIsDisplayed()
+        composeRule.onNodeWithText("What's on your mind?").assertIsDisplayed()
+        composeRule.onNodeWithText("Download a model to chat on this phone.").assertIsDisplayed()
         captureEvidence("mobie-chat-home-empty.png")
-        composeRule.onNodeWithText("Browse models").performClick()
+        composeRule.onNodeWithTag("chat_input").performTextInput("My first question")
+        composeRule.onNodeWithTag("model_picker_button").performClick()
+        composeRule.onNodeWithTag("find_more_models").performClick()
         composeRule.runOnIdle { assertEquals(CatalogTab.DISCOVER, openedModels) }
+    }
+
+    @Test
+    fun firstDraftSurvivesTheModelBecomingReady() {
+        val state = mutableStateOf(MobieUiState())
+        setHome { state.value }
+        composeRule.onNodeWithTag("chat_input").performTextInput("Keep my first question")
+        composeRule.runOnIdle { state.value = loadedState().copy(messages = emptyList()) }
+        composeRule.onNodeWithTag("chat_input").assert(
+            SemanticsMatcher.expectValue(
+                SemanticsProperties.EditableText,
+                AnnotatedString("Keep my first question"),
+            ),
+        )
+        composeRule.onNodeWithContentDescription("Send message").assertIsDisplayed()
+    }
+
+    @Test
+    fun changingModelsFromTheComposerPreservesTheActiveDraft() {
+        val state = mutableStateOf(loadedState().copy(messages = emptyList()))
+        setHome { state.value }
+        composeRule.onNodeWithTag("chat_input").performTextInput("Answer this with the other model")
+        composeRule.onNodeWithTag("model_picker_button").performClick()
+        composeRule.onNodeWithText("Second Model").performClick()
+        composeRule.runOnIdle {
+            assertEquals(secondEntry, picked)
+            state.value = state.value.copy(
+                selected = checkNotNull(picked).model,
+                sessionId = "new-model-chat",
+            )
+        }
+        composeRule.onNodeWithTag("chat_input").assert(
+            SemanticsMatcher.expectValue(
+                SemanticsProperties.EditableText,
+                AnnotatedString("Answer this with the other model"),
+            ),
+        )
+    }
+
+    @Test
+    fun openingSavedChatClearsTheDraftWrittenBeforeChoosingAModel() {
+        val state = mutableStateOf(MobieUiState(chats = listOf(todayChat)))
+        setHome { state.value }
+        composeRule.onNodeWithTag("chat_input").performTextInput("An unsent first question")
+        composeRule.onNodeWithContentDescription("Open chats").performClick()
+        composeRule.onNodeWithText("Trip ideas").performClick()
+        composeRule.runOnIdle {
+            assertEquals(todayChat, openedThread)
+            state.value = loadedState()
+        }
+        composeRule.onNodeWithText("Here is a plan").assertIsDisplayed()
+        composeRule.onNodeWithTag("chat_input").assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("")),
+        )
     }
 
     @Test
@@ -186,9 +291,9 @@ class ChatHomeScreenTest {
 
     private fun setHome(state: MobieUiState) = setHome { state }
 
-    private fun setHome(state: () -> MobieUiState) {
+    private fun setHome(darkTheme: Boolean = true, state: () -> MobieUiState) {
         composeRule.setContent {
-            MobieTheme {
+            MobieTheme(darkTheme = darkTheme) {
                 CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground) {
                     ChatHome(
                         state = state(),

@@ -152,12 +152,8 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                         onboardingComplete = saved.third, preferencesLoaded = true)
                 }
             }
-            if (state.value.welcomeSeen || state.value.onboardingComplete) {
-                openHome()
-                loadFeatured()
-            } else {
-                refreshInstalled()
-            }
+            openHome()
+            loadFeatured()
         }
         viewModelScope.launch {
             val device = readDeviceProfile()

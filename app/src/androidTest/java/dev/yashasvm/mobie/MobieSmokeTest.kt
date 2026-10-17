@@ -22,15 +22,10 @@ class MobieSmokeTest {
 
     @Test
     fun appLaunchesIntoChatHomeAndStoresTokenSecurely() {
-        // The first-run welcome waits for the user; continue past it when present.
-        composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("Continue", ignoreCase = true).fetchSemanticsNodes().isNotEmpty() || chatHomeShown()
-        }
-        if (composeRule.onAllNodesWithText("Continue", ignoreCase = true).fetchSemanticsNodes().isNotEmpty()) {
-            composeRule.onNodeWithText("Continue", ignoreCase = true).performClick()
-        }
         // The app opens on the chat home, never on the model catalog.
         composeRule.waitUntil(timeoutMillis = 10_000) { chatHomeShown() }
+        composeRule.onNodeWithTag("chat_input").assertIsDisplayed()
+        composeRule.onNodeWithTag("model_picker_button").assertIsDisplayed()
         assertTrue(composeRule.onAllNodesWithText("Recommended").fetchSemanticsNodes().isEmpty())
 
         // Settings live in the chats drawer.
