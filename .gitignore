@@ -12,3 +12,4 @@ captures/
 *.keystore
 secrets.properties
 models/
+.claude/worktrees/

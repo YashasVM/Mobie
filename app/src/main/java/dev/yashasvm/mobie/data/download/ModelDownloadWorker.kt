@@ -321,7 +321,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
         }
         val safeName = DownloadFilePolicy.safeFileName(fileName)
         val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_stat_mobie)
             .setContentTitle("Downloading model")
             .setContentText(if (hasTotal) "$safeName · $progress%" else safeName)
             .setOngoing(true)
