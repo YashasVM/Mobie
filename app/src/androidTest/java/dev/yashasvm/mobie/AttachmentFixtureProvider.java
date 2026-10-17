@@ -20,7 +20,7 @@ public final class AttachmentFixtureProvider extends ContentProvider {
         if ("mime-denied".equals(uri.getLastPathSegment())) {
             throw new SecurityException("Fixture provider refused MIME access");
         }
-        return "text/markdown";
+        return "photo".equals(uri.getLastPathSegment()) ? "image/png" : "text/markdown";
     }
     @Override public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs, String sortOrder) {
         if ("query-failed".equals(uri.getLastPathSegment())) {
@@ -36,7 +36,14 @@ public final class AttachmentFixtureProvider extends ContentProvider {
             ? new byte[] { 65, 0, 66 }
             : "Local UTF-8 notes: café".getBytes(StandardCharsets.UTF_8);
         try (FileOutputStream stream = new FileOutputStream(file)) {
-            stream.write(bytes);
+            if ("photo".equals(uri.getLastPathSegment())) {
+                android.graphics.Bitmap bitmap = android.graphics.Bitmap.createBitmap(8, 8, android.graphics.Bitmap.Config.ARGB_8888);
+                bitmap.eraseColor(android.graphics.Color.BLUE);
+                bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, stream);
+                bitmap.recycle();
+            } else {
+                stream.write(bytes);
+            }
         } catch (IOException error) {
             throw new FileNotFoundException(error.getMessage());
         }

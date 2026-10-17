@@ -114,7 +114,7 @@ internal fun Panel(
             .clip(shape)
             .background(color, shape)
             .border(1.dp, borderColor, shape)
-            .then(if (onClick != null) Modifier.clickable(interactionSource = interaction, indication = ripple(), onClick = onClick) else Modifier),
+            .then(if (onClick != null) Modifier.clickable(interactionSource = interaction, indication = ripple(), role = Role.Button, onClick = onClick) else Modifier),
     ) {
         CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
             content()
@@ -476,7 +476,7 @@ internal fun StatusLine(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .clip(PillShape)
-                    .then(if (segment.onClick != null) Modifier.clickable(onClick = segment.onClick) else Modifier)
+                    .then(if (segment.onClick != null) Modifier.clickable(role = Role.Button, onClick = segment.onClick) else Modifier)
                     .padding(horizontal = 6.dp, vertical = 4.dp),
             )
         }

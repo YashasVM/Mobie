@@ -5,6 +5,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onLast
@@ -195,6 +196,25 @@ class ChatHomeScreenTest {
         composeRule.onNodeWithContentDescription("Add to message").performClick()
         composeRule.onNodeWithText("File", useUnmergedTree = true).assertIsDisplayed()
         composeRule.onNodeWithText("Photo").assertDoesNotExist()
+    }
+
+    @Test
+    fun chatSearchKeepsAnAccessibleNameAfterTyping() {
+        setHome(loadedState())
+        composeRule.onNodeWithTag("open_chats").performClick()
+        composeRule.onNodeWithTag("chat_search").performTextInput("Trip")
+        composeRule.onNodeWithTag("chat_search").assertContentDescriptionEquals("Search chats")
+    }
+
+    @Test
+    fun runDetailsAnnouncesItsExpandedState() {
+        setHome(loadedState())
+        composeRule.onNodeWithText("run details ▸").assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapsed"),
+        ).performClick()
+        composeRule.onNodeWithText("run details ▾").assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Expanded"),
+        ).assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, androidx.compose.ui.semantics.Role.Button))
     }
 
     private fun setHome(state: MobieUiState) = setHome { state }
