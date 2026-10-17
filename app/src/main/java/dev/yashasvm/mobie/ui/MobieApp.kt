@@ -52,6 +52,7 @@ fun MobieApp(
     }
 
     var warningOverride by remember { mutableStateOf(false) }
+    var showComputeSettings by remember { mutableStateOf(false) }
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) {
@@ -69,6 +70,12 @@ fun MobieApp(
         } else {
             viewModel.download(allowWarning)
         }
+    }
+
+    if (showComputeSettings && state.chatting) {
+        ComputeSettingsDialog(state, viewModel::updateComputeOptions, viewModel::updateSampler,
+            onApply = { viewModel.applyComputeSettings(); showComputeSettings = false },
+            onReset = viewModel::resetComputeSettings, onClose = { showComputeSettings = false })
     }
 
     // Models and model pages sit on top of the chat home; back returns toward it. At the home,
@@ -105,6 +112,7 @@ fun MobieApp(
                     onOpenModels = viewModel::openModels,
                     onGetModel = viewModel::findModel,
                     onSamplerChange = viewModel::updateSampler,
+                    onComputeSettings = { showComputeSettings = true },
                     onLoadAnyway = { viewModel.runInstalled(allowReclaim = true) },
                 )
                 AppScreen.MODEL -> ModelScreen(
@@ -114,6 +122,12 @@ fun MobieApp(
                     onCancelDownload = viewModel::cancelDownload,
                     onBackendChange = viewModel::setComputeBackend,
                     onCpuThreadsChange = viewModel::setCpuThreads,
+                    onComputeOptionsChange = viewModel::updateComputeOptions,
+                    onSamplerChange = viewModel::updateSampler,
+                    onApplyCompute = viewModel::applyComputeSettings,
+                    onResetCompute = viewModel::resetComputeSettings,
+                    onMemoryRefresh = viewModel::refreshMemory,
+                    onFreeMemory = viewModel::freeUpMemory,
                     onBack = { viewModel.back() },
                 )
                 AppScreen.CATALOG -> CatalogScreen(

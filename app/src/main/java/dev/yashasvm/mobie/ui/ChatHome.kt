@@ -82,6 +82,7 @@ internal fun ChatHome(
     onOpenModels: (CatalogTab) -> Unit,
     onGetModel: (String) -> Unit,
     onSamplerChange: (SamplerSettings) -> String? = { null },
+    onComputeSettings: () -> Unit = {},
     onLoadAnyway: () -> Unit = {},
 ) {
     val drawerState = rememberDrawerState(DrawerValue.Closed)
@@ -130,7 +131,7 @@ internal fun ChatHome(
                     onOpenDrawer = openDrawer,
                     onOpenModelPicker = { showPicker = true },
                     onNewChat = onNewChat,
-                    onSamplerChange = onSamplerChange,
+                    onComputeSettings = onComputeSettings,
                     onLoadAnyway = onLoadAnyway,
                     onGetModel = onGetModel,
                 )

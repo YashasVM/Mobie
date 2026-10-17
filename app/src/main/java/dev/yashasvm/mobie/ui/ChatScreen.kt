@@ -132,7 +132,6 @@ import dev.yashasvm.mobie.core.model.Compatibility
 import dev.yashasvm.mobie.core.model.MemoryAdmissionTier
 import dev.yashasvm.mobie.core.runtime.ActiveCompute
 import dev.yashasvm.mobie.core.runtime.InferenceStats
-import dev.yashasvm.mobie.core.runtime.SamplerSettings
 import dev.yashasvm.mobie.core.device.RunTelemetry
 import org.json.JSONObject
 import dev.yashasvm.mobie.ui.theme.Mobie
@@ -162,7 +161,7 @@ internal fun ChatScreen(
     onOpenDrawer: () -> Unit = {},
     onOpenModelPicker: () -> Unit = {},
     onNewChat: () -> Unit = {},
-    onSamplerChange: (SamplerSettings) -> String? = { null },
+    onComputeSettings: () -> Unit = {},
     onLoadAnyway: () -> Unit = {},
     onGetModel: (String) -> Unit = {},
 ) {
@@ -287,9 +286,8 @@ internal fun ChatScreen(
                 activeCompute = state.activeCompute,
                 stats = state.stats,
                 live = state.telemetry,
-                sampler = state.sampler,
                 runJson = { runJson(latestState) },
-                onSamplerChange = onSamplerChange,
+                onComputeSettings = onComputeSettings,
             )
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -540,18 +538,12 @@ private fun RunDetails(
     activeCompute: ActiveCompute?,
     stats: InferenceStats?,
     live: RunTelemetry,
-    sampler: SamplerSettings,
     runJson: () -> String,
-    onSamplerChange: (SamplerSettings) -> String?,
+    onComputeSettings: () -> Unit,
 ) {
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     var expanded by rememberSaveable { mutableStateOf(false) }
-    var temperature by remember(sampler) { mutableStateOf(sampler.temperature.toString()) }
-    var topK by remember(sampler) { mutableStateOf(sampler.topK.toString()) }
-    var topP by remember(sampler) { mutableStateOf(sampler.topP.toString()) }
-    var seed by remember(sampler) { mutableStateOf(sampler.seed.toString()) }
-    var settingsError by remember { mutableStateOf<String?>(null) }
     val decode = stats?.tokensPerSecond?.takeIf { it > 0 }?.let { String.format(Locale.US, "%.1f tok/s", it) }
         ?: live.liveSdkChunksPerSecond?.let { String.format(Locale.US, "%.1f SDK chunks/s", it) }
         ?: "Waiting for output"
@@ -607,41 +599,25 @@ private fun RunDetails(
                     enabled = stats != null || live.sdkChunks > 0,
                     modifier = Modifier.padding(vertical = 4.dp),
                 )
-                SectionLabel("Sampling", Modifier.padding(top = 6.dp))
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(temperature, { temperature = it }, label = { Text("Temperature") }, singleLine = true, modifier = Modifier.width(120.dp), shape = RectangleShape)
-                    OutlinedTextField(topK, { topK = it }, label = { Text("Top-k") }, singleLine = true, modifier = Modifier.width(100.dp), shape = RectangleShape)
-                    OutlinedTextField(topP, { topP = it }, label = { Text("Top-p") }, singleLine = true, modifier = Modifier.width(100.dp), shape = RectangleShape)
-                    OutlinedTextField(seed, { seed = it }, label = { Text("Seed") }, singleLine = true, modifier = Modifier.width(120.dp), shape = RectangleShape)
-                }
-                TermButton(
-                    "Apply sampling",
-                    onClick = {
-                        val parsed = listOfNotNull(temperature.toDoubleOrNull(), topK.toIntOrNull(), topP.toDoubleOrNull(), seed.toIntOrNull())
-                        settingsError = if (parsed.size != 4) "Enter valid numbers for all sampling fields." else {
-                            onSamplerChange(SamplerSettings(temperature.toDouble(), topK.toInt(), topP.toDouble(), seed.toInt()))
-                        }
-                    },
-                    style = TermButtonStyle.Ghost,
-                    modifier = Modifier.padding(vertical = 4.dp),
-                )
-                settingsError?.let { Text("[!] $it", style = Mobie.numeric.tiny, color = Mobie.signals.blocked) }
+                TermButton("Compute settings", onClick = onComputeSettings, style = TermButtonStyle.Ghost,
+                    modifier = Modifier.padding(vertical = 4.dp).testTag("open_compute_settings"))
             }
         }
         Hairline()
     }
 }
 
-private fun runJson(state: MobieUiState): String {
+internal fun runJson(state: MobieUiState): String {
     val stats = state.stats
     val live = state.telemetry
+    val sampler = state.appliedSampler ?: state.sampler
     fun value(value: Any?): Any = value ?: JSONObject.NULL
     return JSONObject().apply {
         put("modelId", value(state.selected?.id))
         put("artifact", value(state.selectedArtifact?.fileName))
         put("compute", value(state.activeCompute?.label))
-        put("sampler", JSONObject().put("temperature", state.sampler.temperature).put("topK", state.sampler.topK)
-            .put("topP", state.sampler.topP).put("seed", state.sampler.seed))
+        put("sampler", JSONObject().put("temperature", sampler.temperature).put("topK", sampler.topK)
+            .put("topP", sampler.topP).put("seed", sampler.seed))
         put("firstSdkChunkMs", value(live.firstChunkMs))
         put("sdkChunks", live.sdkChunks)
         put("liveSdkChunksPerSecond", value(live.liveSdkChunksPerSecond))
