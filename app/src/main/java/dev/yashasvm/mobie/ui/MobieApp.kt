@@ -157,6 +157,10 @@ internal fun AppScreenHost(screen: AppScreen, content: @Composable (AppScreen) -
             },
             label = "screen",
         ) { screen ->
-            savedScreens.SaveableStateProvider(screen) { content(screen) }
+            if (screen == AppScreen.CHAT) {
+                savedScreens.SaveableStateProvider(screen) { content(screen) }
+            } else {
+                content(screen)
+            }
         }
 }
