@@ -164,7 +164,6 @@ internal fun ChatScreen(
     onSend: (String, String?) -> Boolean,
     onStop: () -> Unit = {},
     onBack: () -> Unit = {},
-    onHistory: () -> Unit = {},
     onNewChat: () -> Unit = {},
     onSamplerChange: (SamplerSettings) -> String? = { null },
     onLoadAnyway: () -> Unit = {},
@@ -178,6 +177,7 @@ internal fun ChatScreen(
     val context = LocalContext.current
     var prompt by rememberSaveable { mutableStateOf("") }
     var pendingSend by remember(model?.id, state.sessionId) { mutableStateOf(false) }
+    var pendingLoadAttempt by remember(model?.id, state.sessionId) { mutableStateOf(0L) }
     var imagePath by rememberSaveable { mutableStateOf<String?>(null) }
     var imageError by remember { mutableStateOf<String?>(null) }
     var imageCopying by remember { mutableStateOf(false) }
@@ -256,8 +256,8 @@ internal fun ChatScreen(
             followLatest = true
         }
     }
-    LaunchedEffect(state.runtimeState, state.error, model?.id, pendingSend) {
-        if (pendingSend) {
+    LaunchedEffect(state.runtimeState, state.error, state.loadAttempt, model?.id, state.sessionId, pendingSend) {
+        if (pendingSend && state.loadAttempt > pendingLoadAttempt) {
             when {
                 ready -> { pendingSend = false; sendDraft() }
                 state.runtimeState == RuntimeState.ERROR || state.error != null -> pendingSend = false
@@ -266,7 +266,7 @@ internal fun ChatScreen(
     }
     val submit = {
         if (canSubmit) {
-            if (ready) sendDraft() else { pendingSend = true; onLoad() }
+            if (ready) sendDraft() else { pendingLoadAttempt = state.loadAttempt; pendingSend = true; onLoad() }
         }
     }
 
@@ -278,7 +278,14 @@ internal fun ChatScreen(
     ) {
         ChatHeader(
             onBack = onBack,
-            onNewChat = { pendingSend = false; onNewChat() },
+            onNewChat = {
+                pendingSend = false
+                prompt = ""
+                val staleImage = imagePath
+                imagePath = null
+                scope.launch { staleImage?.let { deleteImageFile(it) } }
+                onNewChat()
+            },
             onRunDetails = { showRunDetails = true },
         )
         AnimatedVisibility(
@@ -463,7 +470,7 @@ private fun ChatHeader(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
-            LucideIcon(LucideR.drawable.lucide_ic_menu, "Open menu", Modifier.size(24.dp))
+            LucideIcon(LucideR.drawable.lucide_ic_menu, "Open navigation", Modifier.size(24.dp))
         }
         Text("Mobie", style = MaterialTheme.typography.titleLarge.copy(fontFamily = FontFamily.Serif),
             modifier = Modifier.weight(1f).padding(start = 8.dp).semantics { heading() })
@@ -566,10 +573,10 @@ private fun RunDetails(
             )
             SectionLabel("Sampling", Modifier.padding(top = 6.dp))
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(temperature, { temperature = it }, label = { Text("Temperature") }, singleLine = true, modifier = Modifier.width(120.dp), shape = RectangleShape)
-                OutlinedTextField(topK, { topK = it }, label = { Text("Top-k") }, singleLine = true, modifier = Modifier.width(100.dp), shape = RectangleShape)
-                OutlinedTextField(topP, { topP = it }, label = { Text("Top-p") }, singleLine = true, modifier = Modifier.width(100.dp), shape = RectangleShape)
-                OutlinedTextField(seed, { seed = it }, label = { Text("Seed") }, singleLine = true, modifier = Modifier.width(120.dp), shape = RectangleShape)
+                OutlinedTextField(temperature, { temperature = it }, label = { Text("Temperature") }, singleLine = true, modifier = Modifier.width(120.dp), shape = MaterialTheme.shapes.medium)
+                OutlinedTextField(topK, { topK = it }, label = { Text("Top-k") }, singleLine = true, modifier = Modifier.width(100.dp), shape = MaterialTheme.shapes.medium)
+                OutlinedTextField(topP, { topP = it }, label = { Text("Top-p") }, singleLine = true, modifier = Modifier.width(100.dp), shape = MaterialTheme.shapes.medium)
+                OutlinedTextField(seed, { seed = it }, label = { Text("Seed") }, singleLine = true, modifier = Modifier.width(120.dp), shape = MaterialTheme.shapes.medium)
             }
             TermButton(
                 "Apply sampling",
@@ -651,7 +658,7 @@ private fun EmptyChat(model: AiModel?, imageInputReady: Boolean, ready: Boolean)
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        LucideIcon(LucideR.drawable.lucide_ic_sparkles, null, Modifier.size(32.dp), tint = MaterialTheme.colorScheme.primary)
+        LucideIcon(LucideR.drawable.lucide_ic_sparkles, null, Modifier.size(32.dp), tint = MaterialTheme.colorScheme.tertiary)
         Spacer(Modifier.height(24.dp))
         Text("What can I help with?",
             style = MaterialTheme.typography.headlineLarge.copy(fontFamily = FontFamily.Serif, fontWeight = FontWeight.Normal),
@@ -1399,7 +1406,7 @@ private fun ComposerDock(
                 if (supportsVision) IconButton(onClick = onPickPhoto, enabled = ready && !imageCopying, modifier = Modifier.size(48.dp)) {
                     LucideIcon(LucideR.drawable.lucide_ic_image, "Attach image", Modifier.size(20.dp))
                 }
-                Row(Modifier.weight(1f, fill = false).heightIn(min = 48.dp).clip(PillShape)
+                Row(Modifier.weight(1f).heightIn(min = 48.dp).clip(PillShape)
                     .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                     .clickable(role = Role.Button, onClickLabel = "Switch model", onClick = onSwitchModel)
                     .padding(horizontal = 14.dp),
@@ -1408,7 +1415,6 @@ private fun ComposerDock(
                         overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                     LucideIcon(LucideR.drawable.lucide_ic_chevron_down, null, Modifier.size(14.dp))
                 }
-                Spacer(Modifier.weight(1f))
                 SendStopButton(generating = generating, canSubmit = canSubmit, onSubmit = onSubmit, onStop = onStop)
             }
         }

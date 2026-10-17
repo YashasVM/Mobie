@@ -91,6 +91,7 @@ data class MobieUiState(
     /** Id of the installed model the user last chatted with; drives the switcher and "back to chat". */
     val activeInstalledId: String? = null,
     val runtimeState: RuntimeState = RuntimeState.IDLE,
+    val loadAttempt: Long = 0,
     val messages: List<ChatMessage> = emptyList(),
     val history: List<ChatHistorySession> = emptyList(),
     val recentChats: List<RecentChat> = emptyList(),
@@ -145,7 +146,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         }
         container.runtimes.all().forEach { it.configureSampler(mutableState.value.sampler) }
         refreshInstalled()
-        if (mutableState.value.welcomeSeen || mutableState.value.onboardingComplete) loadFeatured()
+        loadFeatured()
     }
 
     fun finishOnboarding(token: String?) {
@@ -340,10 +341,11 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun runInstalled(allowReclaim: Boolean = false) {
+        mutableState.update { it.copy(loadAttempt = it.loadAttempt + 1) }
         val revision = selectionRevision.get()
         val path = state.value.downloadedPath
         if (path != null && File(path).isFile) {
-            mutableState.update { it.copy(runtimeState = RuntimeState.LOADING, error = null) }
+            mutableState.update { it.copy(chatting = true, runtimeState = RuntimeState.LOADING, error = null) }
             viewModelScope.launch {
                 val current = state.value
                 val device = readDeviceProfile()
@@ -719,6 +721,8 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         mutableState.update {
             it.copy(
                 messages = emptyList(),
+                pendingAttachments = emptyList(),
+                attachmentError = null,
                 history = container.chatHistory.sessions(model.id),
                 sessionId = sessionId,
                 runtimeState = if (canReuseLoadedModel) RuntimeState.LOADING else RuntimeState.IDLE,
@@ -761,8 +765,8 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     fun openCatalog() = select(null)
 
     fun returnToChat() {
-        val entry = state.value.installedModels.firstOrNull { it.model.id == state.value.activeInstalledId } ?: return
-        prepareInstalledChat(entry, newSession = false)
+        val entry = state.value.installedModels.firstOrNull { it.model.id == state.value.activeInstalledId }
+        if (entry == null) select(null) else prepareInstalledChat(entry, newSession = false)
     }
 
     fun refreshRecents() {
@@ -944,7 +948,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val current = state.value
 
         launchRouted = true
-        if (current.selected != null || current.chatting || selectionRevision.get() != 0) return
+        if (current.selected != null || current.chatting || selectionRevision.get() != 0L) return
         val destination = initialDestination(installed, current.activeInstalledId)
         if (destination is LaunchDestination.Chat) prepareInstalledChat(destination.entry, newSession = false)
     }

@@ -41,13 +41,13 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.composables.icons.lucide.R as LucideR
 import dev.yashasvm.mobie.core.device.CompatibilityResolver
+import dev.yashasvm.mobie.core.runtime.ComputeBackend
 import dev.yashasvm.mobie.core.model.AiModel
 import dev.yashasvm.mobie.core.model.Compatibility
 import dev.yashasvm.mobie.core.model.CompatibilityResult
 import dev.yashasvm.mobie.data.download.InstalledModelEntry
 
 /** Model library and catalog. All fit estimates come from the shared compatibility policy. */
-@Suppress("UNUSED_PARAMETER")
 @Composable
 internal fun CatalogScreen(
     state: MobieUiState,
@@ -57,10 +57,6 @@ internal fun CatalogScreen(
     onFeatured: () -> Unit,
     onOpenInstalled: (InstalledModelEntry) -> Unit = {},
     onDeleteInstalled: (InstalledModelEntry) -> Unit = {},
-    darkTheme: Boolean = true,
-    onDarkThemeChange: (Boolean) -> Unit = {},
-    onSaveToken: (String) -> Unit = {},
-    onReturnToChat: (() -> Unit)? = null,
 ) {
     var installedTab by rememberSaveable { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<InstalledModelEntry?>(null) }
@@ -92,7 +88,7 @@ internal fun CatalogScreen(
                     }
                 }
                 items(state.installedModels, key = { it.model.id }) { entry ->
-                    val compatibility = remember(entry.model, state.device) { state.device?.let { resolver.resolve(entry.model.bestArtifact, it) } }
+                    val compatibility = remember(entry.model, state.device, state.computeBackend) { state.device?.let { resolver.resolve(entry.model.bestArtifact, it, entry.model.supportsVision, state.computeBackend.takeUnless { it == ComputeBackend.AUTO } ?: ComputeBackend.CPU) } }
                     CatalogModelCard(
                         model = entry.model,
                         compatibility = compatibility,
@@ -146,7 +142,7 @@ internal fun CatalogScreen(
                         ModelNotice("No matching models", "Try another name or browse the recommended models.", "Show recommended", onFeatured)
                     }
                     else -> items(state.models, key = { it.id }) { model ->
-                        val compatibility = remember(model, state.device) { state.device?.let { resolver.resolve(model.bestArtifact, it) } }
+                        val compatibility = remember(model, state.device, state.computeBackend) { state.device?.let { resolver.resolve(model.bestArtifact, it, model.supportsVision, state.computeBackend.takeUnless { it == ComputeBackend.AUTO } ?: ComputeBackend.CPU) } }
                         CatalogModelCard(
                             model = model,
                             compatibility = compatibility,

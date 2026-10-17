@@ -18,7 +18,7 @@ import org.junit.Test
 
 class DeferredModelSelectionTest {
     @Test
-    fun selectionAndRecentsDoNotLoadRuntimeOrLoseHistory() = runBlocking {
+    fun selectingAndStartingNewChatDoesNotLoadRuntime() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val container = AppContainer(context)
         val store = ViewModelStore()

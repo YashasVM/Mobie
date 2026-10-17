@@ -32,7 +32,7 @@ class ChatRedesignTest {
             MobieTheme {
                 ChatScreen(state = state.value, onLoad = {
                     loads++
-                    state.value = state.value.copy(runtimeState = RuntimeState.LOADING)
+                    state.value = state.value.copy(runtimeState = RuntimeState.LOADING, error = null, loadAttempt = state.value.loadAttempt + 1)
                 }, onSend = { text, _ -> sent.add(text); true })
             }
         }
@@ -55,7 +55,7 @@ class ChatRedesignTest {
             MobieTheme {
                 CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground) {
                     ChatScreen(state = state.value, onSwitchModel = { switches++ }, onLoad = {
-                        state.value = state.value.copy(runtimeState = RuntimeState.LOADING)
+                        state.value = state.value.copy(runtimeState = RuntimeState.LOADING, error = null, loadAttempt = state.value.loadAttempt + 1)
                     }, onSend = { text, _ -> sent.add(text); true })
                 }
             }
@@ -68,6 +68,25 @@ class ChatRedesignTest {
         composeRule.onNodeWithText("Test Model").performClick()
         composeRule.runOnIdle { assertEquals(2, switches); assertEquals(emptyList<String>(), sent) }
         composeRule.onNodeWithText("Free some memory and try again.").assertIsDisplayed()
+    }
+
+    @Test
+    fun repeatedIdenticalLoadFailureLeavesDraftRetryable() {
+        val state = mutableStateOf(MobieUiState(selected = model, runtimeState = RuntimeState.ERROR, error = "Memory unavailable", loadAttempt = 1))
+        var loads = 0
+        composeRule.setContent { MobieTheme {
+            ChatScreen(state = state.value, onSend = { _, _ -> error("A failed load must not send") }, onLoad = {
+                loads++
+                state.value = state.value.copy(loadAttempt = state.value.loadAttempt + 1)
+            })
+        } }
+        composeRule.onNodeWithTag("chat_input").performTextInput("Keep trying")
+        repeat(2) {
+            composeRule.onNodeWithContentDescription("Send message").performClick()
+            composeRule.waitForIdle()
+        }
+        composeRule.runOnIdle { assertEquals(2, loads) }
+        composeRule.onNodeWithTag("chat_input").assertTextContains("Keep trying")
     }
 
     @Test

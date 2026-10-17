@@ -561,7 +561,7 @@ private fun ComputeSettingsPanel(
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(ComputeBackend.AUTO, ComputeBackend.CPU, ComputeBackend.GPU).forEach { choice ->
                         ChoiceChip(
-                            label = when (choice) { ComputeBackend.AUTO -> "Automatic"; ComputeBackend.CPU -> "CPU"; ComputeBackend.GPU -> "GPU" },
+                            label = when (choice) { ComputeBackend.AUTO -> "Automatic"; ComputeBackend.CPU -> "CPU"; ComputeBackend.GPU -> "GPU"; ComputeBackend.NPU -> "NPU" },
                             selected = backend == choice,
                             onClick = { onBackendChange(choice) },
                         )

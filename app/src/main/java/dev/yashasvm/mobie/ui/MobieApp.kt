@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -44,9 +45,11 @@ fun MobieApp(
     var page by rememberSaveable { mutableStateOf(AppPage.Chat) }
     var showModelSwitcher by rememberSaveable { mutableStateOf(false) }
     var showModelDetail by rememberSaveable { mutableStateOf(false) }
+    var detailModelId by rememberSaveable { mutableStateOf<String?>(null) }
     var warningOverride by remember { mutableStateOf(false) }
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    val screenState = rememberSaveableStateHolder()
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         viewModel.download(warningOverride)
         warningOverride = false
@@ -94,6 +97,7 @@ fun MobieApp(
                 if (page != AppPage.Chat && !showModelDetail) PageHeader(page.title) { scope.launch { drawer.open() } }
                 Box(Modifier.weight(1f)) {
                     when {
+                        showModelDetail && state.selected?.id != detailModelId -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                         showModelDetail && state.selected != null -> ModelScreen(
                             state = state,
                             onDownload = ::requestDownload,
@@ -107,8 +111,8 @@ fun MobieApp(
                             onCpuThreadsChange = viewModel::setCpuThreads,
                             onBack = { showModelDetail = false },
                         )
-                        page == AppPage.Chat -> ChatScreen(
-                            state = state,
+                        page == AppPage.Chat -> screenState.SaveableStateProvider("chat") { ChatScreen(
+                            state = if (state.chatting) state else state.copy(selected = null, messages = emptyList(), error = null),
                             onSend = { prompt, imagePath ->
                                 viewModel.sendMessage(prompt, imagePath, state.pendingAttachments).also {
                                     if (it) viewModel.clearPendingAttachments()
@@ -117,7 +121,6 @@ fun MobieApp(
                             onLoad = { viewModel.runInstalled() },
                             onStop = viewModel::stopGeneration,
                             onBack = { scope.launch { drawer.open() } },
-                            onHistory = { navigate(AppPage.Recents) },
                             onNewChat = viewModel::newChat,
                             onSamplerChange = viewModel::updateSampler,
                             onLoadAnyway = { viewModel.runInstalled(allowReclaim = true) },
@@ -125,14 +128,14 @@ fun MobieApp(
                             onAttachDocument = viewModel::attachDocument,
                             onRemoveAttachment = viewModel::removePendingAttachment,
                             onDismissAttachmentError = viewModel::dismissAttachmentError,
-                        )
-                        page == AppPage.Models -> CatalogScreen(
+                        ) }
+                        page == AppPage.Models -> screenState.SaveableStateProvider("models") { CatalogScreen(
                             state, viewModel::setQuery, viewModel::search,
-                            onSelect = { viewModel.select(it); showModelDetail = true },
+                            onSelect = { detailModelId = it.id; viewModel.select(it); showModelDetail = true },
                             onFeatured = viewModel::loadFeatured,
                             onOpenInstalled = { viewModel.startInstalledChat(it); page = AppPage.Chat },
                             onDeleteInstalled = viewModel::deleteInstalled,
-                        )
+                        ) }
                         page == AppPage.Settings -> SettingsScreen(state, darkTheme, onDarkThemeChange, viewModel::saveToken)
                         else -> RecentsScreen(state.recentChats) { viewModel.openRecent(it); page = AppPage.Chat }
                     }

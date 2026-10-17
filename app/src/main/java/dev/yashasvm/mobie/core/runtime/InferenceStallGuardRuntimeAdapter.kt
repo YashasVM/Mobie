@@ -3,7 +3,6 @@ package dev.yashasvm.mobie.core.runtime
 import dev.yashasvm.mobie.core.model.ModelFormat
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
@@ -79,7 +78,7 @@ class InferenceStallGuardRuntimeAdapter(
         }
 
         val events = Channel<InferenceEvent>(Channel.BUFFERED)
-        val producerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val producerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val producer = producerScope.launch {
             try {
                 delegate.generate(prompt, imagePath, config).collect { event ->
@@ -201,10 +200,8 @@ class InferenceStallGuardRuntimeAdapter(
 
     private suspend fun requestBoundedCall(timeoutMs: Long, block: suspend () -> Unit): Result<Unit>? {
         val completion = CompletableDeferred<Result<Unit>>()
-        val detachedScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-        // ATOMIC: a worker cancelled by the timeout before it was dispatched must still reach the
-        // native call, otherwise a requested cancel/unload would silently never happen.
-        val worker = detachedScope.launch(start = CoroutineStart.ATOMIC) {
+        val detachedScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val worker = detachedScope.launch {
             completion.complete(runCatching { block() })
         }
         return try {
