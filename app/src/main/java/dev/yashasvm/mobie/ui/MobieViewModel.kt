@@ -25,12 +25,13 @@ import dev.yashasvm.mobie.core.runtime.RuntimeModelOwnership
 import dev.yashasvm.mobie.core.runtime.SamplerSettings
 import dev.yashasvm.mobie.data.download.DownloadProgress
 import dev.yashasvm.mobie.data.download.InstalledModelEntry
-import dev.yashasvm.mobie.data.history.ChatHistorySession
+import dev.yashasvm.mobie.data.history.ChatThread
 import dev.yashasvm.mobie.data.history.HistoryMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,6 +44,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 
@@ -81,8 +83,18 @@ data class MobieUiState(
     val chatting: Boolean = false,
     val runtimeState: RuntimeState = RuntimeState.IDLE,
     val messages: List<ChatMessage> = emptyList(),
-    val history: List<ChatHistorySession> = emptyList(),
+    /** Every saved chat across all models, newest first, for the chats drawer. */
+    val chats: List<ChatThread> = emptyList(),
+    /** The open chat's id; null for a new chat that has not been saved yet. */
     val sessionId: String? = null,
+    /** Navigation stack. The chat home is always the root. */
+    val screens: List<AppScreen> = listOf(AppScreen.CHAT),
+    /** Tab the Models screen opens on. */
+    val catalogTab: CatalogTab = CatalogTab.DISCOVER,
+    /** True while the chat home is deciding which model to open or switching models. */
+    val chatPending: Boolean = false,
+    /** Set when a saved chat is open whose model is no longer installed; the chat is read-only. */
+    val readOnlyChat: ReadOnlyChat? = null,
     val stats: InferenceStats? = null,
     val telemetry: RunTelemetry = RunTelemetry(),
     val sampler: SamplerSettings = SamplerSettings(),
@@ -91,6 +103,14 @@ data class MobieUiState(
     val cpuThreads: Int? = null,
     val activeCompute: ActiveCompute? = null,
 )
+
+/** A saved chat shown without a runtime because its model is no longer on this phone. */
+data class ReadOnlyChat(val modelId: String, val modelTitle: String)
+
+val MobieUiState.screen: AppScreen get() = screens.lastOrNull() ?: AppScreen.CHAT
+
+/** Identifies a chat to come back to: a saved session, or a new unsaved chat when [sessionId] is null. */
+private data class ChatRef(val modelId: String, val sessionId: String?)
 
 class MobieViewModel(private val container: AppContainer) : ViewModel() {
     private val mutableState = MutableStateFlow(
@@ -112,6 +132,13 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     private val selectionRevision = AtomicLong(0L)
     private val runtimeOwnership = RuntimeModelOwnership()
     private val credentialAccess = Mutex()
+    private var homeJob: Job? = null
+    private var selectionJob: Job? = null
+    /** The chat the home should return to after a detour through the Models screens. */
+    private var lastChat: ChatRef? = null
+    // One writer at a time keeps history saves in the order they were made.
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val historyWrites = Dispatchers.IO.limitedParallelism(1)
 
     init {
         viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
@@ -125,14 +152,18 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                         onboardingComplete = saved.third, preferencesLoaded = true)
                 }
             }
-            if (state.value.welcomeSeen || state.value.onboardingComplete) loadFeatured()
+            if (state.value.welcomeSeen || state.value.onboardingComplete) {
+                openHome()
+                loadFeatured()
+            } else {
+                refreshInstalled()
+            }
         }
         viewModelScope.launch {
             val device = readDeviceProfile()
             mutableState.update { it.copy(device = it.device ?: device) }
         }
         container.runtimes.all().forEach { it.configureSampler(mutableState.value.sampler) }
-        refreshInstalled()
     }
 
     fun finishOnboarding(token: String?) {
@@ -143,6 +174,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                     it.copy(onboardingComplete = true, tokenConfigured = !token.isNullOrBlank(), error = null)
                 }
             }
+            openHome()
             loadFeatured()
         }
     }
@@ -153,16 +185,200 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 withContext(Dispatchers.IO) { container.tokenStore.markWelcomeSeen() }
                 mutableState.update { it.copy(welcomeSeen = true) }
             }
+            openHome()
             loadFeatured()
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Chat home and navigation
+
+    /**
+     * Opens the chat home: [preferred] when its model is still installed (or as a read-only chat
+     * when it is not), otherwise a new chat with the launch model from [chooseLaunchModel]. The
+     * runtime starts loading in the background; nothing is saved until the first message.
+     */
+    private fun openHome(preferred: ChatRef? = null) {
+        cancelPendingNavigation()
+        mutableState.update { it.copy(chatPending = true, screens = listOf(AppScreen.CHAT)) }
+        homeJob = viewModelScope.launch {
+            val (installed, chats, lastUsed) = withContext(historyWrites) {
+                Triple(
+                    container.downloads.installedModels(),
+                    container.chatHistory.allSessions(),
+                    container.chatHistory.lastModelId(),
+                )
+            }
+            mutableState.update { it.copy(installedModels = installed, chats = chats) }
+            val preferredThread = preferred?.sessionId?.let { id ->
+                chats.firstOrNull { it.modelId == preferred.modelId && it.session.id == id }
+            }
+            val preferredEntry = preferred?.let { ref -> installed.firstOrNull { it.model.id == ref.modelId } }
+            when {
+                preferredEntry != null -> openInstalledChat(preferredEntry, preferredThread)
+                preferredThread != null -> openReadOnly(preferredThread)
+                else -> {
+                    val modelId = chooseLaunchModel(installed.map { it.model.id }, lastUsed, chats.map { it.modelId })
+                    val entry = installed.firstOrNull { it.model.id == modelId }
+                    if (entry != null) {
+                        openInstalledChat(entry, thread = null)
+                    } else {
+                        beginSelection(null) { mutableState.update { it.copy(chatPending = false) } }
+                    }
+                }
+            }
+        }
+    }
+
+    /** Selects an installed model and opens [thread] (or a new chat) with it, unloading any other model first. */
+    private fun openInstalledChat(entry: InstalledModelEntry, thread: ChatThread?) {
+        mutableState.update { it.copy(chatPending = true, readOnlyChat = null) }
+        beginSelection(entry.model) {
+            openChat(entry.localPath, thread?.session?.id, thread?.session?.messages?.map(::toChatMessage))
+        }
+    }
+
+    private fun openReadOnly(thread: ChatThread) {
+        val title = shortModelName(thread.modelId, thread.session.modelTitle)
+        beginSelection(null) {
+            lastChat = ChatRef(thread.modelId, thread.session.id)
+            mutableState.update {
+                it.copy(
+                    chatPending = false,
+                    readOnlyChat = ReadOnlyChat(thread.modelId, title),
+                    messages = thread.session.messages.map(::toChatMessage),
+                    sessionId = thread.session.id,
+                    screens = listOf(AppScreen.CHAT),
+                )
+            }
+        }
+    }
+
+    /** Opens a chat from the drawer, switching models when the chat belongs to another one. */
+    fun openThread(thread: ChatThread) {
+        cancelPendingNavigation()
+        val current = state.value
+        val sameLoadedModel = current.chatting && current.readOnlyChat == null &&
+            current.selected?.id == thread.modelId && current.downloadedPath != null
+        if (sameLoadedModel) {
+            if (current.sessionId == thread.session.id) {
+                mutableState.update { it.copy(screens = listOf(AppScreen.CHAT), chatPending = false) }
+                return
+            }
+            resumeLoadedModel(thread.session.id, thread.session.messages.map(::toChatMessage))
+            return
+        }
+        val entry = current.installedModels.firstOrNull { it.model.id == thread.modelId }
+        if (entry != null) openInstalledChat(entry, thread) else openReadOnly(thread)
+    }
+
+    /** Starts a chat with an installed model, from the model switcher or the Library. */
+    fun startInstalledChat(entry: InstalledModelEntry) {
+        cancelPendingNavigation()
+        val current = state.value
+        if (current.chatting && current.readOnlyChat == null && current.selected?.id == entry.model.id) {
+            mutableState.update { it.copy(screens = listOf(AppScreen.CHAT)) }
+            newChat()
+        } else {
+            openInstalledChat(entry, thread = null)
+        }
+    }
+
+    fun openModels(tab: CatalogTab = CatalogTab.DISCOVER) {
+        cancelPendingNavigation()
+        mutableState.update { it.copy(screens = it.screens.pushScreen(AppScreen.CATALOG), catalogTab = tab, chatPending = false) }
+        if (state.value.models.isEmpty() && !state.value.loading) loadFeatured()
+        refreshInstalled()
+    }
+
+    /**
+     * Opens the model page for a chat whose model was removed. Uses a model already in the catalog
+     * when possible; otherwise searches the catalog for it and falls back to the search results.
+     */
+    fun findModel(modelId: String) {
+        cancelPendingNavigation()
+        val known = (state.value.models + state.value.recentModels).firstOrNull { it.id == modelId }
+        if (known != null) {
+            openModelPage(known)
+            return
+        }
+        mutableState.update { it.copy(screens = it.screens.pushScreen(AppScreen.CATALOG), catalogTab = CatalogTab.DISCOVER) }
+        val query = modelId.substringAfterLast('/')
+        setQuery(query)
+        loadCatalog(expectedQuery = query, then = { models ->
+            models.firstOrNull { it.id == modelId }?.let { match ->
+                if (state.value.screen == AppScreen.CATALOG) openModelPage(match)
+            }
+        }) { container.catalog.search(query) }
+    }
+
+    /** Opens a model's page from the catalog. The chat home reloads its chat when the user comes back. */
+    fun openModelPage(model: AiModel) {
+        cancelPendingNavigation()
+        mutableState.update { it.copy(screens = it.screens.pushScreen(AppScreen.MODEL), chatPending = false) }
+        select(model)
+    }
+
+    /** System or toolbar back from a secondary screen. Returns false when already at the chat home. */
+    fun back(): Boolean {
+        val current = state.value
+        if (current.screens.size <= 1) return false
+        cancelPendingNavigation()
+        val stack = current.screens.popScreen()
+        mutableState.update { it.copy(screens = stack) }
+        if (stack.last() == AppScreen.CHAT && !current.chatting && current.readOnlyChat == null) {
+            // Opening a model page released the chat's model; bring the last chat back.
+            openHome(lastChat)
+        }
+        return true
+    }
+
+    fun renameChat(thread: ChatThread, title: String) {
+        launchHistoryWrite {
+            container.chatHistory.rename(thread.modelId, thread.session.id, title)
+            val chats = container.chatHistory.allSessions()
+            mutableState.update { it.copy(chats = chats) }
+        }
+    }
+
+    fun deleteChat(thread: ChatThread) {
+        val current = state.value
+        val isOpen = current.sessionId == thread.session.id &&
+            (current.selected?.id == thread.modelId || current.readOnlyChat?.modelId == thread.modelId)
+        // Stop this stream before queueing deletion. Its cancellation must not save the chat again.
+        if (isOpen) cancelInference(saveHistory = false)
+        launchHistoryWrite {
+            container.chatHistory.delete(thread.modelId, thread.session.id)
+            val chats = container.chatHistory.allSessions()
+            mutableState.update { it.copy(chats = chats) }
+        }
+        if (isOpen) {
+            if (lastChat == ChatRef(thread.modelId, thread.session.id)) lastChat = null
+            if (current.readOnlyChat != null) openHome() else newChat()
         }
     }
 
     /** Device facts read /proc and binder, so they run on IO rather than the main thread. */
     private suspend fun readDeviceProfile(): DeviceProfile = withContext(Dispatchers.IO) { container.deviceProfile.current() }
 
+    private fun cancelPendingNavigation() {
+        homeJob?.cancel()
+        selectionJob?.cancel()
+        selectionRevision.incrementAndGet()
+    }
+
     /** Cancels generation or a load together with its telemetry sampler, so neither outlives the other. */
-    private fun cancelInference() {
+    private fun cancelInference(saveHistory: Boolean = true) {
+        val current = state.value
+        val model = current.selected
+        val sessionId = current.sessionId
+        if (saveHistory && inferenceJob?.isActive == true && model != null && sessionId != null &&
+            current.runtimeState in setOf(RuntimeState.GENERATING, RuntimeState.STOPPING)
+        ) {
+            persistHistory(model, sessionId, current.messages.finishInterruptedReply())
+        }
         inferenceJob?.cancel()
+        inferenceJob = null
         telemetryJob?.cancel()
     }
 
@@ -204,6 +420,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
 
     private fun loadCatalog(
         expectedQuery: String? = null,
+        then: ((List<AiModel>) -> Unit)? = null,
         request: suspend () -> Result<List<AiModel>>,
     ) {
         catalogJob?.cancel()
@@ -228,6 +445,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                                     .thenByDescending { it.downloads },
                             )
                         mutableState.update { it.copy(models = compatible, device = device, loading = false) }
+                        then?.invoke(compatible)
                     }
                 },
                 onFailure = { error ->
@@ -245,28 +463,28 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
      * Stops the previous model's work now, then applies the new selection once the device profile
      * is read off the main thread. A newer selection made in the meantime supersedes this one.
      */
-    private fun beginSelection(model: AiModel?, afterSelect: (suspend (Long) -> Unit)? = null) {
+    private fun beginSelection(model: AiModel?, afterSelect: (() -> Unit)? = null) {
+        selectionJob?.cancel()
         downloadObserverJob?.cancel()
         cancelInference()
         val operation = nextRuntimeOperation()
         viewModelScope.launch { unloadRuntime(operation) }
         val revision = selectionRevision.incrementAndGet()
-        viewModelScope.launch {
+        mutableState.update {
+            it.copy(selected = null, selectedArtifact = null, downloadedPath = null,
+                chatting = false, runtimeState = RuntimeState.IDLE, imageInputReady = false)
+        }
+        selectionJob = viewModelScope.launch {
             val device = readDeviceProfile()
             if (selectionRevision.get() != revision) return@launch
-            applySelection(model, device, revision)
-            if (selectionRevision.get() == revision) afterSelect?.invoke(revision)
+            applySelection(model, device)
+            afterSelect?.invoke()
         }
     }
 
-    private suspend fun applySelection(model: AiModel?, device: DeviceProfile, revision: Long) {
+    private fun applySelection(model: AiModel?, device: DeviceProfile) {
         val artifact = model?.let { artifactForDevice(it, device) }
         val presentedModel = model?.preferArtifact(artifact)
-        val sessions = presentedModel?.let { container.chatHistory.sessions(it.id) }.orEmpty()
-        val currentSessionId = presentedModel?.let { container.chatHistory.currentSessionId(it.id) }
-        val messages = presentedModel?.let { readHistory(it) }.orEmpty()
-        // The history reads suspend, so a newer selection may have started meanwhile.
-        if (selectionRevision.get() != revision) return
         mutableState.update {
             it.copy(
                 selected = presentedModel,
@@ -279,9 +497,10 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 downloadedPath = null,
                 chatting = false,
                 runtimeState = RuntimeState.IDLE,
-                messages = messages,
-                history = sessions,
-                sessionId = currentSessionId,
+                // The chat that opens next fills these in; a model page shows no conversation.
+                messages = emptyList(),
+                sessionId = null,
+                readOnlyChat = null,
                 stats = null,
                 imageInputReady = false,
                 activeCompute = null,
@@ -308,8 +527,10 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val current = state.value
         val model = current.selected ?: return
         val artifact = current.selectedArtifact ?: return
+        val revision = selectionRevision.get()
         viewModelScope.launch {
             val device = readDeviceProfile()
+            if (selectionRevision.get() != revision) return@launch
             val compatibility = container.compatibility.resolve(artifact, device, model.supportsVision, admissionBackend())
             mutableState.update { it.copy(device = device, compatibility = compatibility, error = null) }
             if (model.gated && !state.value.tokenConfigured) {
@@ -335,57 +556,76 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun runInstalled(allowReclaim: Boolean = false) {
-        val path = state.value.downloadedPath
-        if (path != null && File(path).isFile) {
-            viewModelScope.launch {
-                val current = state.value
-                val device = readDeviceProfile()
-                val compatibility = container.compatibility.resolve(current.selectedArtifact, device,
-                    current.selected?.supportsVision == true, admissionBackend())
-                mutableState.update { it.copy(device = device, compatibility = compatibility) }
-                if (compatibility.status == Compatibility.INCOMPATIBLE) {
-                    mutableState.update { it.copy(error = compatibility.reason) }
-                    return@launch
+        val current = state.value
+        val model = current.selected ?: return
+        val artifact = current.selectedArtifact ?: return
+        val path = current.downloadedPath
+        val revision = selectionRevision.get()
+        val operation = runtimeOperation.get()
+        viewModelScope.launch {
+            val exists = withContext(Dispatchers.IO) { path != null && File(path).isFile }
+            if (selectionRevision.get() != revision || !isCurrentRuntimeOperation(operation)) return@launch
+            if (!exists || path == null) {
+                mutableState.update {
+                    it.copy(downloadedPath = null, download = null,
+                        error = "The local model file is missing. Download it again.")
                 }
-                if (compatibility.memoryTier == MemoryAdmissionTier.FITS_AFTER_RECLAIM && !allowReclaim) {
-                    mutableState.update { it.copy(error = compatibility.reason) }
-                    return@launch
-                }
-                openChat(path, allowReclaim)
+                return@launch
             }
-        } else {
-            mutableState.update {
-                it.copy(
-                    downloadedPath = null,
-                    download = null,
-                    error = "The local model file is missing. Download it again.",
-                )
+            val device = readDeviceProfile()
+            if (selectionRevision.get() != revision || !isCurrentRuntimeOperation(operation)) return@launch
+            val compatibility = container.compatibility.resolve(artifact, device, model.supportsVision, admissionBackend())
+            mutableState.update { it.copy(device = device, compatibility = compatibility) }
+            if (compatibility.status == Compatibility.INCOMPATIBLE ||
+                (compatibility.memoryTier == MemoryAdmissionTier.FITS_AFTER_RECLAIM && !allowReclaim)
+            ) {
+                mutableState.update { it.copy(error = compatibility.reason) }
+                return@launch
             }
+            val resume = lastChat?.takeIf { it.modelId == model.id }?.sessionId
+            openChat(path, resume, allowReclaim = allowReclaim)
         }
     }
 
-    private suspend fun openChat(path: String, allowReclaim: Boolean = false) {
+    /**
+     * Shows the chat for the selected model and loads its runtime in the background. [sessionId]
+     * null opens a new chat that stays unsaved until its first message. [preloaded] skips the disk
+     * read when the caller already has the messages.
+     */
+    private fun openChat(
+        path: String,
+        sessionId: String?,
+        preloaded: List<ChatMessage>? = null,
+        allowReclaim: Boolean = false,
+    ) {
         val current = state.value
         val model = current.selected ?: return
         val artifact = current.selectedArtifact ?: return
         cancelInference()
         val operation = nextRuntimeOperation()
-        // LOADING is set before the history reads so the composer stays disabled while they run.
+        lastChat = ChatRef(model.id, sessionId)
         mutableState.update {
             it.copy(
                 chatting = true,
+                chatPending = false,
+                readOnlyChat = null,
+                screens = listOf(AppScreen.CHAT),
                 downloadedPath = path,
                 runtimeState = RuntimeState.LOADING,
                 activeCompute = null,
+                messages = preloaded.orEmpty(),
+                sessionId = sessionId,
+                stats = null,
                 error = null,
             )
         }
-        val history = readHistory(model)
-        val sessions = container.chatHistory.sessions(model.id)
-        val sessionId = container.chatHistory.currentSessionId(model.id)
-        if (!isCurrentRuntimeOperation(operation)) return
-        mutableState.update { it.copy(messages = history, history = sessions, sessionId = sessionId) }
         inferenceJob = viewModelScope.launch {
+            val history = preloaded ?: if (sessionId == null) emptyList() else withContext(Dispatchers.IO) {
+                container.chatHistory.session(model.id, sessionId)?.messages.orEmpty().map(::toChatMessage)
+            }
+            if (!isCurrentRuntimeOperation(operation)) return@launch
+            if (preloaded == null) mutableState.update { it.copy(messages = history) }
+            launchHistoryWrite { container.chatHistory.setLastModelId(model.id) }
             loadRuntimeConversation(model, artifact, path, history, preferReset = false,
                 operation = operation, allowReclaim = allowReclaim)
         }
@@ -415,33 +655,43 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 imagePath = it.imagePath,
             )
         }
-        val result = runtimeLifecycle.withLock {
-            if (!isCurrentRuntimeOperation(operation)) return
-            adapter.configureCompute(
-                ComputeOptions(
-                    backend = state.value.computeBackend,
-                    cpuThreads = state.value.cpuThreads,
-                    artifactIdentity = "${model.id}|${artifact.fileName}|${artifact.downloadUrl}|${artifact.sha256.orEmpty()}",
-                ),
-            )
-            if (preferReset && runtimeOwnership.owns(model.id)) {
-                val reset = adapter.resetConversation(restored)
-                if (reset.isSuccess) {
-                    reset
+        val result = try {
+            runtimeLifecycle.withLock {
+                if (!isCurrentRuntimeOperation(operation)) return
+                adapter.configureCompute(
+                    ComputeOptions(
+                        backend = state.value.computeBackend,
+                        cpuThreads = state.value.cpuThreads,
+                        artifactIdentity = "${model.id}|${artifact.fileName}|${artifact.downloadUrl}|${artifact.sha256.orEmpty()}",
+                    ),
+                )
+                if (preferReset && runtimeOwnership.owns(model.id)) {
+                    val reset = adapter.resetConversation(restored)
+                    if (reset.isSuccess) {
+                        reset
+                    } else {
+                        container.runtimes.all().forEach { it.unload() }
+                        runtimeOwnership.clear()
+                        (if (allowReclaim) adapter.loadAllowingMemoryReclaim(path, model.supportsVision, restored)
+                         else adapter.load(path, model.supportsVision, restored)).also { loaded ->
+                            if (loaded.isSuccess) runtimeOwnership.markLoaded(model.id)
+                        }
+                    }
                 } else {
+                    // A superseded selection may have skipped its queued unload. Release every
+                    // engine here before loading another model, under the same lifecycle lock.
+                    container.runtimes.all().forEach { it.unload() }
                     runtimeOwnership.clear()
                     (if (allowReclaim) adapter.loadAllowingMemoryReclaim(path, model.supportsVision, restored)
                      else adapter.load(path, model.supportsVision, restored)).also { loaded ->
                         if (loaded.isSuccess) runtimeOwnership.markLoaded(model.id)
                     }
                 }
-            } else {
-                runtimeOwnership.clear()
-                (if (allowReclaim) adapter.loadAllowingMemoryReclaim(path, model.supportsVision, restored)
-                 else adapter.load(path, model.supportsVision, restored)).also { loaded ->
-                    if (loaded.isSuccess) runtimeOwnership.markLoaded(model.id)
-                }
             }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Result.failure(error)
         }
         if (!isCurrentRuntimeOperation(operation)) return
         result.fold(
@@ -467,82 +717,89 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val current = state.value
         val model = current.selected ?: return false
         val artifact = current.selectedArtifact ?: return false
-        if (prompt.isBlank() || current.runtimeState != RuntimeState.READY) return false
+        if (prompt.isBlank() || !current.canSendToRuntime) return false
         if (imagePath != null && (!model.supportsVision || !current.imageInputReady)) return false
         val adapter = container.runtimes.adapterFor(artifact.format) ?: return false
+        cancelInference()
+        // Save the first prompt immediately so it also survives leaving during generation.
         val sessionId = current.sessionId ?: UUID.randomUUID().toString()
+        lastChat = ChatRef(model.id, sessionId)
         mutableState.update {
             it.copy(
-                runtimeState = RuntimeState.GENERATING,
                 sessionId = sessionId,
+                runtimeState = RuntimeState.GENERATING,
                 messages = it.messages + ChatMessage(true, prompt.trim(), imagePath) + ChatMessage(false, ""),
                 stats = null,
                 telemetry = RunTelemetry(),
                 error = null,
             )
         }
-        cancelInference()
+        persistHistory(model, sessionId, state.value.messages.removeBlankAssistant())
         telemetryJob = startTelemetrySampling()
         val operation = runtimeOperation.get()
         inferenceJob = viewModelScope.launch {
-            adapter.generate(prompt.trim(), imagePath, GenerationConfig(sampler = current.sampler)).collectBatchedTokens { event ->
-                if (!isCurrentRuntimeOperation(operation) ||
-                    state.value.selected?.id != model.id || state.value.sessionId != sessionId
-                ) return@collectBatchedTokens
-                when (event) {
-                    is InferenceEvent.Token -> mutableState.update { currentState ->
-                        currentState.copy(messages = currentState.messages.updateLastAssistant(event.text, event.thinking))
-                    }
-                    is InferenceEvent.Stats -> mutableState.update {
-                        it.copy(
-                            stats = event.value,
-                            telemetry = it.telemetry.copy(
-                                estimatedEnergyPerTokenMilliWh = BatteryCurrentMath.milliWhPerToken(
-                                    it.telemetry.estimatedEnergyMilliWh,
-                                    event.value.decodeTokenCount,
+            runtimeLifecycle.withLock {
+                if (!isCurrentRuntimeOperation(operation)) return@withLock
+                adapter.generate(prompt.trim(), imagePath, GenerationConfig(sampler = current.sampler)).collectBatchedTokens { event ->
+                    if (!isCurrentRuntimeOperation(operation) ||
+                        state.value.selected?.id != model.id || state.value.sessionId != sessionId
+                    ) return@collectBatchedTokens
+                    when (event) {
+                        is InferenceEvent.Token -> mutableState.update { currentState ->
+                            currentState.copy(messages = currentState.messages.updateLastAssistant(event.text, event.thinking))
+                        }
+                        is InferenceEvent.Stats -> mutableState.update {
+                            it.copy(
+                                stats = event.value,
+                                telemetry = it.telemetry.copy(
+                                    estimatedEnergyPerTokenMilliWh = BatteryCurrentMath.milliWhPerToken(
+                                        it.telemetry.estimatedEnergyMilliWh,
+                                        event.value.decodeTokenCount,
+                                    ),
                                 ),
-                            ),
-                            messages = it.messages.attachStatsToLastAssistant(event.value),
-                        )
-                    }
-                    is InferenceEvent.Progress -> mutableState.update {
-                        it.copy(telemetry = it.telemetry.copy(
-                            sdkChunks = event.sdkChunks,
-                            firstChunkMs = event.firstChunkMs,
-                            liveSdkChunksPerSecond = if (event.sdkChunks > 1 && event.elapsedMs > event.firstChunkMs) {
-                                (event.sdkChunks - 1) * 1_000.0 / (event.elapsedMs - event.firstChunkMs)
-                            } else null,
-                        ))
-                    }
-                    is InferenceEvent.Error -> {
-                        telemetryJob?.cancel()
-                        val messages = state.value.messages.finishInterruptedReply()
-                        mutableState.update {
-                            it.copy(
-                                runtimeState = if (event.requiresReload) RuntimeState.ERROR else RuntimeState.READY,
-                                // Cancellation can disable image support in the stall guard; the UI must follow it.
-                                imageInputReady = adapter.supportsImageInput,
-                                messages = messages,
-                                error = event.message,
+                                messages = it.messages.attachStatsToLastAssistant(event.value),
                             )
                         }
-                        persistHistoryAndRefresh(model.id, sessionId, messages)
-                    }
-                    InferenceEvent.Complete -> {
-                        telemetryJob?.cancel()
-                        val messages = state.value.messages.finishReply()
-                        mutableState.update {
-                            it.copy(
-                                runtimeState = RuntimeState.READY,
-                                imageInputReady = adapter.supportsImageInput,
-                                messages = messages,
-                            )
+                        is InferenceEvent.Progress -> mutableState.update {
+                            it.copy(telemetry = it.telemetry.copy(
+                                sdkChunks = event.sdkChunks,
+                                firstChunkMs = event.firstChunkMs,
+                                liveSdkChunksPerSecond = if (event.sdkChunks > 1 && event.elapsedMs > event.firstChunkMs) {
+                                    (event.sdkChunks - 1) * 1_000.0 / (event.elapsedMs - event.firstChunkMs)
+                                } else null,
+                            ))
                         }
-                        persistHistoryAndRefresh(model.id, sessionId, messages)
+                        is InferenceEvent.Error -> {
+                            telemetryJob?.cancel()
+                            val messages = state.value.messages.finishInterruptedReply()
+                            persistHistory(model, sessionId, messages)
+                            mutableState.update {
+                                it.copy(
+                                    runtimeState = if (event.requiresReload) RuntimeState.ERROR else RuntimeState.READY,
+                                    // Cancellation can disable image support in the stall guard; the UI must follow it.
+                                    imageInputReady = adapter.supportsImageInput,
+                                    messages = messages,
+                                    error = event.message,
+                                )
+                            }
+                        }
+                        InferenceEvent.Complete -> {
+                            telemetryJob?.cancel()
+                            val messages = state.value.messages.finishReply()
+                            persistHistory(model, sessionId, messages)
+                            mutableState.update {
+                                it.copy(
+                                    runtimeState = RuntimeState.READY,
+                                    imageInputReady = adapter.supportsImageInput,
+                                    messages = messages,
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
+
         return true
     }
 
@@ -550,7 +807,8 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val current = state.value
         if (current.runtimeState != RuntimeState.GENERATING) return
         val activeInference = inferenceJob
-        val modelId = current.selected?.id
+        val model = current.selected
+        val modelId = model?.id
         val sessionId = current.sessionId
         val operation = runtimeOperation.get()
         telemetryJob?.cancel()
@@ -559,19 +817,18 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             it.copy(runtimeState = RuntimeState.STOPPING, error = null)
         }
         viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
-            if (modelId != null) {
-                saveBeforeCancellation(current.messages, activeInference) { persistHistory(modelId, sessionId, it) }
+            if (model != null && sessionId != null) {
+                saveBeforeCancellation(current.messages, activeInference) { persistHistory(model, sessionId, it) }
             } else {
                 activeInference?.cancelAndJoin()
             }
             if (isCurrentRuntimeOperation(operation) && state.value.selected?.id == modelId && state.value.sessionId == sessionId &&
-                state.value.runtimeState == RuntimeState.STOPPING && modelId != null
+                state.value.runtimeState == RuntimeState.STOPPING && model != null && sessionId != null
             ) {
                 val messages = state.value.messages.finishInterruptedReply()
                 mutableState.update { it.copy(messages = messages) }
-                persistHistory(modelId, sessionId, messages)
+                persistHistory(model, sessionId, messages)
             }
-            val sessions = modelId?.let { container.chatHistory.sessions(it) }.orEmpty()
             mutableState.update { latest ->
                 if (
                     latest.runtimeState == RuntimeState.STOPPING &&
@@ -583,7 +840,6 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                         runtimeState = RuntimeState.READY,
                         imageInputReady = latest.selectedArtifact
                             ?.let { container.runtimes.adapterFor(it.format)?.supportsImageInput } == true,
-                        history = sessions,
                     )
                 } else {
                     latest
@@ -627,7 +883,29 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /**
+     * Starts a new, unsaved chat. With a model loaded the runtime conversation is reset in place;
+     * otherwise (no model, or a read-only chat) the home opens with the launch model.
+     */
     fun newChat() {
+        cancelPendingNavigation()
+        val current = state.value
+        val model = current.selected
+        val path = current.downloadedPath
+        if (!current.chatting || current.readOnlyChat != null || model == null || path == null || current.selectedArtifact == null) {
+            lastChat = null
+            openHome()
+            return
+        }
+        mutableState.update { it.copy(screens = listOf(AppScreen.CHAT)) }
+        // Already on a fresh chat: nothing to reset.
+        if (current.sessionId == null && current.messages.isEmpty() && current.runtimeState != RuntimeState.ERROR) return
+        lastChat = ChatRef(model.id, null)
+        resumeLoadedModel(sessionId = null, messages = emptyList())
+    }
+
+    /** Swaps the conversation on the loaded model, resetting the runtime instead of reloading when it can. */
+    private fun resumeLoadedModel(sessionId: String?, messages: List<ChatMessage>) {
         val current = state.value
         val model = current.selected ?: return
         val artifact = current.selectedArtifact ?: return
@@ -635,29 +913,21 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val canReuseLoadedModel = current.runtimeState == RuntimeState.READY
         cancelInference()
         val operation = nextRuntimeOperation()
-        // The id is chosen here so the state can switch synchronously; the write itself runs on IO.
-        val sessionId = UUID.randomUUID().toString()
+        lastChat = ChatRef(model.id, sessionId)
         mutableState.update {
             it.copy(
-                messages = emptyList(),
+                messages = messages,
                 sessionId = sessionId,
+                screens = listOf(AppScreen.CHAT),
+                chatPending = false,
                 runtimeState = RuntimeState.LOADING,
+                imageInputReady = false,
                 stats = null,
                 error = null,
             )
         }
         inferenceJob = viewModelScope.launch {
-            container.chatHistory.startNewSession(model.id, sessionId)
-            val sessions = container.chatHistory.sessions(model.id)
-            if (isCurrentRuntimeOperation(operation)) mutableState.update { it.copy(history = sessions) }
-            loadRuntimeConversation(model, artifact, path, emptyList(), preferReset = canReuseLoadedModel, operation = operation)
-        }
-    }
-
-    fun startInstalledChat(entry: InstalledModelEntry) {
-        beginSelection(entry.model) { revision ->
-            container.chatHistory.startNewSession(entry.model.id)
-            if (selectionRevision.get() == revision) openChat(entry.localPath)
+            loadRuntimeConversation(model, artifact, path, messages, preferReset = canReuseLoadedModel, operation = operation)
         }
     }
 
@@ -717,15 +987,6 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    fun leaveChat() {
-        cancelInference()
-        val operation = nextRuntimeOperation()
-        viewModelScope.launch { unloadRuntime(operation) }
-        mutableState.update {
-            it.copy(chatting = false, runtimeState = RuntimeState.IDLE, stats = null, error = null)
-        }
-    }
-
     private suspend fun unloadRuntime(operation: Long) {
         try {
             runtimeLifecycle.withLock {
@@ -737,39 +998,13 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             throw error
         } catch (error: Exception) {
             // The stall guard fails closed after an unload timeout, so surface the state instead of crashing.
-            mutableState.update {
-                it.copy(
-                    runtimeState = RuntimeState.ERROR,
-                    error = error.message ?: "The model could not be unloaded. Restart Mobie before loading another model.",
-                )
-            }
-        }
-    }
-
-    fun selectHistory(sessionId: String) {
-        val current = state.value
-        val model = current.selected ?: return
-        val artifact = current.selectedArtifact ?: return
-        val path = current.downloadedPath ?: return
-        val canReuseLoadedModel = current.runtimeState == RuntimeState.READY
-        cancelInference()
-        val operation = nextRuntimeOperation()
-        mutableState.update {
-            it.copy(
-                sessionId = sessionId,
-                runtimeState = RuntimeState.LOADING,
-                stats = null,
-                error = null,
-            )
-        }
-        viewModelScope.launch {
-            container.chatHistory.activate(model.id, sessionId)
-            val history = readHistory(model)
-            val sessions = container.chatHistory.sessions(model.id)
-            if (!isCurrentRuntimeOperation(operation)) return@launch
-            mutableState.update { it.copy(messages = history, history = sessions) }
-            inferenceJob = viewModelScope.launch {
-                loadRuntimeConversation(model, artifact, path, history, preferReset = canReuseLoadedModel, operation = operation)
+            if (isCurrentRuntimeOperation(operation)) {
+                mutableState.update {
+                    it.copy(
+                        runtimeState = RuntimeState.ERROR,
+                        error = error.message ?: "The model could not be unloaded. Restart Mobie before loading another model.",
+                    )
+                }
             }
         }
     }
@@ -799,6 +1034,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 } else {
                     null
                 }
+                if (state.value.selected?.id != model.id || state.value.selectedArtifact != artifact) return@collect
                 mutableState.update {
                     it.copy(
                         download = progress,
@@ -824,29 +1060,29 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     private fun artifactForDevice(model: AiModel, device: DeviceProfile): ModelArtifact? =
         container.compatibility.selectBestArtifact(model, device) ?: model.bestArtifact
 
-    private suspend fun readHistory(model: AiModel): List<ChatMessage> = container.chatHistory.read(model.id).map {
-        ChatMessage(it.fromUser, it.text, it.imagePath, it.thinking, interrupted = it.interrupted)
-    }
-
-    private suspend fun persistHistory(modelId: String, sessionId: String?, messages: List<ChatMessage>) {
-        container.chatHistory.writeSession(
-            modelId,
-            sessionId,
-            messages.map {
-                HistoryMessage(it.fromUser, it.text, it.imagePath, it.thinking, it.interrupted)
-            },
-        )
-    }
+    private fun toChatMessage(message: HistoryMessage): ChatMessage =
+        ChatMessage(message.fromUser, message.text, message.imagePath, message.thinking, interrupted = message.interrupted)
 
     /**
-     * Writes the transcript off the main thread, then refreshes the session list. Each call is launched
-     * on the main dispatcher, so the store's FIFO lock keeps writes in the order they were requested.
+     * Saves the conversation off the main thread, in order, then refreshes the chats list. The
+     * write finishes even if the screen closes mid-save so a finished reply is not lost.
      */
-    private fun persistHistoryAndRefresh(modelId: String, sessionId: String?, messages: List<ChatMessage>) {
-        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
-            persistHistory(modelId, sessionId, messages)
-            val sessions = container.chatHistory.sessions(modelId)
-            mutableState.update { if (it.selected?.id == modelId) it.copy(history = sessions) else it }
+    private fun persistHistory(model: AiModel, sessionId: String, messages: List<ChatMessage>) {
+        val snapshot = messages.map { HistoryMessage(it.fromUser, it.text, it.imagePath, it.thinking, it.interrupted) }
+        launchHistoryWrite {
+            container.chatHistory.writeSession(model.id, sessionId, snapshot, model.title)
+            val chats = container.chatHistory.allSessions()
+            mutableState.update { it.copy(chats = chats) }
+        }
+    }
+
+    private fun launchHistoryWrite(write: suspend () -> Unit) {
+        viewModelScope.launch(historyWrites + NonCancellable) {
+            try {
+                write()
+            } catch (_: IOException) {
+                mutableState.update { it.copy(error = "Couldn't save chat history. Free some storage and try again.") }
+            }
         }
     }
 
@@ -924,7 +1160,7 @@ internal fun List<ChatMessage>.finishInterruptedReply(): List<ChatMessage> =
 internal suspend fun saveBeforeCancellation(
     messages: List<ChatMessage>,
     inference: Job?,
-    persist: suspend (List<ChatMessage>) -> Unit,
+    persist: (List<ChatMessage>) -> Unit,
 ) {
     persist(messages.finishInterruptedReply())
     inference?.cancelAndJoin()
