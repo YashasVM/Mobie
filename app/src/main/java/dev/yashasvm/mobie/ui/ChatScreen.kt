@@ -248,8 +248,8 @@ internal fun ChatScreen(
     }
     // Capability can be lost mid-draft (reload, or stop after uncertain cancellation). Drop the photo
     // here so submit never sends a stale attachment that the ViewModel would reject.
-    LaunchedEffect(imageAllowed) {
-        if (shouldDropPendingImage(imagePath, imageAllowed)) {
+    LaunchedEffect(imageAllowed, state.runtimeState) {
+        if (state.runtimeState != RuntimeState.LOADING && shouldDropPendingImage(imagePath, imageAllowed)) {
             imagePath?.let { deleteImageFile(it) }
             imagePath = null
             imageError = PHOTO_REMOVED_MESSAGE
@@ -581,7 +581,8 @@ private fun RunDetails(
             Modifier
                 .fillMaxWidth()
                 .heightIn(min = 44.dp)
-                .clickable(role = Role.Button) { expanded = !expanded }
+                .clickable(role = Role.Button, onClickLabel = if (expanded) "Hide run details" else "Show run details") { expanded = !expanded }
+                .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" }
                 .padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,

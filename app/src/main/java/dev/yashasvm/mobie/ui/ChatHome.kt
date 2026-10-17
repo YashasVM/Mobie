@@ -46,13 +46,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -236,7 +237,8 @@ private fun ChatsDrawer(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp)
-                .testTag("chat_search"),
+                .testTag("chat_search")
+                .semantics { contentDescription = "Search chats" },
             placeholder = { Text("Search chats") },
             leadingIcon = { LucideIcon(LucideR.drawable.lucide_ic_search, null, Modifier.size(18.dp)) },
             trailingIcon = if (query.isNotEmpty()) {

@@ -26,6 +26,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -82,23 +83,7 @@ fun MobieApp(
     // back is left to the system so it exits the app (the drawer handles its own back first).
     BackHandler(enabled = state.screen != AppScreen.CHAT) { viewModel.back() }
     AppBackdrop(Modifier.fillMaxSize()) {
-        AnimatedContent(
-            targetState = state.screen,
-            transitionSpec = {
-                // Shared-axis motion kept short and flat: deeper screens (chat → models → model)
-                // slide in from the right, going back reverses it.
-                val forward = targetState.ordinal > initialState.ordinal
-                val direction = if (forward) 1 else -1
-                (
-                    slideInHorizontally(tween(MotionShort, easing = EmphasizedEase)) { it / 10 * direction } +
-                        fadeIn(tween(MotionShort, easing = LinearEasing))
-                    ) togetherWith (
-                    slideOutHorizontally(tween(MotionShort, easing = EmphasizedEase)) { -it / 14 * direction } +
-                        fadeOut(tween(MotionShort / 2, easing = LinearEasing))
-                    )
-            },
-            label = "screen",
-        ) { screen ->
+        AppScreenHost(state.screen) { screen ->
             when (screen) {
                 AppScreen.CHAT -> ChatHome(
                     state = state,
@@ -163,4 +148,28 @@ private fun AppBackdrop(modifier: Modifier = Modifier, content: @Composable () -
             content()
         }
     }
+}
+
+@Composable
+internal fun AppScreenHost(screen: AppScreen, content: @Composable (AppScreen) -> Unit) {
+    val savedScreens = rememberSaveableStateHolder()
+    AnimatedContent(
+            targetState = screen,
+            transitionSpec = {
+                // Shared-axis motion kept short and flat: deeper screens (chat → models → model)
+                // slide in from the right, going back reverses it.
+                val forward = targetState.ordinal > initialState.ordinal
+                val direction = if (forward) 1 else -1
+                (
+                    slideInHorizontally(tween(MotionShort, easing = EmphasizedEase)) { it / 10 * direction } +
+                        fadeIn(tween(MotionShort, easing = LinearEasing))
+                    ) togetherWith (
+                    slideOutHorizontally(tween(MotionShort, easing = EmphasizedEase)) { -it / 14 * direction } +
+                        fadeOut(tween(MotionShort / 2, easing = LinearEasing))
+                    )
+            },
+            label = "screen",
+        ) { screen ->
+            savedScreens.SaveableStateProvider(screen) { content(screen) }
+        }
 }
