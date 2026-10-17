@@ -86,8 +86,7 @@ class ChatHistoryStore(context: Context) {
     fun startNewSession(modelId: String): String {
         val id = UUID.randomUUID().toString()
         val sessions = (listOf(ChatHistorySession(id, "New local chat", System.currentTimeMillis())) +
-            sessions(modelId).filter { it.messages.isNotEmpty() })
-            .take(MAX_SESSIONS)
+            sessions(modelId).filter { it.messages.isNotEmpty() }.take(MAX_SESSIONS))
         sessionsCache[modelId] = sessions
         preferences.edit()
             .putString(sessionsKey(modelId), json.encodeToString(sessions))
