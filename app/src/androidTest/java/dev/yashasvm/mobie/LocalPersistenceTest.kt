@@ -141,6 +141,114 @@ class LocalPersistenceTest {
     }
 
     @Test
+    fun allSessionsListsChatsAcrossModelsNewestFirstAndSkipsEmptyOnes() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val first = "test/all-sessions-a"
+        val second = "test/all-sessions-b"
+        val store = ChatHistoryStore(context)
+        listOf(first, second).forEach(store::clear)
+        try {
+            val older = store.writeSession(first, null, listOf(HistoryMessage(true, "Older chat")), modelTitle = "Model A")
+            Thread.sleep(5)
+            val newer = store.writeSession(second, null, listOf(HistoryMessage(true, "Newer chat")), modelTitle = "Model B")
+            // A new chat stays unsaved until it has a message.
+            store.writeSession(first, null, emptyList())
+
+            val threads = ChatHistoryStore(context).allSessions().filter { it.modelId in setOf(first, second) }
+            assertEquals(listOf(newer, older), threads.map { it.session.id })
+            assertEquals(listOf(second, first), threads.map { it.modelId })
+            assertEquals("Model B", threads.first().session.modelTitle)
+            assertEquals(1, store.sessions(first).size)
+        } finally {
+            listOf(first, second).forEach(store::clear)
+        }
+    }
+
+    @Test
+    fun renamedChatKeepsItsTitleAfterNewMessages() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val modelId = "test/rename-chat"
+        val store = ChatHistoryStore(context)
+        store.clear(modelId)
+        try {
+            val id = store.writeSession(modelId, null, listOf(HistoryMessage(true, "Original prompt")))
+            assertEquals("Original prompt", store.session(modelId, id)?.title)
+            assertTrue(store.rename(modelId, id, "  Trip ideas \n"))
+            assertFalse(store.rename(modelId, id, "   "))
+            store.writeSession(modelId, id, listOf(HistoryMessage(true, "Original prompt"), HistoryMessage(false, "Answer")))
+
+            val restored = ChatHistoryStore(context).session(modelId, id)
+            assertEquals("Trip ideas", restored?.title)
+            assertEquals(2, restored?.messages?.size)
+        } finally {
+            store.clear(modelId)
+        }
+    }
+
+    @Test
+    fun deletingChatsRemovesThemAndTheirActivePointer() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val modelId = "test/delete-chat"
+        val store = ChatHistoryStore(context)
+        store.clear(modelId)
+        try {
+            val kept = store.writeSession(modelId, null, listOf(HistoryMessage(true, "Keep me")))
+            val removed = store.writeSession(modelId, null, listOf(HistoryMessage(true, "Delete me")))
+            assertEquals(removed, store.currentSessionId(modelId))
+
+            assertTrue(store.delete(modelId, removed))
+            assertFalse(store.delete(modelId, removed))
+            val restored = ChatHistoryStore(context)
+            assertEquals(listOf(kept), restored.sessions(modelId).map { it.id })
+            assertEquals(kept, restored.currentSessionId(modelId))
+            assertEquals(null, context.getSharedPreferences("chat_history", Context.MODE_PRIVATE).getString("current:$modelId", null))
+        } finally {
+            store.clear(modelId)
+        }
+    }
+
+    @Test
+    fun legacyChatIsListedAndCanBeDeleted() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val modelId = "test/legacy-delete"
+        val store = ChatHistoryStore(context)
+        store.clear(modelId)
+        context.getSharedPreferences("chat_history", Context.MODE_PRIVATE)
+            .edit()
+            .putString(modelId, """[{"fromUser":true,"text":"Earlier question"}]""")
+            .commit()
+        try {
+            val restored = ChatHistoryStore(context)
+            val legacy = restored.allSessions().single { it.modelId == modelId }
+            assertEquals(ChatHistoryStore.LEGACY_SESSION_ID, legacy.session.id)
+
+            assertTrue(restored.delete(modelId, legacy.session.id))
+            val recreated = ChatHistoryStore(context)
+            assertTrue(recreated.allSessions().none { it.modelId == modelId })
+            assertTrue(recreated.sessions(modelId).isEmpty())
+        } finally {
+            store.clear(modelId)
+        }
+    }
+
+    @Test
+    fun lastUsedModelSurvivesStoreRecreation() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val store = ChatHistoryStore(context)
+        val previous = store.lastModelId()
+        try {
+            store.setLastModelId("test/last-used")
+            assertEquals("test/last-used", ChatHistoryStore(context).lastModelId())
+            // The pointer is not a chat, so it never shows up as one.
+            assertTrue(ChatHistoryStore(context).allSessions().none { it.modelId == "test/last-used" })
+        } finally {
+            val preferences = context.getSharedPreferences("chat_history", Context.MODE_PRIVATE).edit()
+            if (previous == null) preferences.remove("meta:last_model") else preferences.putString("meta:last_model", previous)
+            preferences.commit()
+        }
+    }
+
+    @Test
     fun installedModelPreservesSourceArtifactIdentity() = kotlinx.coroutines.runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val modelId = "test/artifact-identity"
