@@ -1,5 +1,14 @@
 package dev.yashasvm.mobie.ui
 
+import android.net.Uri
+import dev.yashasvm.mobie.core.attachment.AttachmentPolicy
+import dev.yashasvm.mobie.core.attachment.AttachmentRejection
+import dev.yashasvm.mobie.core.attachment.AttachmentResult
+import dev.yashasvm.mobie.core.attachment.DocumentAttachment
+import dev.yashasvm.mobie.core.attachment.DocumentPromptAssembler
+import dev.yashasvm.mobie.core.runtime.utf8ByteCount
+import dev.yashasvm.mobie.data.history.toDocument
+import dev.yashasvm.mobie.data.history.toHistory
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -59,6 +68,7 @@ data class ChatMessage(
     val interrupted: Boolean = false,
     /** Measured performance for this assistant reply; null until the runtime reports it. */
     val stats: InferenceStats? = null,
+    val attachments: List<DocumentAttachment> = emptyList(),
 )
 
 data class MobieUiState(
@@ -102,6 +112,8 @@ data class MobieUiState(
     val computeBackend: ComputeBackend = ComputeBackend.AUTO,
     val cpuThreads: Int? = null,
     val activeCompute: ActiveCompute? = null,
+    val pendingAttachments: List<DocumentAttachment> = emptyList(),
+    val attachmentError: String? = null,
 )
 
 /** A saved chat shown without a runtime because its model is no longer on this phone. */
@@ -117,9 +129,6 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         MobieUiState(
             // Device facts are read off the main thread in init; the UI already tolerates a null device.
             device = null,
-            sampler = container.samplerSettings.read(),
-            computeBackend = container.computeSettings.selectedBackend(),
-            cpuThreads = container.computeSettings.selectedCpuThreads(),
         ),
     )
     val state: StateFlow<MobieUiState> = mutableState.asStateFlow()
@@ -132,6 +141,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     private val selectionRevision = AtomicLong(0L)
     private val runtimeOwnership = RuntimeModelOwnership()
     private val credentialAccess = Mutex()
+    private val attachmentRevision = AtomicLong(0L)
     private var homeJob: Job? = null
     private var selectionJob: Job? = null
     /** The chat the home should return to after a detour through the Models screens. */
@@ -145,13 +155,19 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             credentialAccess.withLock {
                 val saved = withContext(Dispatchers.IO) {
                     val store = container.tokenStore
-                    Triple(store.read() != null, store.hasSeenWelcome(), store.hasCompletedOnboarding())
+                    StartupConfiguration(
+                        store.read() != null, store.hasSeenWelcome(), store.hasCompletedOnboarding(),
+                        container.samplerSettings.read(), container.computeSettings.selectedBackend(),
+                        container.computeSettings.selectedCpuThreads(),
+                    )
                 }
                 mutableState.update {
-                    it.copy(tokenConfigured = saved.first, welcomeSeen = saved.second,
-                        onboardingComplete = saved.third, preferencesLoaded = true)
+                    it.copy(tokenConfigured = saved.tokenConfigured, welcomeSeen = saved.welcomeSeen,
+                        onboardingComplete = saved.onboardingComplete, sampler = saved.sampler,
+                        computeBackend = saved.backend, cpuThreads = saved.cpuThreads, preferencesLoaded = true)
                 }
             }
+            container.runtimes.all().forEach { it.configureSampler(state.value.sampler) }
             if (state.value.welcomeSeen || state.value.onboardingComplete) {
                 openHome()
                 loadFeatured()
@@ -163,8 +179,16 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             val device = readDeviceProfile()
             mutableState.update { it.copy(device = it.device ?: device) }
         }
-        container.runtimes.all().forEach { it.configureSampler(mutableState.value.sampler) }
     }
+
+    private data class StartupConfiguration(
+        val tokenConfigured: Boolean,
+        val welcomeSeen: Boolean,
+        val onboardingComplete: Boolean,
+        val sampler: SamplerSettings,
+        val backend: ComputeBackend,
+        val cpuThreads: Int?,
+    )
 
     fun finishOnboarding(token: String?) {
         viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
@@ -497,6 +521,8 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 downloadedPath = null,
                 chatting = false,
                 runtimeState = RuntimeState.IDLE,
+                pendingAttachments = emptyList(),
+                attachmentError = null,
                 // The chat that opens next fills these in; a model page shows no conversation.
                 messages = emptyList(),
                 sessionId = null,
@@ -650,7 +676,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val restored = history.map {
             RuntimeMessage(
                 fromUser = it.fromUser,
-                text = it.text,
+                text = if (it.fromUser) DocumentPromptAssembler.assemble(it.text, it.attachments) else it.text,
                 interrupted = it.interrupted,
                 imagePath = it.imagePath,
             )
@@ -712,13 +738,76 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         )
     }
 
+    /**
+     * Chooses a local document for the next message. Failures are reported in [MobieUiState.attachmentError].
+     * The file is read off the main thread and bounded by the selected model's context window.
+     */
+    fun attachDocument(uri: Uri) {
+        val current = state.value
+        val model = current.selected
+        val artifact = current.selectedArtifact
+        if (model == null || artifact == null) {
+            mutableState.update { it.copy(attachmentError = "Choose a model before attaching a file.") }
+            return
+        }
+        val sessionId = current.sessionId
+        val readRevision = attachmentRevision.get()
+        val revision = selectionRevision.get()
+        val budget = attachmentBudgetBytes(model, artifact, current.compatibility)
+        val remaining = budget - AttachmentPolicy.totalTextBytes(current.pendingAttachments)
+        viewModelScope.launch {
+            if (remaining < AttachmentPolicy.MIN_TEXT_BUDGET_BYTES) {
+                mutableState.update { it.copy(attachmentError = AttachmentRejection.NoContextRoom.message) }
+                return@launch
+            }
+            when (val result = container.attachments.read(uri, remaining)) {
+                is AttachmentResult.Rejected -> mutableState.update {
+                    if (selectionRevision.get() == revision && attachmentRevision.get() == readRevision && it.sessionId == sessionId) it.copy(attachmentError = result.reason.message) else it
+                }
+                is AttachmentResult.Accepted -> mutableState.update { latest ->
+                    val stillSameModel = latest.selected?.id == model.id && latest.sessionId == sessionId && selectionRevision.get() == revision && attachmentRevision.get() == readRevision
+                    val room = budget - AttachmentPolicy.totalTextBytes(latest.pendingAttachments)
+                    when {
+                        !stillSameModel -> latest
+                        result.attachment.text.utf8ByteCount() > room -> latest.copy(
+                            attachmentError = AttachmentRejection.NoContextRoom.message,
+                        )
+                        else -> latest.copy(
+                            pendingAttachments = latest.pendingAttachments + result.attachment,
+                            attachmentError = null,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun removePendingAttachment(index: Int) {
+        mutableState.update { current ->
+            if (index !in current.pendingAttachments.indices) current
+            else current.copy(pendingAttachments = current.pendingAttachments.filterIndexed { i, _ -> i != index })
+        }
+    }
+
+    /** Call after the UI has passed the pending files to [sendMessage], or when the user discards them. */
+    fun clearPendingAttachments() {
+        attachmentRevision.incrementAndGet()
+        mutableState.update { it.copy(pendingAttachments = emptyList(), attachmentError = null) }
+    }
+
+    fun dismissAttachmentError() {
+        mutableState.update { it.copy(attachmentError = null) }
+    }
+
     /** Returns false when the prompt was rejected, so the composer keeps the user's draft. */
-    fun sendMessage(prompt: String, imagePath: String? = null): Boolean {
+    fun sendMessage(prompt: String, imagePath: String? = null, attachments: List<DocumentAttachment> = emptyList()): Boolean {
         val current = state.value
         val model = current.selected ?: return false
         val artifact = current.selectedArtifact ?: return false
-        if (prompt.isBlank() || !current.canSendToRuntime) return false
+        if ((prompt.isBlank() && attachments.isEmpty()) || !current.canSendToRuntime) return false
         if (imagePath != null && (!model.supportsVision || !current.imageInputReady)) return false
+        if (AttachmentPolicy.totalTextBytes(attachments) > attachmentBudgetBytes(model, artifact, current.compatibility)) return false
+        val generationPrompt = DocumentPromptAssembler.assemble(prompt.trim(), attachments)
         val adapter = container.runtimes.adapterFor(artifact.format) ?: return false
         cancelInference()
         // Save the first prompt immediately so it also survives leaving during generation.
@@ -728,7 +817,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             it.copy(
                 sessionId = sessionId,
                 runtimeState = RuntimeState.GENERATING,
-                messages = it.messages + ChatMessage(true, prompt.trim(), imagePath) + ChatMessage(false, ""),
+                messages = it.messages + ChatMessage(true, prompt.trim(), imagePath, attachments = attachments) + ChatMessage(false, ""),
                 stats = null,
                 telemetry = RunTelemetry(),
                 error = null,
@@ -740,7 +829,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         inferenceJob = viewModelScope.launch {
             runtimeLifecycle.withLock {
                 if (!isCurrentRuntimeOperation(operation)) return@withLock
-                adapter.generate(prompt.trim(), imagePath, GenerationConfig(sampler = current.sampler)).collectBatchedTokens { event ->
+                adapter.generate(generationPrompt, imagePath, GenerationConfig(sampler = current.sampler)).collectBatchedTokens { event ->
                     if (!isCurrentRuntimeOperation(operation) ||
                         state.value.selected?.id != model.id || state.value.sessionId != sessionId
                     ) return@collectBatchedTokens
@@ -906,6 +995,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
 
     /** Swaps the conversation on the loaded model, resetting the runtime instead of reloading when it can. */
     private fun resumeLoadedModel(sessionId: String?, messages: List<ChatMessage>) {
+        clearPendingAttachments()
         val current = state.value
         val model = current.selected ?: return
         val artifact = current.selectedArtifact ?: return
@@ -1061,14 +1151,14 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         container.compatibility.selectBestArtifact(model, device) ?: model.bestArtifact
 
     private fun toChatMessage(message: HistoryMessage): ChatMessage =
-        ChatMessage(message.fromUser, message.text, message.imagePath, message.thinking, interrupted = message.interrupted)
+        ChatMessage(message.fromUser, message.text, message.imagePath, message.thinking, interrupted = message.interrupted, attachments = message.attachments.map { it.toDocument() })
 
     /**
      * Saves the conversation off the main thread, in order, then refreshes the chats list. The
      * write finishes even if the screen closes mid-save so a finished reply is not lost.
      */
     private fun persistHistory(model: AiModel, sessionId: String, messages: List<ChatMessage>) {
-        val snapshot = messages.map { HistoryMessage(it.fromUser, it.text, it.imagePath, it.thinking, it.interrupted) }
+        val snapshot = messages.map { HistoryMessage(it.fromUser, it.text, it.imagePath, it.thinking, it.interrupted, attachments = it.attachments.map { attachment -> attachment.toHistory() }) }
         launchHistoryWrite {
             container.chatHistory.writeSession(model.id, sessionId, snapshot, model.title)
             val chats = container.chatHistory.allSessions()
@@ -1084,6 +1174,14 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 mutableState.update { it.copy(error = "Couldn't save chat history. Free some storage and try again.") }
             }
         }
+    }
+
+    /** Text budget for files in one message, from the model's effective context window. */
+    private fun attachmentBudgetBytes(model: AiModel, artifact: ModelArtifact, compatibility: CompatibilityResult?): Int {
+        val contextWindow = compatibility?.contextWindowTokens?.takeIf { it > 0 }
+            ?: artifact.contextWindowTokens?.takeIf { it > 0 }
+            ?: 4_096
+        return AttachmentPolicy.textBudgetBytes(contextWindow, hasImage = model.supportsVision)
     }
 
     private fun nextRuntimeOperation(): Long = runtimeOperation.incrementAndGet()

@@ -50,6 +50,7 @@ class ChatHomeScreenTest {
     private var gotModel: String? = null
     private var newChats = 0
     private var reclaimRetries = 0
+    private var removedAttachment: Int? = null
 
     @Test
     fun newChatShowsGreetingWhileModelLoads() {
@@ -184,6 +185,18 @@ class ChatHomeScreenTest {
         composeRule.runOnIdle { assertEquals(1, reclaimRetries) }
     }
 
+    @Test
+    fun chatHomeWiresFileRemovalAndTextDocumentMenu() {
+        val file = dev.yashasvm.mobie.core.attachment.DocumentAttachment("notes.md", "text/markdown", 20, "Local notes", truncated = false)
+        setHome(loadedState().copy(pendingAttachments = listOf(file)))
+        composeRule.onNodeWithText("notes.md").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Remove notes.md").performClick()
+        composeRule.runOnIdle { assertEquals(0, removedAttachment) }
+        composeRule.onNodeWithContentDescription("Add to message").performClick()
+        composeRule.onNodeWithText("File", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Photo").assertDoesNotExist()
+    }
+
     private fun setHome(state: MobieUiState) = setHome { state }
 
     private fun setHome(state: () -> MobieUiState) {
@@ -202,6 +215,7 @@ class ChatHomeScreenTest {
                         onOpenModels = { openedModels = it },
                         onGetModel = { gotModel = it },
                         onLoadAnyway = { reclaimRetries++ },
+                        onRemoveAttachment = { removedAttachment = it },
                     )
                 }
             }

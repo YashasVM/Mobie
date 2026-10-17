@@ -32,6 +32,7 @@ class AppContainer(context: Context) {
     val catalog by lazy { HuggingFaceCatalogRepository(http, tokenStore) }
     val conversion by lazy { ConversionRepository(http) }
     val downloads by lazy { ModelDownloadManager(appContext) }
+    val attachments by lazy { dev.yashasvm.mobie.data.attachment.AttachmentReader(appContext) }
     val chatHistory by lazy { ChatHistoryStore(appContext) }
     val samplerSettings by lazy { SamplerSettingsStore(appContext) }
     val deviceProfile by lazy { DeviceProfileProvider(appContext) }

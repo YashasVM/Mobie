@@ -83,6 +83,9 @@ internal fun ChatHome(
     onGetModel: (String) -> Unit,
     onSamplerChange: (SamplerSettings) -> String? = { null },
     onLoadAnyway: () -> Unit = {},
+    onAttachDocument: (android.net.Uri) -> Unit = {},
+    onRemoveAttachment: (Int) -> Unit = {},
+    onDismissAttachmentError: () -> Unit = {},
 ) {
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -127,6 +130,9 @@ internal fun ChatHome(
                     state = state,
                     onSend = onSend,
                     onStop = onStop,
+                    onAttachDocument = onAttachDocument,
+                    onRemoveAttachment = onRemoveAttachment,
+                    onDismissAttachmentError = onDismissAttachmentError,
                     onOpenDrawer = openDrawer,
                     onOpenModelPicker = { showPicker = true },
                     onNewChat = onNewChat,
