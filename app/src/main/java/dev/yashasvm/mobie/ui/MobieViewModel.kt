@@ -341,11 +341,12 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun runInstalled(allowReclaim: Boolean = false) {
-        mutableState.update { it.copy(loadAttempt = it.loadAttempt + 1) }
+        mutableState.update {
+            it.copy(loadAttempt = it.loadAttempt + 1, chatting = it.selected != null, runtimeState = RuntimeState.LOADING, error = null)
+        }
         val revision = selectionRevision.get()
         val path = state.value.downloadedPath
         if (path != null && File(path).isFile) {
-            mutableState.update { it.copy(chatting = true, runtimeState = RuntimeState.LOADING, error = null) }
             viewModelScope.launch {
                 val current = state.value
                 val device = readDeviceProfile()
