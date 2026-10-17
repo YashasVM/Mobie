@@ -114,7 +114,7 @@ private const val STAGGER_LIMIT = 8
 private val GroupGap = 18.dp
 
 /**
- * Home of the app: Discover (catalog sized against this phone), Installed (local library), and
+ * Secondary Models screen: Discover (catalog sized against this phone), Installed (local library), and
  * Settings. All compatibility shown here comes from [CompatibilityResolver]; the screen never
  * parses catalog responses or touches a runtime.
  */
@@ -131,8 +131,15 @@ internal fun CatalogScreen(
     darkTheme: Boolean = true,
     onDarkThemeChange: (Boolean) -> Unit = {},
     onSaveToken: (String) -> Unit = {},
+    initialTab: CatalogTab = CatalogTab.DISCOVER,
+    onBack: (() -> Unit)? = null,
 ) {
-    var selectedTab by rememberSaveable { mutableIntStateOf(TAB_DISCOVER) }
+    val startTab = when (initialTab) {
+        CatalogTab.DISCOVER -> TAB_DISCOVER
+        CatalogTab.LIBRARY -> TAB_INSTALLED
+        CatalogTab.SETTINGS -> TAB_SETTINGS
+    }
+    var selectedTab by rememberSaveable { mutableIntStateOf(startTab) }
     var pendingDelete by remember { mutableStateOf<InstalledModelEntry?>(null) }
     val resolver = remember { CompatibilityResolver() }
     // One tracker per list, hoisted above the tab switcher so revisiting a tab doesn't replay entrances.
@@ -140,7 +147,8 @@ internal fun CatalogScreen(
     val installedEntrance = rememberEntranceTracker()
     val settingsEntrance = rememberEntranceTracker()
 
-    BackHandler(enabled = selectedTab != TAB_DISCOVER) { selectedTab = TAB_DISCOVER }
+    // Back first returns to the tab this screen opened on, then leaves to the chat home.
+    BackHandler(enabled = selectedTab != startTab) { selectedTab = startTab }
 
     // One list state per tab so each keeps its scroll position and the top bar knows when content sits under it.
     val listStates = List(TAB_COUNT) { rememberLazyListState() }
@@ -156,6 +164,7 @@ internal fun CatalogScreen(
             title = TabTitles[selectedTab],
             scrolled = scrolled,
             trailing = if (selectedTab == TAB_DISCOVER) chipName(state.device) ?: deviceName(state.device) else null,
+            onBack = onBack,
         )
         AnimatedContent(
             targetState = selectedTab,
@@ -923,7 +932,7 @@ private val TabTitles = listOf("Discover", "Library", "Settings")
  * A hairline fades in once content scrolls beneath it, the way native top bars lift on scroll.
  */
 @Composable
-private fun HomeTopBar(title: String, scrolled: Boolean, trailing: String? = null) {
+private fun HomeTopBar(title: String, scrolled: Boolean, trailing: String? = null, onBack: (() -> Unit)? = null) {
     val rule by animateColorAsState(
         if (scrolled) MaterialTheme.colorScheme.outline.copy(alpha = .5f) else Color.Transparent,
         tween(MotionShort),
@@ -931,11 +940,17 @@ private fun HomeTopBar(title: String, scrolled: Boolean, trailing: String? = nul
     )
     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).statusBarsPadding()) {
         Row(
-            Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 16.dp),
+            Modifier.fillMaxWidth().height(56.dp).padding(start = if (onBack != null) 4.dp else 16.dp, end = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("$", style = Mobie.numeric.large, color = MaterialTheme.colorScheme.primary)
+            if (onBack != null) {
+                IconButton(onClick = onBack, modifier = Modifier.testTag("catalog_back")) {
+                    LucideIcon(LucideR.drawable.lucide_ic_arrow_left, "Back to chat", Modifier.size(22.dp))
+                }
+            } else {
+                Text("$", style = Mobie.numeric.large, color = MaterialTheme.colorScheme.primary)
+            }
             Text(
                 title,
                 style = MaterialTheme.typography.titleLarge,
