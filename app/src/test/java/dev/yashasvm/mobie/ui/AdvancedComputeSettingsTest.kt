@@ -165,4 +165,34 @@ class AdvancedComputeSettingsTest {
         assertNull(refused.activeCompute)
         assertEquals("Close other apps to free about 1.2 GB before loading.", refused.error)
     }
+
+    @Test fun `a refused new conversation with changed settings never enables the old engine`() {
+        val pending = MobieUiState(
+            chatting = true, runtimeState = RuntimeState.LOADING, sessionId = "new-chat",
+            messages = emptyList(), imageInputReady = true,
+            computeOptions = ComputeOptions(ComputeBackend.GPU),
+            appliedComputeOptions = ComputeOptions(ComputeBackend.CPU), appliedSampler = SamplerSettings(),
+        )
+        val failed = pending.afterFailedLoad(ActiveCompute(ComputeBackend.CPU, 4), false, "Not enough memory")
+        assertEquals(RuntimeState.ERROR, failed.runtimeState)
+        assertNull(failed.activeCompute)
+        assertFalse(failed.imageInputReady)
+        assertNull(failed.appliedComputeOptions)
+        assertNull(failed.appliedSampler)
+        assertEquals("new-chat", failed.sessionId)
+        assertEquals(emptyList<ChatMessage>(), failed.messages)
+        assertEquals("Not enough memory", failed.error)
+    }
+
+    @Test fun `only an explicit settings reload can preserve an existing engine after failure`() {
+        val engine = ActiveCompute(ComputeBackend.CPU, 4)
+        val pending = MobieUiState(runtimeState = RuntimeState.LOADING,
+            messages = listOf(ChatMessage(true, "Existing conversation")))
+        val kept = pending.afterFailedLoad(engine, true, "GPU unavailable")
+        assertEquals(RuntimeState.READY, kept.runtimeState)
+        assertEquals(engine, kept.activeCompute)
+        assertEquals(listOf(ChatMessage(true, "Existing conversation")), kept.messages)
+        assertEquals("Kept running on CPU. GPU unavailable", kept.error)
+        assertEquals(RuntimeState.ERROR, pending.afterFailedLoad(null, true, "Load failed").runtimeState)
+    }
 }

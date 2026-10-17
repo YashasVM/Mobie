@@ -6,15 +6,12 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
-import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.platform.app.InstrumentationRegistry
@@ -124,7 +121,7 @@ class ChatComputeSettingsTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val file = File(checkNotNull(context.getExternalFilesDir(null)), name)
         file.outputStream().use { output ->
-            assertTrue(composeRule.onRoot().captureToImage().asAndroidBitmap()
+            assertTrue(checkNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot())
                 .compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output))
         }
     }

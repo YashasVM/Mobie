@@ -19,6 +19,8 @@ import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
 import dev.yashasvm.mobie.core.model.ModelType
+import dev.yashasvm.mobie.core.runtime.ActiveCompute
+import dev.yashasvm.mobie.core.runtime.ComputeBackend
 import dev.yashasvm.mobie.data.download.InstalledModelEntry
 import dev.yashasvm.mobie.data.download.DownloadProgress
 import dev.yashasvm.mobie.ui.theme.MobieTheme
@@ -150,6 +152,33 @@ class ModelScreensTest {
         composeRule.onNodeWithTag("chat_input").performTextInput("Hello locally")
         composeRule.onNodeWithContentDescription("Send message").performClick()
         composeRule.runOnIdle { assertTrue(sent == "Hello locally") }
+    }
+
+    @Test
+    fun terminalChatKeepsConversationVisibleAndOpensRunSettings() {
+        var settingsOpened = false
+        composeRule.setContent {
+            ScreenTheme {
+                ChatScreen(
+                    state = MobieUiState(
+                        selected = testModel(),
+                        runtimeState = RuntimeState.READY,
+                        activeCompute = ActiveCompute(backend = ComputeBackend.GPU),
+                        messages = listOf(
+                            ChatMessage(fromUser = true, text = "Where do my messages go?"),
+                            ChatMessage(fromUser = false, text = "This is a UI fixture. Inference runs locally on your phone."),
+                        ),
+                    ),
+                    onSend = { _, _ -> true },
+                    onComputeSettings = { settingsOpened = true },
+                )
+            }
+        }
+        composeRule.onNodeWithText("Where do my messages go?").assertIsDisplayed()
+        composeRule.onNodeWithText("This is a UI fixture. Inference runs locally on your phone.").assertIsDisplayed()
+        composeRule.onNodeWithTag("open_compute_settings").assertIsDisplayed().performClick()
+        composeRule.runOnIdle { assertTrue(settingsOpened) }
+        captureEvidence("mobie-terminal-chat.png")
     }
 
     @Test

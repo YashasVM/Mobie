@@ -150,6 +150,22 @@ internal fun MobieUiState.afterRefusedReload(previous: MobieUiState, keptEngine:
     error = keptRunningMessage(keptEngine, reason),
 )
 
+/** A failed replacement must never enable prompts against a different conversation. */
+internal fun MobieUiState.afterFailedLoad(
+    previousEngine: ActiveCompute?,
+    preserveLoadedEngineOnFailure: Boolean,
+    reason: String,
+): MobieUiState {
+    val keptEngine = previousEngine.takeIf { preserveLoadedEngineOnFailure }
+    return if (keptEngine != null) {
+        copy(runtimeState = RuntimeState.READY, activeCompute = keptEngine,
+            error = keptRunningMessage(keptEngine, reason))
+    } else {
+        copy(runtimeState = RuntimeState.ERROR, activeCompute = null, imageInputReady = false,
+            appliedComputeOptions = null, appliedSampler = null, error = reason)
+    }
+}
+
 /** Uses the existing runtime_compute preferences, including its typed backend/thread keys. */
 internal fun RuntimeComputeSettings.readAdvancedOptions(coreCount: Int): ComputeOptions {
     val values = preferences.all.mapValues { it.value?.toString() }
