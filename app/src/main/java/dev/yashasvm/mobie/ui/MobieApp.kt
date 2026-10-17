@@ -124,12 +124,12 @@ fun MobieApp(
         viewModel.select(null)
     }
 
-    BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
-    BackHandler(enabled = state.selected != null && !state.chatting) { viewModel.select(null) }
+    BackHandler(enabled = state.selected != null && !state.chatting && !state.openingChat) { viewModel.select(null) }
     AppBackdrop(Modifier.fillMaxSize()) {
         AnimatedContent(
             targetState = when {
-                state.chatting -> "chat"
+                // While returning to chat, stay on the chat pane instead of passing through the model page.
+                state.chatting || state.openingChat -> "chat"
                 state.selected != null -> "model"
                 else -> "catalog"
             },
@@ -168,6 +168,7 @@ fun MobieApp(
                         )
                     },
                 ) {
+                    BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
                     ChatScreen(
                         state = state,
                         onSend = viewModel::sendMessage,
@@ -207,6 +208,7 @@ fun MobieApp(
                     onOpenInstalled = viewModel::startInstalledChat,
                     onDeleteInstalled = viewModel::deleteInstalled,
                     initialTab = catalogTab,
+                    onTabChange = { catalogTab = it },
                     // With a model installed, back returns to the chat home instead of leaving the app.
                     onBack = viewModel::openLastChat.takeIf { state.installedModels.isNotEmpty() },
                 )

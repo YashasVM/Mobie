@@ -119,10 +119,16 @@ internal fun CatalogScreen(
     onDarkThemeChange: (Boolean) -> Unit = {},
     onSaveToken: (String) -> Unit = {},
     initialTab: Int = TAB_DISCOVER,
-    /** When set, back returns to the chat home from any tab; otherwise back first returns to Discover. */
+    /** Reports tab changes so the caller can reopen the same tab after a detour to a model page. */
+    onTabChange: (Int) -> Unit = {},
+    /** When set, back from Discover returns to the chat home; other tabs first go back to Discover. */
     onBack: (() -> Unit)? = null,
 ) {
     var selectedTab by rememberSaveable { mutableIntStateOf(initialTab) }
+    fun selectTab(tab: Int) {
+        selectedTab = tab
+        onTabChange(tab)
+    }
     var pendingDelete by remember { mutableStateOf<InstalledModelEntry?>(null) }
     val resolver = remember { CompatibilityResolver() }
     // One tracker per list, hoisted above the tab switcher so revisiting a tab doesn't replay entrances.
@@ -131,7 +137,7 @@ internal fun CatalogScreen(
     val settingsEntrance = rememberEntranceTracker()
 
     BackHandler(enabled = onBack != null || selectedTab != TAB_DISCOVER) {
-        if (onBack != null) onBack() else selectedTab = TAB_DISCOVER
+        if (selectedTab != TAB_DISCOVER) selectTab(TAB_DISCOVER) else onBack?.invoke()
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -173,7 +179,7 @@ internal fun CatalogScreen(
                         tracker = installedEntrance,
                         onOpen = onOpenInstalled,
                         onDelete = { pendingDelete = it },
-                        onBrowse = { selectedTab = TAB_DISCOVER },
+                        onBrowse = { selectTab(TAB_DISCOVER) },
                     )
                     TAB_SETTINGS -> settingsTab(
                         tokenConfigured = state.tokenConfigured,
@@ -194,7 +200,7 @@ internal fun CatalogScreen(
                 }
             }
         }
-        ConsoleNavBar(selectedTab) { selectedTab = it }
+        ConsoleNavBar(selectedTab, ::selectTab)
     }
 
     pendingDelete?.let { entry ->

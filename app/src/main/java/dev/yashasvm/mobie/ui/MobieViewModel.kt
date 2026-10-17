@@ -87,6 +87,8 @@ data class MobieUiState(
     val preferencesLoaded: Boolean = false,
     /** False until launch has either opened the last-used model's chat or found nothing installed. */
     val launchResolved: Boolean = false,
+    /** True from choosing the chat-home model until its chat opens, so screens never flash in between. */
+    val openingChat: Boolean = false,
     val download: DownloadProgress? = null,
     val downloadedPath: String? = null,
     val chatting: Boolean = false,
@@ -209,20 +211,32 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
      */
     fun openLastChat() {
         viewModelScope.launch {
-            val (installed, lastUsed) = withContext(Dispatchers.IO) {
-                container.downloads.installedModels() to container.chatHistory.lastModelId()
+            val entry = try {
+                val (installed, lastUsed) = withContext(Dispatchers.IO) {
+                    container.downloads.installedModels() to container.chatHistory.lastModelId()
+                }
+                mutableState.update { it.copy(installedModels = installed) }
+                chooseLaunchModel(installed, lastUsed)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                // Fall back to the catalog rather than leaving the launch screen blank.
+                mutableState.update {
+                    it.copy(error = error.message ?: "Installed models couldn't be read.")
+                }
+                null
             }
-            mutableState.update { it.copy(installedModels = installed) }
-            val entry = chooseLaunchModel(installed, lastUsed)
             if (entry == null) {
-                mutableState.update { it.copy(launchResolved = true) }
+                mutableState.update { it.copy(launchResolved = true, openingChat = false) }
                 return@launch
             }
-            beginSelection(entry.model, onSuperseded = { mutableState.update { it.copy(launchResolved = true) } }) {
+            val opened = { mutableState.update { it.copy(launchResolved = true, openingChat = false) } }
+            mutableState.update { it.copy(openingChat = true) }
+            beginSelection(entry.model, onSuperseded = opened) {
                 try {
                     openChat(entry.localPath)
                 } finally {
-                    mutableState.update { it.copy(launchResolved = true) }
+                    opened()
                 }
             }
         }
@@ -430,8 +444,17 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch { unloadRuntime(operation) }
         val revision = selectionRevision.incrementAndGet()
         viewModelScope.launch {
-            val device = readDeviceProfile()
-            if (selectionRevision.get() != revision || !applySelection(model, device, revision)) {
+            val applied = try {
+                val device = readDeviceProfile()
+                selectionRevision.get() == revision && applySelection(model, device, revision)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                // A failed read must not crash the app or leave a waiting caller (the launch screen) hanging.
+                mutableState.update { it.copy(error = error.message ?: "This model couldn't be opened.") }
+                false
+            }
+            if (!applied) {
                 onSuperseded()
                 return@launch
             }

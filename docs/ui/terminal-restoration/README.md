@@ -11,6 +11,10 @@ Two corrections from the later integration survive the UI restoration:
 
 The chat screenshot is a synthetic UI fixture captured by `ModelScreensTest.terminalChatKeepsConversationVisibleAndOpensRunSettings`. Its GPU label is fixture state, not evidence that inference ran on the emulator.
 
+## Chat-first launch
+
+The one UX behaviour kept from PR #35: Mobie opens straight into chat with the last-used installed model and its current conversation, falling back to the first installed model, or to the catalog when nothing is installed. The welcome screen and starter prompts are gone. The chat's menu button opens a terminal-style drawer with new chat, chat history, models, library, and settings; back from the catalog returns to the chat. `mobie-launch-into-chat.png` and `mobie-chat-drawer.png` were captured on the emulator with a dummy model file, so the engine error in them is expected.
+
 ## Verification
 
 JDK 17, Android 15 x86_64 emulator `emulator-5558`:
