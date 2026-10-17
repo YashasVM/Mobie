@@ -1,11 +1,17 @@
 package dev.yashasvm.mobie.ui
 
-import android.os.ParcelFileDescriptor
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.isRoot
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.isDialog
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -209,7 +215,7 @@ class ModelScreensTest {
         composeRule.onNodeWithText("Test Model").performClick()
         composeRule.runOnIdle { assertTrue(opened) }
         composeRule.onNodeWithContentDescription("Delete Test Model").performClick()
-        composeRule.onNodeWithText("Delete").performClick()
+        composeRule.onNode(hasText("Delete") and hasAnyAncestor(isDialog())).performClick()
         composeRule.runOnIdle { assertTrue(deleted) }
     }
 
@@ -235,11 +241,8 @@ class ModelScreensTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val file = File(checkNotNull(instrumentation.targetContext.getExternalFilesDir(null)), name)
         file.outputStream().use { output ->
-            assertTrue(checkNotNull(instrumentation.uiAutomation.takeScreenshot()).compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output))
+            assertTrue(composeRule.onAllNodes(isRoot()).onLast().captureToImage().asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output))
         }
-        ParcelFileDescriptor.AutoCloseInputStream(
-            instrumentation.uiAutomation.executeShellCommand("cp ${file.absolutePath} /sdcard/$name"),
-        ).use { it.readBytes() }
     }
 }
 

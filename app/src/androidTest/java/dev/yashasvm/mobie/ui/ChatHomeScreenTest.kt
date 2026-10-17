@@ -1,13 +1,19 @@
 package dev.yashasvm.mobie.ui
 
-import android.os.ParcelFileDescriptor
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.isRoot
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -149,7 +155,9 @@ class ChatHomeScreenTest {
         composeRule.runOnIdle {
             state.value = state.value.copy(sessionId = "different-chat", messages = emptyList())
         }
-        composeRule.onNodeWithTag("chat_input").assertTextEquals("")
+        composeRule.onNodeWithTag("chat_input").assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("")),
+        )
     }
 
     @Test
@@ -241,10 +249,7 @@ class ChatHomeScreenTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val file = File(checkNotNull(instrumentation.targetContext.getExternalFilesDir(null)), name)
         file.outputStream().use { output ->
-            checkNotNull(instrumentation.uiAutomation.takeScreenshot()).compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output)
+            composeRule.onAllNodes(isRoot()).onLast().captureToImage().asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output)
         }
-        ParcelFileDescriptor.AutoCloseInputStream(
-            instrumentation.uiAutomation.executeShellCommand("cp ${file.absolutePath} /sdcard/$name"),
-        ).use { it.readBytes() }
     }
 }
