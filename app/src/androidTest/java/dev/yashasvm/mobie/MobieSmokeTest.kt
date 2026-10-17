@@ -54,6 +54,8 @@ class MobieSmokeTest {
     private fun capture(name: String) {
         composeRule.waitForIdle()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
+        instrumentation.waitForIdleSync()
+        android.os.SystemClock.sleep(250)
         val file = File(instrumentation.targetContext.getExternalFilesDir(null), "$name.png")
         file.outputStream().use { output ->
             check(checkNotNull(instrumentation.uiAutomation.takeScreenshot()).compress(Bitmap.CompressFormat.PNG, 100, output))

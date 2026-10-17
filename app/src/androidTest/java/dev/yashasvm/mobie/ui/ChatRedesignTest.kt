@@ -5,7 +5,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -43,7 +46,7 @@ class ChatRedesignTest {
         composeRule.runOnIdle { state.value = state.value.copy(runtimeState = RuntimeState.READY) }
         composeRule.waitForIdle()
         composeRule.runOnIdle { assertEquals(listOf("Keep this draft"), sent) }
-        composeRule.onNodeWithTag("chat_input").assertTextEquals("")
+        composeRule.onNodeWithTag("chat_input").assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("")))
     }
 
     @Test

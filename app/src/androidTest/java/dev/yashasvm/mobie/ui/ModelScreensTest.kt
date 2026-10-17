@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performScrollTo
 import dev.yashasvm.mobie.core.model.AiModel
 import dev.yashasvm.mobie.core.model.Compatibility
 import dev.yashasvm.mobie.core.model.CompatibilityResult
@@ -81,7 +82,7 @@ class ModelScreensTest {
             }
         }
 
-        composeRule.onNodeWithText("Type: Text generation").assertIsDisplayed()
+        composeRule.onNodeWithText("Type: Text generation").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("model_primary_action").assertIsDisplayed().performClick()
         assertTrue(downloadRequested)
     }
