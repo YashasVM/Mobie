@@ -82,10 +82,11 @@ data class MobieUiState(
     /** Catalog fetch failure, kept apart from [error] so an offline refresh never hides a model or chat error. */
     val catalogError: String? = null,
     val tokenConfigured: Boolean = false,
-    val welcomeSeen: Boolean = false,
     val onboardingComplete: Boolean = false,
-    /** False until the saved credential and welcome flags are read off the main thread. */
+    /** False until the saved credential flags are read off the main thread. */
     val preferencesLoaded: Boolean = false,
+    /** False until launch has either opened the last-used model's chat or found nothing installed. */
+    val launchResolved: Boolean = false,
     val download: DownloadProgress? = null,
     val downloadedPath: String? = null,
     val chatting: Boolean = false,
@@ -174,20 +175,19 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             credentialAccess.withLock {
                 val saved = withContext(Dispatchers.IO) {
                     val store = container.tokenStore
-                    Triple(store.read() != null, store.hasSeenWelcome(), store.hasCompletedOnboarding())
+                    (store.read() != null) to store.hasCompletedOnboarding()
                 }
                 mutableState.update {
-                    it.copy(tokenConfigured = saved.first, welcomeSeen = saved.second,
-                        onboardingComplete = saved.third, preferencesLoaded = true)
+                    it.copy(tokenConfigured = saved.first, onboardingComplete = saved.second, preferencesLoaded = true)
                 }
             }
-            if (state.value.welcomeSeen || state.value.onboardingComplete) loadFeatured()
+            loadFeatured()
         }
+        openLastChat()
         viewModelScope.launch {
             val device = readDeviceProfile()
             mutableState.update { it.copy(device = it.device ?: device) }
         }
-        refreshInstalled()
     }
 
     fun finishOnboarding(token: String?) {
@@ -202,13 +202,29 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    fun finishWelcome() {
-        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
-            credentialAccess.withLock {
-                withContext(Dispatchers.IO) { container.tokenStore.markWelcomeSeen() }
-                mutableState.update { it.copy(welcomeSeen = true) }
+    /**
+     * Opens the chat home: the last-used installed model with its current conversation, so the
+     * app starts in chat. With nothing installed it resolves to the catalog. Also used to return
+     * to chat from the catalog.
+     */
+    fun openLastChat() {
+        viewModelScope.launch {
+            val (installed, lastUsed) = withContext(Dispatchers.IO) {
+                container.downloads.installedModels() to container.chatHistory.lastModelId()
             }
-            loadFeatured()
+            mutableState.update { it.copy(installedModels = installed) }
+            val entry = chooseLaunchModel(installed, lastUsed)
+            if (entry == null) {
+                mutableState.update { it.copy(launchResolved = true) }
+                return@launch
+            }
+            beginSelection(entry.model, onSuperseded = { mutableState.update { it.copy(launchResolved = true) } }) {
+                try {
+                    openChat(entry.localPath)
+                } finally {
+                    mutableState.update { it.copy(launchResolved = true) }
+                }
+            }
         }
     }
 
@@ -403,7 +419,11 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
      * Stops the previous model's work now, then applies the new selection once the device profile
      * is read off the main thread. A newer selection made in the meantime supersedes this one.
      */
-    private fun beginSelection(model: AiModel?, afterSelect: (suspend () -> Unit)? = null) {
+    private fun beginSelection(
+        model: AiModel?,
+        onSuperseded: () -> Unit = {},
+        afterSelect: (suspend () -> Unit)? = null,
+    ) {
         downloadObserverJob?.cancel()
         cancelInference()
         val operation = nextRuntimeOperation()
@@ -411,8 +431,10 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val revision = selectionRevision.incrementAndGet()
         viewModelScope.launch {
             val device = readDeviceProfile()
-            if (selectionRevision.get() != revision) return@launch
-            if (!applySelection(model, device, revision)) return@launch
+            if (selectionRevision.get() != revision || !applySelection(model, device, revision)) {
+                onSuperseded()
+                return@launch
+            }
             afterSelect?.invoke()
         }
     }
@@ -572,6 +594,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 error = null,
             )
         }
+        launchHistoryWrite(model.id) { container.chatHistory.setLastModelId(model.id) }
         cancelInference()
         inferenceJob = viewModelScope.launch {
             loadRuntimeConversation(model, artifact, path, history, preferReset = false,

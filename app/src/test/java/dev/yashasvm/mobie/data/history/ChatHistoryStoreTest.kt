@@ -32,6 +32,22 @@ class ChatHistoryStoreTest {
     }
 
     @Test
+    fun lastUsedModelSurvivesReopeningAndDoesNotDisturbHistory() = runBlocking {
+        val prefs = MemoryPreferences()
+        val store = ChatHistoryStore(prefs)
+        assertNull(store.lastModelId())
+        store.write(modelId, listOf(HistoryMessage(true, "Hello")))
+
+        store.setLastModelId(modelId)
+        val writes = prefs.commitCount
+        store.setLastModelId(modelId)
+
+        assertEquals(writes, prefs.commitCount)
+        assertEquals(modelId, ChatHistoryStore(prefs.reopened()).lastModelId())
+        assertEquals("Hello", ChatHistoryStore(prefs.reopened()).read(modelId).single().text)
+    }
+
+    @Test
     fun repeatedIdenticalWriteIsSkippedAndLeavesStoredPayloadUntouched() = runBlocking {
         val prefs = MemoryPreferences()
         val store = ChatHistoryStore(prefs)

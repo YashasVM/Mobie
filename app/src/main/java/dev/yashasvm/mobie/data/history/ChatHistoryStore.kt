@@ -113,6 +113,15 @@ class ChatHistoryStore private constructor(openPreferences: () -> SharedPreferen
         id
     }
 
+    /** The model the user last opened a chat with; the app reopens it at launch. */
+    suspend fun lastModelId(): String? = locked { preferences.getString(LAST_MODEL_KEY, null) }
+
+    suspend fun setLastModelId(modelId: String) = mutate {
+        if (preferences.getString(LAST_MODEL_KEY, null) != modelId) {
+            commit(preferences.edit().putString(LAST_MODEL_KEY, modelId))
+        }
+    }
+
     suspend fun activate(modelId: String, sessionId: String) = mutate {
         if (sessionsLocked(modelId).any { it.id == sessionId }) {
             commit(preferences.edit().putString(currentKey(modelId), sessionId))
@@ -190,6 +199,8 @@ class ChatHistoryStore private constructor(openPreferences: () -> SharedPreferen
 
     companion object {
         const val LEGACY_SESSION_ID = "legacy"
+        // Model ids contain a slash and never a colon, so this key cannot collide with a legacy history key.
+        private const val LAST_MODEL_KEY = "meta:last_model"
         private const val DEFAULT_TITLE = "New local chat"
         private const val MAX_MESSAGES = 100
         private const val MAX_SESSIONS = 20

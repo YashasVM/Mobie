@@ -153,6 +153,7 @@ internal fun ChatScreen(
     state: MobieUiState,
     onSend: (String, String?) -> Boolean,
     onStop: () -> Unit = {},
+    onMenu: () -> Unit = {},
     onBack: () -> Unit = {},
     onHistory: () -> Unit = {},
     onNewChat: () -> Unit = {},
@@ -231,7 +232,7 @@ internal fun ChatScreen(
             title = model.title,
             runtimeLabel = runtimeLabel,
             runtimeState = state.runtimeState,
-            onBack = onBack,
+            onMenu = onMenu,
             onHistory = onHistory,
             onNewChat = onNewChat,
         )
@@ -261,14 +262,7 @@ internal fun ChatScreen(
                             state.compatibility.status != Compatibility.INCOMPATIBLE
                     },
                 )
-                state.messages.isEmpty() -> EmptyChat(
-                    model = model,
-                    imageInputReady = state.imageInputReady,
-                    onStarter = { starter ->
-                        prompt = starter
-                        if (ready) inputFocus.requestFocus()
-                    },
-                )
+                state.messages.isEmpty() -> EmptyChat(model = model, imageInputReady = state.imageInputReady)
                 else -> LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
@@ -408,7 +402,7 @@ private fun ChatHeader(
     title: String,
     runtimeLabel: String,
     runtimeState: RuntimeState,
-    onBack: () -> Unit,
+    onMenu: () -> Unit,
     onHistory: () -> Unit,
     onNewChat: () -> Unit,
 ) {
@@ -425,8 +419,8 @@ private fun ChatHeader(
             Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) {
-                LucideIcon(LucideR.drawable.lucide_ic_arrow_left, "Back", Modifier.size(22.dp))
+            IconButton(onClick = onMenu, modifier = Modifier.testTag("open_menu")) {
+                LucideIcon(LucideR.drawable.lucide_ic_menu, "Open menu", Modifier.size(22.dp))
             }
             Column(Modifier.weight(1f).padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
@@ -706,15 +700,7 @@ private fun ErrorPanel(message: String, onBack: () -> Unit, onLoadAnyway: (() ->
 }
 
 @Composable
-private fun EmptyChat(model: AiModel, imageInputReady: Boolean, onStarter: (String) -> Unit) {
-    val starters = remember(model.supportsVision, imageInputReady) {
-        buildList {
-            add("Explain how on-device AI works")
-            add("Write a short poem about the sea")
-            add("Summarize the pros and cons of electric cars")
-            if (model.supportsVision && imageInputReady) add("Describe an image") else add("Help me plan a weekend trip")
-        }
-    }
+private fun EmptyChat(model: AiModel, imageInputReady: Boolean) {
     Column(
         Modifier
             .fillMaxSize()
@@ -722,7 +708,7 @@ private fun EmptyChat(model: AiModel, imageInputReady: Boolean, onStarter: (Stri
             .padding(horizontal = 18.dp, vertical = 22.dp),
         verticalArrangement = Arrangement.spacedBy(22.dp, Alignment.CenterVertically),
     ) {
-        // Boot-log intro: each line reads like a command or a check finishing.
+        // A quiet greeting; the message box below is the only call to action.
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             PromptLine("mobie chat --load", Modifier.appear())
             Text(
@@ -745,41 +731,6 @@ private fun EmptyChat(model: AiModel, imageInputReady: Boolean, onStarter: (Stri
                     if (model.supportsVision && !imageInputReady) "!" else "i",
                     if (model.supportsVision && !imageInputReady) Mobie.signals.caution else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            }
-        }
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            SectionLabel("Try", Modifier.appear(delayMillis = 160))
-            starters.forEachIndexed { index, starter ->
-                val vision = starter == "Describe an image"
-                Panel(
-                    Modifier.fillMaxWidth().appear(delayMillis = 200 + index * 60),
-                    color = MaterialTheme.colorScheme.surfaceContainer,
-                    borderColor = MaterialTheme.colorScheme.outline.copy(alpha = .55f),
-                    onClick = { onStarter(if (vision) "Describe this image in detail." else starter) },
-                ) {
-                    Row(
-                        Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Text("›", style = Mobie.numeric.medium, color = MaterialTheme.colorScheme.primary)
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(starter, style = MaterialTheme.typography.bodyLarge)
-                            if (vision) {
-                                Text(
-                                    "Attach a photo with the image button first",
-                                    style = Mobie.numeric.tiny,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                        Text(
-                            if (vision) "[img]" else "[run]",
-                            style = Mobie.numeric.tiny,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
             }
         }
     }

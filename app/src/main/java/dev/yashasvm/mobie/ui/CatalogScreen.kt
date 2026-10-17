@@ -90,9 +90,9 @@ import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.data.download.InstalledModelEntry
 import dev.yashasvm.mobie.ui.theme.Mobie
 
-private const val TAB_DISCOVER = 0
-private const val TAB_INSTALLED = 1
-private const val TAB_SETTINGS = 2
+internal const val TAB_DISCOVER = 0
+internal const val TAB_INSTALLED = 1
+internal const val TAB_SETTINGS = 2
 private const val TAB_COUNT = 3
 
 /** List items before this index stagger in; later ones (reached by scrolling) appear without delay. */
@@ -118,8 +118,11 @@ internal fun CatalogScreen(
     darkTheme: Boolean = true,
     onDarkThemeChange: (Boolean) -> Unit = {},
     onSaveToken: (String) -> Unit = {},
+    initialTab: Int = TAB_DISCOVER,
+    /** When set, back returns to the chat home from any tab; otherwise back first returns to Discover. */
+    onBack: (() -> Unit)? = null,
 ) {
-    var selectedTab by rememberSaveable { mutableIntStateOf(TAB_DISCOVER) }
+    var selectedTab by rememberSaveable { mutableIntStateOf(initialTab) }
     var pendingDelete by remember { mutableStateOf<InstalledModelEntry?>(null) }
     val resolver = remember { CompatibilityResolver() }
     // One tracker per list, hoisted above the tab switcher so revisiting a tab doesn't replay entrances.
@@ -127,7 +130,9 @@ internal fun CatalogScreen(
     val installedEntrance = rememberEntranceTracker()
     val settingsEntrance = rememberEntranceTracker()
 
-    BackHandler(enabled = selectedTab != TAB_DISCOVER) { selectedTab = TAB_DISCOVER }
+    BackHandler(enabled = onBack != null || selectedTab != TAB_DISCOVER) {
+        if (onBack != null) onBack() else selectedTab = TAB_DISCOVER
+    }
 
     Column(Modifier.fillMaxSize()) {
         // tmux-style status line: session name, the current window, and the device at the right.

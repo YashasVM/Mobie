@@ -157,6 +157,7 @@ class ModelScreensTest {
     @Test
     fun terminalChatKeepsConversationVisibleAndOpensRunSettings() {
         var settingsOpened = false
+        var menuOpened = false
         composeRule.setContent {
             ScreenTheme {
                 ChatScreen(
@@ -170,11 +171,14 @@ class ModelScreensTest {
                         ),
                     ),
                     onSend = { _, _ -> true },
+                    onMenu = { menuOpened = true },
                     onComputeSettings = { settingsOpened = true },
                 )
             }
         }
         composeRule.onNodeWithText("Where do my messages go?").assertIsDisplayed()
+        composeRule.onNodeWithTag("open_menu").assertIsDisplayed().performClick()
+        composeRule.runOnIdle { assertTrue(menuOpened) }
         composeRule.onNodeWithText("This is a UI fixture. Inference runs locally on your phone.").assertIsDisplayed()
         composeRule.onNodeWithTag("open_compute_settings").assertIsDisplayed().performClick()
         composeRule.runOnIdle { assertTrue(settingsOpened) }
