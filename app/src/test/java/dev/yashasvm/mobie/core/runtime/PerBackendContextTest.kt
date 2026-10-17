@@ -19,6 +19,7 @@ import org.junit.Test
  */
 class PerBackendContextTest {
     private val resolver = CompatibilityResolver()
+    private val dynamicCapabilities = ComputeCapabilities(4096, true, false, false)
 
     /** A mid-size artifact whose GPU estimate fits at 2048 tokens and not at 4096 on the chosen budget. */
     private val midSizeWeights = 1_200L * MIB
@@ -30,10 +31,10 @@ class PerBackendContextTest {
         assertEquals(2_048, contextFor(ComputeBackend.GPU, device))
         assertEquals(4_096, contextFor(ComputeBackend.CPU, device))
 
-        val gpu = resolver.resolve(midSizeArtifact(), device, backend = ComputeBackend.GPU)
+        val gpu = resolver.resolve(midSizeArtifact(), device, backend = ComputeBackend.GPU, capabilities = dynamicCapabilities)
         assertEquals(Compatibility.COMPATIBLE, gpu.status)
         assertEquals(2_048, gpu.contextWindowTokens)
-        assertEquals(4_096, resolver.resolve(midSizeArtifact(), device, backend = ComputeBackend.CPU).contextWindowTokens)
+        assertEquals(4_096, resolver.resolve(midSizeArtifact(), device, backend = ComputeBackend.CPU, capabilities = dynamicCapabilities).contextWindowTokens)
     }
 
     @Test
@@ -47,7 +48,7 @@ class PerBackendContextTest {
     @Test
     fun autoRecommendationRanksGpuAtItsOwnContext() {
         val device = midSizeDevice.copy(gpuAttemptable = true)
-        val admission = resolver.resolveBackend(midSizeArtifact(), device, backend = ComputeBackend.AUTO)
+        val admission = resolver.resolveBackend(midSizeArtifact(), device, backend = ComputeBackend.AUTO, capabilities = dynamicCapabilities)
         assertEquals(ComputeBackend.GPU, admission.backend)
         assertEquals(2_048, admission.result.contextWindowTokens)
     }
@@ -115,7 +116,7 @@ class PerBackendContextTest {
         )
         assertEquals(
             contextFor(ComputeBackend.CPU, device),
-            resolver.resolve(midSizeArtifact(), device, backend = ComputeBackend.CPU).contextWindowTokens,
+            resolver.resolve(midSizeArtifact(), device, backend = ComputeBackend.CPU, capabilities = dynamicCapabilities).contextWindowTokens,
         )
     }
 

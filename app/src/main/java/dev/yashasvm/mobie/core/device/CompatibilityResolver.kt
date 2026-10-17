@@ -8,6 +8,7 @@ import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
 import dev.yashasvm.mobie.core.model.MemoryAdmissionTier
+import dev.yashasvm.mobie.core.runtime.ComputeCapabilities
 import dev.yashasvm.mobie.core.runtime.ComputeBackend
 import dev.yashasvm.mobie.core.runtime.LiteRtContextWindowPolicy
 import dev.yashasvm.mobie.core.runtime.RuntimeLoadMemoryPolicy
@@ -56,7 +57,8 @@ class CompatibilityResolver {
         backend: ComputeBackend = ComputeBackend.CPU,
         allowReclaim: Boolean = false,
         contextTokens: Int? = null,
-    ): CompatibilityResult = resolveBackend(artifact, device, visionEncoderLoaded, backend, allowReclaim, contextTokens).result
+        capabilities: ComputeCapabilities? = null,
+    ): CompatibilityResult = resolveBackend(artifact, device, visionEncoderLoaded, backend, allowReclaim, contextTokens, capabilities).result
 
     /**
      * Admission for the backend a load would run. Explicit CPU and GPU are judged as requested.
@@ -72,15 +74,16 @@ class CompatibilityResolver {
         backend: ComputeBackend = ComputeBackend.CPU,
         allowReclaim: Boolean = false,
         contextTokens: Int? = null,
+        capabilities: ComputeCapabilities? = null,
     ): BackendAdmission {
         if (backend != ComputeBackend.AUTO) {
-            return BackendAdmission(backend, resolveFor(artifact, device, visionEncoderLoaded, backend, contextTokens))
+            return BackendAdmission(backend, resolveFor(artifact, device, visionEncoderLoaded, backend, contextTokens, capabilities))
         }
-        val cpu = resolveFor(artifact, device, visionEncoderLoaded, ComputeBackend.CPU, contextTokens)
+        val cpu = resolveFor(artifact, device, visionEncoderLoaded, ComputeBackend.CPU, contextTokens, capabilities)
         if (!device.gpuAttemptable || cpu.status == Compatibility.INCOMPATIBLE) {
             return BackendAdmission(ComputeBackend.CPU, cpu)
         }
-        val gpu = resolveFor(artifact, device, visionEncoderLoaded, ComputeBackend.GPU, contextTokens)
+        val gpu = resolveFor(artifact, device, visionEncoderLoaded, ComputeBackend.GPU, contextTokens, capabilities)
         val gpuAdmitted = gpu.status != Compatibility.INCOMPATIBLE && when (gpu.memoryTier) {
             MemoryAdmissionTier.FITS_NOW -> true
             MemoryAdmissionTier.FITS_AFTER_RECLAIM -> allowReclaim
@@ -102,6 +105,7 @@ class CompatibilityResolver {
         visionEncoderLoaded: Boolean,
         backend: ComputeBackend,
         contextTokens: Int?,
+        capabilities: ComputeCapabilities?,
     ): CompatibilityResult {
         if (artifact == null || artifact.format != ModelFormat.LITERT_LM) {
             return CompatibilityResult(
@@ -128,18 +132,13 @@ class CompatibilityResolver {
             )
         }
 
-        // Match recommendation math to the context allocation that production will actually pass
-        // to LiteRT. Extended-context packages are useful on smaller phones when their KV cache can
-        // be bounded safely; judging them at the full advertised 32K/64K context can otherwise mark
-        // a model incompatible even though Mobie would load the same artifact at a smaller context.
-        // The same policy the native load uses, per backend, so GPU is judged at its own context and an
-        // explicit override is neither shrunk here nor ignored at load. Catalog metadata cannot tell
-        // fixed-context packages apart, so they are treated as dynamic until the load reads ModelInfo.
+        // Only the exact package metadata establishes whether its context may shrink. Until
+        // first load, a shrunken catalog estimate is provisional and cannot claim compatibility.
         val advertisedContext = artifact.contextWindowTokens ?: DEFAULT_CONTEXT_TOKENS
         val selectedContext = try {
             LiteRtContextWindowPolicy.contextFor(
-                maxContextTokens = advertisedContext,
-                dynamicContext = true,
+                maxContextTokens = capabilities?.maxContextTokens ?: advertisedContext,
+                dynamicContext = capabilities?.dynamicContext ?: true,
                 requestedContextTokens = contextTokens,
                 advertisedContextWindowTokens = advertisedContext,
                 modelWeightsBytes = artifact.sizeBytes,
@@ -210,6 +209,14 @@ class CompatibilityResolver {
             )
         }
         if (admission.tier == MemoryAdmissionTier.FITS_AFTER_RECLAIM) return result(Compatibility.WARNING, admission.reason)
+        if (capabilities == null && selectedContext < advertisedContext) {
+            val fixedBytes = requireNotNull(RuntimeLoadMemoryPolicy.estimate(
+                artifact.copy(contextWindowTokens = advertisedContext), backend, visionEncoderLoaded,
+            )).estimatedRamBytes
+            val fixedRam = String.format(Locale.US, "%.1f GB", fixedBytes.toDouble() / GIB)
+            return result(Compatibility.WARNING,
+                "Package context limits are unknown until first load. This RAM estimate assumes a dynamic $selectedContext-token context; a fixed $advertisedContext-token package would need about $fixedRam. The load checks package limits before allocating.")
+        }
         return result(Compatibility.COMPATIBLE, admission.reason)
     }
 

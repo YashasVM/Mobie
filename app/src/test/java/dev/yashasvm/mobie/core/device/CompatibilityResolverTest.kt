@@ -68,7 +68,7 @@ class CompatibilityResolverTest {
     }
 
     @Test
-    fun `extended context recommendation uses same bounded context as runtime`() {
+    fun `unknown extended context estimate warns while retaining the hypothetical bounded calculation`() {
         val model = artifact(size = gib, name = "MiniCPM5-1B-c64k.litertlm")
         val result = resolver.resolve(model, device)
         val runtimeSelectedContext = LiteRtContextWindowPolicy.select(
@@ -80,7 +80,8 @@ class CompatibilityResolverTest {
             isLowRamDevice = device.isLowRamDevice,
         )
 
-        assertEquals(Compatibility.COMPATIBLE, result.status)
+        assertEquals(Compatibility.WARNING, result.status)
+        assertTrue(result.reason.contains("unknown until first load"))
         assertEquals(runtimeSelectedContext, result.contextWindowTokens)
         assertEquals(4_096, result.contextWindowTokens)
         assertEquals(0, result.contextWindowTokens % 256)
@@ -98,7 +99,7 @@ class CompatibilityResolverTest {
     }
 
     @Test
-    fun `device selector can choose extended context artifact when runtime can bound it safely`() {
+    fun `device selector prefers a full context fit over an unverified context shrink`() {
         val model = AiModel(
             id = "example/model",
             title = "Example",
@@ -110,7 +111,7 @@ class CompatibilityResolverTest {
             ),
         )
         val selected = resolver.selectBestArtifact(model, device.copy(availableRamBytes = 4 * gib))
-        assertEquals("model-c64k.litertlm", selected?.fileName)
+        assertEquals("model-ekv2048.litertlm", selected?.fileName)
     }
 
     @Test
