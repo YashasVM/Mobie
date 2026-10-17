@@ -3,6 +3,7 @@ package dev.yashasvm.mobie
 import android.net.Uri
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.yashasvm.mobie.core.attachment.AttachmentRejection
+import dev.yashasvm.mobie.core.attachment.DocumentAttachment
 import dev.yashasvm.mobie.core.attachment.AttachmentResult
 import dev.yashasvm.mobie.data.attachment.AttachmentReader
 import kotlinx.coroutines.runBlocking
@@ -21,8 +22,11 @@ class AttachmentReaderTest {
         assertEquals("notes.md", result.attachment.name)
     }
 
-    @Test fun providerMimeFailureBecomesAVisibleRejection() = runBlocking {
-        assertEquals(AttachmentResult.Rejected(AttachmentRejection.ReadFailed), reader.read(uri("mime-denied"), 1024))
+    @Test fun missingProviderMimeStillValidatesRecognizedUtf8Text() = runBlocking {
+        assertEquals(
+            AttachmentResult.Accepted(DocumentAttachment("notes.md", "text/markdown", 24, "Local UTF-8 notes: café", truncated = false)),
+            reader.read(uri("mime-denied"), 1024),
+        )
     }
 
     @Test fun providerQueryFailureBecomesAVisibleRejection() = runBlocking {
