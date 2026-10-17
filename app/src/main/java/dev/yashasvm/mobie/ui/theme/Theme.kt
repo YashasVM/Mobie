@@ -40,7 +40,7 @@ data class MobieSignals(
     val hairline: Color,
 )
 
-/** Mono styles for numbers and chrome that are measured or estimated (tok/s, RAM, sizes, latency). */
+/** Shared styles for measured values and literal code. */
 @Immutable
 data class MobieNumericType(
     val large: TextStyle,
@@ -51,90 +51,96 @@ data class MobieNumericType(
     val code: TextStyle,
 )
 
-// Near-black, not pure black, so raised cards read as surfaces. One warm amber accent is used
-// sparingly (primary actions, selection). Green is reserved for "ready".
+// Both palettes are designed independently so surfaces and text retain contrast in either mode.
 private val DarkSignals = MobieSignals(
-    ready = Color(0xFF8FD16A),
-    caution = Color(0xFFE8C872),
-    blocked = Color(0xFFFF8A78),
-    thinking = Color(0xFF8CC4E6),
-    track = Color(0xFF1E2427),
-    hairline = Color(0xFF262D30),
+    ready = Color(0xFFA2C79F),
+    caution = Color(0xFFE2C088),
+    blocked = Color(0xFFFFAA9C),
+    thinking = Color(0xFFA5BEDA),
+    track = Color(0xFF343431),
+    hairline = Color(0xFF3B3B37),
 )
 
 private val LightSignals = MobieSignals(
-    ready = Color(0xFF2F6B12),
-    caution = Color(0xFF7A5B00),
-    blocked = Color(0xFFB3301A),
-    thinking = Color(0xFF225E85),
-    track = Color(0xFFE2E2DB),
-    hairline = Color(0xFFD9D9D1),
+    ready = Color(0xFF356534),
+    caution = Color(0xFF795413),
+    blocked = Color(0xFFAC3829),
+    thinking = Color(0xFF365F87),
+    track = Color(0xFFE7E5DF),
+    hairline = Color(0xFFE0DDD5),
 )
 
 private val MobieDarkColors = darkColorScheme(
-    primary = Color(0xFFFFB547),
-    onPrimary = Color(0xFF0B0D0E),
-    primaryContainer = Color(0xFF3A2A10),
-    onPrimaryContainer = Color(0xFFFFD9A0),
-    secondary = Color(0xFFA9B2AF),
-    onSecondary = Color(0xFF0B0D0E),
-    secondaryContainer = Color(0xFF1E2427),
-    onSecondaryContainer = Color(0xFFD9E0DD),
-    tertiary = Color(0xFF8CC4E6),
-    onTertiary = Color(0xFF0B0D0E),
-    tertiaryContainer = Color(0xFF142430),
-    onTertiaryContainer = Color(0xFFCBE5F5),
-    background = Color(0xFF0B0D0E),
-    onBackground = Color(0xFFE6EAE9),
-    surface = Color(0xFF101415),
-    onSurface = Color(0xFFE6EAE9),
-    surfaceVariant = Color(0xFF171C1E),
-    onSurfaceVariant = Color(0xFFA7B0AD),
-    surfaceContainerLowest = Color(0xFF080A0B),
-    surfaceContainerLow = Color(0xFF0F1213),
-    surfaceContainer = Color(0xFF151A1C),
-    surfaceContainerHigh = Color(0xFF1B2124),
-    surfaceContainerHighest = Color(0xFF232A2D),
-    outline = Color(0xFF6A7478),
-    outlineVariant = Color(0xFF262D30),
-    error = Color(0xFFFF8A78),
-    onError = Color(0xFF0B0D0E),
-    inverseSurface = Color(0xFFE6EAE9),
-    inverseOnSurface = Color(0xFF0B0D0E),
-    inversePrimary = Color(0xFF8A5A00),
+    primary = Color(0xFFF5F4EF),
+    onPrimary = Color(0xFF20201E),
+    primaryContainer = Color(0xFF393936),
+    onPrimaryContainer = Color(0xFFF5F4EF),
+    secondary = Color(0xFFC7C5BD),
+    onSecondary = Color(0xFF20201E),
+    secondaryContainer = Color(0xFF30302D),
+    onSecondaryContainer = Color(0xFFE7E5DE),
+    tertiary = Color(0xFFE4A087),
+    onTertiary = Color(0xFF342018),
+    tertiaryContainer = Color(0xFF50352B),
+    onTertiaryContainer = Color(0xFFFFD8C8),
+    background = Color(0xFF151515),
+    onBackground = Color(0xFFF3F2EC),
+    surface = Color(0xFF1B1B1A),
+    onSurface = Color(0xFFF3F2EC),
+    surfaceVariant = Color(0xFF2B2B28),
+    onSurfaceVariant = Color(0xFFB9B7AE),
+    surfaceContainerLowest = Color(0xFF121212),
+    surfaceContainerLow = Color(0xFF1C1C1A),
+    surfaceContainer = Color(0xFF222220),
+    surfaceContainerHigh = Color(0xFF2B2B28),
+    surfaceContainerHighest = Color(0xFF343431),
+    outline = Color(0xFF85837A),
+    outlineVariant = Color(0xFF3B3B37),
+    error = Color(0xFFFFAA9C),
+    onError = Color(0xFF3A100B),
+    errorContainer = Color(0xFF54231C),
+    onErrorContainer = Color(0xFFFFDAD2),
+    inverseSurface = Color(0xFFF3F2EC),
+    inverseOnSurface = Color(0xFF20201E),
+    inversePrimary = Color(0xFF373732),
 )
 
 private val MobieLightColors = lightColorScheme(
-    primary = Color(0xFF8A5000),
+    primary = Color(0xFF2C2C28),
     onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFFFFE2B5),
-    onPrimaryContainer = Color(0xFF2E1B00),
-    secondary = Color(0xFF555D5A),
+    primaryContainer = Color(0xFFEAE8E1),
+    onPrimaryContainer = Color(0xFF292925),
+    secondary = Color(0xFF605F57),
     onSecondary = Color(0xFFFFFFFF),
-    secondaryContainer = Color(0xFFE3E7E5),
-    onSecondaryContainer = Color(0xFF1A1F20),
-    tertiary = Color(0xFF225E85),
+    secondaryContainer = Color(0xFFEEECE5),
+    onSecondaryContainer = Color(0xFF35352F),
+    tertiary = Color(0xFF9E5039),
     onTertiary = Color(0xFFFFFFFF),
-    tertiaryContainer = Color(0xFFD3E6F3),
-    onTertiaryContainer = Color(0xFF0A2232),
-    background = Color(0xFFF5F6F3),
-    onBackground = Color(0xFF14191B),
-    surface = Color(0xFFFCFCFA),
-    onSurface = Color(0xFF14191B),
-    surfaceVariant = Color(0xFFEBEEEB),
-    onSurfaceVariant = Color(0xFF4B5452),
+    tertiaryContainer = Color(0xFFF9DFD3),
+    onTertiaryContainer = Color(0xFF572817),
+    background = Color(0xFFFAF9F6),
+    onBackground = Color(0xFF252522),
+    surface = Color(0xFFFFFFFF),
+    onSurface = Color(0xFF252522),
+    surfaceVariant = Color(0xFFEEECE6),
+    onSurfaceVariant = Color(0xFF636158),
     surfaceContainerLowest = Color(0xFFFFFFFF),
-    surfaceContainerLow = Color(0xFFF9FAF8),
-    surfaceContainer = Color(0xFFF0F2EF),
-    surfaceContainerHigh = Color(0xFFE8EBE7),
-    surfaceContainerHighest = Color(0xFFE0E4E0),
-    outline = Color(0xFF7A8381),
-    outlineVariant = Color(0xFFD9D9D1),
-    error = Color(0xFFB3301A),
+    surfaceContainerLow = Color(0xFFF7F6F2),
+    surfaceContainer = Color(0xFFFFFFFF),
+    surfaceContainerHigh = Color(0xFFF0EEE8),
+    surfaceContainerHighest = Color(0xFFE9E7DF),
+    outline = Color(0xFF858278),
+    outlineVariant = Color(0xFFE0DDD5),
+    error = Color(0xFFAC3829),
     onError = Color(0xFFFFFFFF),
+    errorContainer = Color(0xFFFFDAD2),
+    onErrorContainer = Color(0xFF4A160D),
+    inverseSurface = Color(0xFF30302C),
+    inverseOnSurface = Color(0xFFF7F6F0),
+    inversePrimary = Color(0xFFE7E5DE),
 )
 
-/** IBM Plex Mono: chrome only (labels, stats, model ids, code, status lines). */
+/** Monospace is reserved for code and literal identifiers. */
 private val MonoFace = FontFamily(
     Font(R.font.plex_mono_regular, FontWeight.Normal),
     Font(R.font.plex_mono_medium, FontWeight.Medium),
@@ -143,14 +149,14 @@ private val MonoFace = FontFamily(
 )
 
 /**
- * Headings and body use the platform sans so long text reads comfortably. Mono is reserved for
- * chrome. Nothing goes below 12sp: these are read on a phone at arm's length.
+ * Serif display text gives the welcome screen character; controls and reading text use sans.
+ * Monospace is reserved for literal code. Nothing goes below 12sp.
  */
 private val SansFace = FontFamily.Default
 
 private val MobieTypography = Typography(
-    displaySmall = TextStyle(fontFamily = SansFace, fontSize = 32.sp, lineHeight = 38.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.5).sp),
-    headlineLarge = TextStyle(fontFamily = SansFace, fontSize = 28.sp, lineHeight = 34.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.3).sp),
+    displaySmall = TextStyle(fontFamily = FontFamily.Serif, fontSize = 36.sp, lineHeight = 44.sp, fontWeight = FontWeight.Normal, letterSpacing = (-0.5).sp),
+    headlineLarge = TextStyle(fontFamily = FontFamily.Serif, fontSize = 30.sp, lineHeight = 38.sp, fontWeight = FontWeight.Normal, letterSpacing = (-0.3).sp),
     headlineMedium = TextStyle(fontFamily = SansFace, fontSize = 24.sp, lineHeight = 30.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.2).sp),
     headlineSmall = TextStyle(fontFamily = SansFace, fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold),
     titleLarge = TextStyle(fontFamily = SansFace, fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold),
@@ -160,28 +166,28 @@ private val MobieTypography = Typography(
     bodyLarge = TextStyle(fontFamily = SansFace, fontSize = 16.sp, lineHeight = 24.sp),
     bodyMedium = TextStyle(fontFamily = SansFace, fontSize = 15.sp, lineHeight = 22.sp),
     bodySmall = TextStyle(fontFamily = SansFace, fontSize = 13.sp, lineHeight = 19.sp),
-    // Buttons and other controls read as sans; the mono face is for chrome text.
+    // Buttons, labels, and other controls share a comfortable sans face.
     labelLarge = TextStyle(fontFamily = SansFace, fontSize = 15.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium),
-    labelMedium = TextStyle(fontFamily = MonoFace, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp),
-    labelSmall = TextStyle(fontFamily = MonoFace, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium),
+    labelMedium = TextStyle(fontFamily = SansFace, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium),
+    labelSmall = TextStyle(fontFamily = SansFace, fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
 )
 
-// Monospace digits are fixed-width, so live values (tok/s, progress) never jitter.
+// Use the same readable sans face for numbers; code keeps its literal monospace style.
 private val MobieNumeric = MobieNumericType(
-    large = TextStyle(fontFamily = MonoFace, fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold),
-    medium = TextStyle(fontFamily = MonoFace, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium),
-    small = TextStyle(fontFamily = MonoFace, fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
-    tiny = TextStyle(fontFamily = MonoFace, fontSize = 12.sp, lineHeight = 16.sp),
+    large = TextStyle(fontFamily = SansFace, fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold),
+    medium = TextStyle(fontFamily = SansFace, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium),
+    small = TextStyle(fontFamily = SansFace, fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
+    tiny = TextStyle(fontFamily = SansFace, fontSize = 12.sp, lineHeight = 16.sp),
     code = TextStyle(fontFamily = MonoFace, fontSize = 13.sp, lineHeight = 20.sp),
 )
 
-// Soft, rounded corners for a native Material feel. Cards are 14dp; sheets and large surfaces 20dp.
+// Generous corners keep cards and sheets visually quiet.
 private val MobieShapes = Shapes(
     extraSmall = RoundedCornerShape(8.dp),
     small = RoundedCornerShape(10.dp),
     medium = RoundedCornerShape(12.dp),
-    large = RoundedCornerShape(14.dp),
-    extraLarge = RoundedCornerShape(20.dp),
+    large = RoundedCornerShape(24.dp),
+    extraLarge = RoundedCornerShape(28.dp),
 )
 
 private val LocalMobieSignals = staticCompositionLocalOf { DarkSignals }
@@ -201,6 +207,7 @@ fun MobieTheme(darkTheme: Boolean = true, content: @Composable () -> Unit) {
     val colors = if (darkTheme) MobieDarkColors else MobieLightColors
     if (!view.isInEditMode) {
         val window = (view.context as Activity).window
+        window.statusBarColor = Color.Transparent.toArgb()
         window.navigationBarColor = colors.background.toArgb()
         WindowCompat.getInsetsController(window, view).apply {
             isAppearanceLightStatusBars = !darkTheme

@@ -66,7 +66,6 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
@@ -94,8 +93,8 @@ import kotlinx.coroutines.delay
 // Shared visual building blocks. Screens compose these instead of styling raw Surfaces so that
 // panels, telemetry, and status colors read as one system.
 
-// Cards are 14dp rounded with a 1dp hairline; chips and badges are fully rounded pills.
-internal val PanelShape: Shape = RoundedCornerShape(14.dp)
+// Grouped content uses rounded cards; chips and badges are fully rounded pills.
+internal val PanelShape: Shape = RoundedCornerShape(24.dp)
 internal val PillShape: Shape = RoundedCornerShape(50)
 
 /** Raised surface with a 1dp hairline border. The base container for every grouped block. */
@@ -123,7 +122,7 @@ internal fun Panel(
     }
 }
 
-/** Small uppercase tracked label used above sections and metrics. */
+/** Plain section title used above grouped information. */
 @Composable
 internal fun SectionLabel(
     text: String,
@@ -131,19 +130,18 @@ internal fun SectionLabel(
     color: Color = MaterialTheme.colorScheme.onSurfaceVariant,
     trailing: (@Composable RowScope.() -> Unit)? = null,
 ) {
-    // Small mono caps label followed by a hairline to the edge. Chrome, not body copy.
     Row(
         modifier.fillMaxWidth().semantics { heading() },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(
-            text.uppercase(Locale.US),
+            text,
             style = MaterialTheme.typography.labelMedium,
             color = color,
             maxLines = 1,
         )
-        Box(Modifier.weight(1f).height(1.dp).background(Mobie.signals.hairline))
+        Spacer(Modifier.weight(1f))
         trailing?.invoke(this)
     }
 }
@@ -160,7 +158,7 @@ internal fun Metric(
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Text(
-            label.uppercase(Locale.US),
+            label,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
@@ -201,11 +199,11 @@ internal fun Hairline(modifier: Modifier = Modifier) {
     Box(modifier.fillMaxWidth().height(1.dp).background(Mobie.signals.hairline))
 }
 
-/** Square status block. When [pulsing], it blinks like a cursor to show live work. */
+/** Small circular status indicator, optionally pulsing during live work. */
 @Composable
 internal fun StatusDot(color: Color, modifier: Modifier = Modifier, pulsing: Boolean = false, size: Dp = 7.dp) {
     if (!pulsing) {
-        Box(modifier.size(size).background(color))
+        Box(modifier.size(size).background(color, CircleShape))
         return
     }
     val transition = rememberInfiniteTransition(label = "status blink")
@@ -216,7 +214,7 @@ internal fun StatusDot(color: Color, modifier: Modifier = Modifier, pulsing: Boo
         animationSpec = infiniteRepeatable(tween(530, easing = StepEasing), RepeatMode.Reverse),
         label = "status blink alpha",
     )
-    Box(modifier.size(size).graphicsLayer { this.alpha = alpha.value }.background(color))
+    Box(modifier.size(size).graphicsLayer { this.alpha = alpha.value }.background(color, CircleShape))
 }
 
 /** A block cursor that blinks at terminal cadence. Place it after streaming or prompt text. */
@@ -234,7 +232,7 @@ internal fun BlinkingCursor(
         animationSpec = infiniteRepeatable(tween(530, easing = StepEasing), RepeatMode.Reverse),
         label = "cursor alpha",
     )
-    Box(modifier.size(width, height).graphicsLayer { this.alpha = alpha.value }.background(color))
+    Box(modifier.size(width, height).graphicsLayer { this.alpha = alpha.value }.background(color, CircleShape))
 }
 
 /** Jumps between start and end values, like a terminal cursor, instead of fading. */
@@ -425,8 +423,7 @@ internal fun ProgressTrack(
 }
 
 /**
- * A terminal window: hairline frame with a title bar (`title` left, `meta` right). Use for any
- * grouped block that benefits from a name, such as the device panel or a pre-flight check.
+ * A rounded information card with a title and optional supporting metadata.
  */
 @Composable
 internal fun TuiWindow(
@@ -434,28 +431,27 @@ internal fun TuiWindow(
     modifier: Modifier = Modifier,
     meta: String? = null,
     metaColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
-    borderColor: Color = MaterialTheme.colorScheme.outline.copy(alpha = .55f),
+    borderColor: Color = Mobie.signals.hairline,
     onClick: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     Panel(modifier, color = MaterialTheme.colorScheme.surfaceContainer, borderColor = borderColor, onClick = onClick) {
         Column {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    title.uppercase(Locale.US),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
                 if (meta != null) Text(meta, style = Mobie.numeric.tiny, color = metaColor, maxLines = 1)
             }
-            Box(Modifier.fillMaxWidth().height(1.dp).background(borderColor))
             content()
         }
     }
@@ -479,7 +475,7 @@ internal fun TermButton(
     hint: String? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
-    val shape = RoundedCornerShape(14.dp)
+    val shape = PillShape
     val accent = when (style) {
         TermButtonStyle.Primary -> MaterialTheme.colorScheme.primary
         TermButtonStyle.Ghost -> MaterialTheme.colorScheme.onSurface
@@ -571,9 +567,7 @@ internal fun PromptLine(
     cursor: Boolean = false,
 ) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(prompt, style = Mobie.numeric.small, color = MaterialTheme.colorScheme.primary)
         Text(text, style = Mobie.numeric.small, color = color)
-        if (cursor) BlinkingCursor(width = 7.dp, height = 14.dp)
     }
 }
 

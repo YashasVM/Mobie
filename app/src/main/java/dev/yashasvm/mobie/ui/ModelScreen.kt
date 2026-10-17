@@ -54,11 +54,8 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.work.WorkInfo
 import com.composables.icons.lucide.R as LucideR
@@ -72,11 +69,9 @@ import dev.yashasvm.mobie.core.runtime.ComputeBackend
 import dev.yashasvm.mobie.data.download.DownloadProgress
 import dev.yashasvm.mobie.data.download.isCancellable
 import dev.yashasvm.mobie.ui.theme.Mobie
-import java.util.Locale
 
 /**
- * Pre-flight spec sheet for one model, styled as a terminal screen: a verdict box, a memory budget
- * window, storage and artifact key/value grids, and a pinned action dock for download / cancel / run.
+ * Model details, device fit, and download safeguards with a pinned download or run action.
  */
 @Composable
 internal fun ModelScreen(
@@ -98,7 +93,7 @@ internal fun ModelScreen(
     val entrance = rememberEntranceTracker()
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        ModelTopBar(path = model.id, runtime = artifact.runtimeLabel, onBack = onBack)
+        ModelTopBar(onBack = onBack)
         LazyColumn(
             modifier = Modifier.weight(1f).fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -235,52 +230,34 @@ private fun ChecklistPanel(model: AiModel, artifact: ModelArtifact, state: Mobie
     }
 }
 
-/** Top bar: back, the model as a path (`model/<id>`), and the runtime tag. */
+/** Keeps the model detail screen connected to the model library. */
 @Composable
-private fun ModelTopBar(path: String, runtime: String, onBack: () -> Unit) {
-    val dim = MaterialTheme.colorScheme.onSurfaceVariant
-    val ink = MaterialTheme.colorScheme.onSurface
-    Column(Modifier.fillMaxWidth().statusBarsPadding()) {
-        Row(
-            Modifier.fillMaxWidth().padding(start = 4.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
-                LucideIcon(LucideR.drawable.lucide_ic_arrow_left, "Back", Modifier.size(22.dp))
-            }
-            Text(
-                buildAnnotatedString {
-                    withStyle(SpanStyle(color = dim)) { append("model/") }
-                    withStyle(SpanStyle(color = ink)) { append(middleEllipsis(path, 36)) }
-                },
-                style = Mobie.numeric.small,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f).padding(start = 4.dp),
-            )
-            Tag(runtime, icon = LucideR.drawable.lucide_ic_cpu)
+private fun ModelTopBar(onBack: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().statusBarsPadding().padding(start = 4.dp, end = 20.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
+            LucideIcon(LucideR.drawable.lucide_ic_arrow_left, "Back", Modifier.size(22.dp))
         }
-        Hairline()
+        Text("Model details", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
     }
 }
 
-/** Repo id as the large heading, author above it, and the facts that matter as tags. */
+/** Human-readable name first, with the publisher and supported inputs beneath it. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ModelIdentity(model: AiModel, artifact: ModelArtifact, modifier: Modifier = Modifier) {
     Column(modifier.padding(top = 14.dp, bottom = 2.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (model.author.isNotBlank()) {
-            Text("by ${model.author}", style = Mobie.numeric.small, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(model.author, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Text(
-            model.id,
-            style = Mobie.numeric.large,
+            model.title.ifBlank { model.id.substringAfterLast('/') },
+            style = MaterialTheme.typography.headlineLarge,
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.semantics { heading() },
         )
-        if (model.title.isNotBlank() && model.title != model.id.substringAfter('/')) {
-            Text(model.title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
-        }
         if (model.description.isNotBlank()) {
             Text(
                 model.description,
@@ -295,7 +272,7 @@ private fun ModelIdentity(model: AiModel, artifact: ModelArtifact, modifier: Mod
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Tag("Type: ${model.type.displayLabel()}")
+            Tag(model.type.displayLabel())
             Tag(
                 if (model.gated) "Gated" else "Public",
                 icon = if (model.gated) LucideR.drawable.lucide_ic_lock else LucideR.drawable.lucide_ic_globe,
@@ -323,7 +300,7 @@ private fun VerdictPanel(result: CompatibilityResult?, modifier: Modifier = Modi
         Compatibility.INCOMPATIBLE, Compatibility.CONVERSION_REQUIRED -> "✕"
         null -> "…"
     }
-    val shape = RoundedCornerShape(14.dp)
+    val shape = RoundedCornerShape(24.dp)
     Column(
         modifier
             .fillMaxWidth()
@@ -342,7 +319,7 @@ private fun VerdictPanel(result: CompatibilityResult?, modifier: Modifier = Modi
             }
             AnimatedContent(
                 targetState = when (status) {
-                    Compatibility.COMPATIBLE -> "Runs on this phone"
+                    Compatibility.COMPATIBLE -> "Fits this phone’s memory"
                     Compatibility.WARNING ->
                         if (result?.memoryTier == MemoryAdmissionTier.FITS_AFTER_RECLAIM) "Fits after freeing memory" else "Check before running"
                     Compatibility.INCOMPATIBLE -> "Won't fit on this phone"
@@ -384,7 +361,7 @@ private fun MemoryPanel(result: CompatibilityResult?, device: DeviceProfile?, mo
     val available = device?.availableRamBytes ?: 0L
 
     TuiWindow("Memory", modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             MemoryBar(
                 segments = segments,
                 capacityBytes = total,
@@ -449,7 +426,7 @@ private fun MemoryPanel(result: CompatibilityResult?, device: DeviceProfile?, mo
 }
 
 /**
- * One terminal key/value row: dim key on the left, value on the right. Use [stacked] for values
+ * One key/value row: muted key on the left, value on the right. Use [stacked] for values
  * too long to share a line (such as file names), which puts the value under the key.
  */
 @Composable
@@ -505,7 +482,7 @@ private fun StoragePanel(
     }
     val after = if (needed > 0 && free > 0) free - needed else 0L
     TuiWindow("Storage", modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 KvRow("Needs", formatBytes(needed))
                 KvRow("Free", formatBytes(free))
@@ -542,7 +519,7 @@ private fun ArtifactPanel(artifact: ModelArtifact, model: AiModel, modifier: Mod
         add(SpecLine("Access", if (model.gated) "Hugging Face approval required" else "Public"))
     }
     TuiWindow("Files and details", modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             rows.forEach { line ->
                 KvRow(
                     line.label,
@@ -577,14 +554,14 @@ private fun ComputeSettingsPanel(
     onCpuThreadsChange: (Int?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    TuiWindow("Compute", modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    TuiWindow("Performance", modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                FlagHeader("--backend", "where the model runs")
+                FlagHeader("Processing", "Where the model runs")
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(ComputeBackend.AUTO, ComputeBackend.CPU, ComputeBackend.GPU).forEach { choice ->
                         ChoiceChip(
-                            label = choice.name.lowercase(Locale.US),
+                            label = when (choice) { ComputeBackend.AUTO -> "Automatic"; ComputeBackend.CPU -> "CPU"; ComputeBackend.GPU -> "GPU" },
                             selected = backend == choice,
                             onClick = { onBackendChange(choice) },
                         )
@@ -592,9 +569,9 @@ private fun ComputeSettingsPanel(
                 }
             }
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                FlagHeader("--threads", "cpu threads")
+                FlagHeader("CPU threads", "Changes apply on next load")
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ChoiceChip("auto", selected = cpuThreads == null, onClick = { onCpuThreadsChange(null) })
+                    ChoiceChip("Auto", selected = cpuThreads == null, onClick = { onCpuThreadsChange(null) })
                     (1..8).forEach { count ->
                         ChoiceChip(
                             label = count.toString(),
@@ -613,11 +590,11 @@ private fun ComputeSettingsPanel(
     }
 }
 
-/** A terminal flag name followed by a plain-language hint, e.g. `--backend  where the model runs`. */
+/** A settings label followed by a short explanation. */
 @Composable
 private fun FlagHeader(flag: String, hint: String) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(flag, style = Mobie.numeric.small, color = MaterialTheme.colorScheme.primary)
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(flag, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
         Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
@@ -728,7 +705,7 @@ private fun ActionDock(
 @Composable
 private fun AccessNotice() {
     val caution = Mobie.signals.caution
-    val shape = RoundedCornerShape(14.dp)
+    val shape = RoundedCornerShape(24.dp)
     Row(
         Modifier
             .fillMaxWidth()
@@ -785,7 +762,6 @@ private fun DownloadStatus(download: DownloadProgress) {
                 !known -> {
                     if (active) StatusDot(MaterialTheme.colorScheme.primary, pulsing = true, size = 8.dp)
                     Text("Starting download…", style = Mobie.numeric.small, color = MaterialTheme.colorScheme.onSurface)
-                    if (active) BlinkingCursor(width = 7.dp, height = 13.dp)
                 }
                 else -> {
                     if (active) StatusDot(MaterialTheme.colorScheme.primary, pulsing = true, size = 8.dp)

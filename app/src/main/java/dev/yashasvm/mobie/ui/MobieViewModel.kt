@@ -93,6 +93,7 @@ data class MobieUiState(
     val runtimeState: RuntimeState = RuntimeState.IDLE,
     val messages: List<ChatMessage> = emptyList(),
     val history: List<ChatHistorySession> = emptyList(),
+    val recentChats: List<RecentChat> = emptyList(),
     val sessionId: String? = null,
     val stats: InferenceStats? = null,
     val telemetry: RunTelemetry = RunTelemetry(),
@@ -106,6 +107,8 @@ data class MobieUiState(
     /** Plain-language reason the last attachment failed; the UI shows it and can dismiss it. */
     val attachmentError: String? = null,
 )
+
+data class RecentChat(val modelId: String, val modelTitle: String, val session: ChatHistorySession)
 
 class MobieViewModel(private val container: AppContainer) : ViewModel() {
     /** Matches the runtime default used when a model reports no context window. */
@@ -337,20 +340,23 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun runInstalled(allowReclaim: Boolean = false) {
+        val revision = selectionRevision.get()
         val path = state.value.downloadedPath
         if (path != null && File(path).isFile) {
+            mutableState.update { it.copy(runtimeState = RuntimeState.LOADING, error = null) }
             viewModelScope.launch {
                 val current = state.value
                 val device = readDeviceProfile()
+                if (selectionRevision.get() != revision) return@launch
                 val compatibility = container.compatibility.resolve(current.selectedArtifact, device,
                     current.selected?.supportsVision == true, admissionBackend())
                 mutableState.update { it.copy(device = device, compatibility = compatibility) }
                 if (compatibility.status == Compatibility.INCOMPATIBLE) {
-                    mutableState.update { it.copy(error = compatibility.reason) }
+                    mutableState.update { it.copy(runtimeState = RuntimeState.ERROR, error = compatibility.reason) }
                     return@launch
                 }
                 if (compatibility.memoryTier == MemoryAdmissionTier.FITS_AFTER_RECLAIM && !allowReclaim) {
-                    mutableState.update { it.copy(error = compatibility.reason) }
+                    mutableState.update { it.copy(runtimeState = RuntimeState.ERROR, error = compatibility.reason) }
                     return@launch
                 }
                 openChat(path, allowReclaim)
@@ -360,6 +366,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 it.copy(
                     downloadedPath = null,
                     download = null,
+                    runtimeState = RuntimeState.ERROR,
                     error = "The local model file is missing. Download it again.",
                 )
             }
@@ -714,41 +721,61 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 messages = emptyList(),
                 history = container.chatHistory.sessions(model.id),
                 sessionId = sessionId,
-                runtimeState = RuntimeState.LOADING,
+                runtimeState = if (canReuseLoadedModel) RuntimeState.LOADING else RuntimeState.IDLE,
                 stats = null,
                 error = null,
             )
         }
+        if (!canReuseLoadedModel) return
         inferenceJob = viewModelScope.launch {
             loadRuntimeConversation(model, artifact, path, emptyList(), preferReset = canReuseLoadedModel, operation = operation)
         }
     }
 
-    fun startInstalledChat(entry: InstalledModelEntry) {
+    /** Selecting a model opens its conversation without allocating native memory. */
+    fun startInstalledChat(entry: InstalledModelEntry) = prepareInstalledChat(entry, newSession = true)
+
+    private fun prepareInstalledChat(entry: InstalledModelEntry, newSession: Boolean, sessionId: String? = null) {
         container.lastUsedModel.write(entry.model.id)
         mutableState.update { it.copy(activeInstalledId = entry.model.id) }
         beginSelection(entry.model) {
-            container.chatHistory.startNewSession(entry.model.id)
-            openChat(entry.localPath)
+            if (newSession) container.chatHistory.startNewSession(entry.model.id)
+            if (sessionId != null) container.chatHistory.activate(entry.model.id, sessionId)
+            mutableState.update {
+                it.copy(
+                    chatting = true,
+                    downloadedPath = entry.localPath,
+                    messages = readHistory(entry.model),
+                    history = container.chatHistory.sessions(entry.model.id),
+                    sessionId = container.chatHistory.currentSessionId(entry.model.id),
+                )
+            }
         }
     }
 
-    /** Unloads the current model and opens chat on [entry]. Picking the model already open is a no-op. */
     fun switchModel(entry: InstalledModelEntry) {
-        val current = state.value
-        if (current.chatting && current.selected?.id == entry.model.id) return
+        if (state.value.chatting && state.value.selected?.id == entry.model.id) return
         startInstalledChat(entry)
     }
 
-    /** Leaves chat for the catalog so the user can download more models. The runtime is unloaded. */
-    fun openCatalog() {
-        select(null)
-    }
+    fun openCatalog() = select(null)
 
-    /** Reopens chat on the active installed model, if it is still installed. */
     fun returnToChat() {
         val entry = state.value.installedModels.firstOrNull { it.model.id == state.value.activeInstalledId } ?: return
-        startInstalledChat(entry)
+        prepareInstalledChat(entry, newSession = false)
+    }
+
+    fun refreshRecents() {
+        val chats = state.value.installedModels.flatMap { entry ->
+            container.chatHistory.sessions(entry.model.id).filter { it.messages.isNotEmpty() }
+                .map { RecentChat(entry.model.id, entry.model.title, it) }
+        }.sortedByDescending { it.session.updatedAt }
+        mutableState.update { it.copy(recentChats = chats) }
+    }
+
+    fun openRecent(chat: RecentChat) {
+        val entry = state.value.installedModels.firstOrNull { it.model.id == chat.modelId } ?: return
+        prepareInstalledChat(entry, newSession = false, sessionId = chat.session.id)
     }
 
     fun deleteInstalled(entry: InstalledModelEntry) {
@@ -915,11 +942,11 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     private fun routeOnLaunch(installed: List<InstalledModelEntry>) {
         if (launchRouted) return
         val current = state.value
-        if (!current.welcomeSeen) return
+
         launchRouted = true
-        if (current.selected != null || current.chatting) return
-        val destination = initialDestination(current.welcomeSeen, installed, current.activeInstalledId)
-        if (destination is LaunchDestination.Chat) startInstalledChat(destination.entry)
+        if (current.selected != null || current.chatting || selectionRevision.get() != 0) return
+        val destination = initialDestination(installed, current.activeInstalledId)
+        if (destination is LaunchDestination.Chat) prepareInstalledChat(destination.entry, newSession = false)
     }
 
     private fun artifactForDevice(model: AiModel, device: DeviceProfile): ModelArtifact? =

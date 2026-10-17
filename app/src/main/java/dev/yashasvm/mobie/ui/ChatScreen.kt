@@ -168,14 +168,16 @@ internal fun ChatScreen(
     onNewChat: () -> Unit = {},
     onSamplerChange: (SamplerSettings) -> String? = { null },
     onLoadAnyway: () -> Unit = {},
+    onLoad: () -> Unit = {},
     onSwitchModel: () -> Unit = {},
     onAttachDocument: (Uri) -> Unit = {},
     onRemoveAttachment: (Int) -> Unit = {},
     onDismissAttachmentError: () -> Unit = {},
 ) {
-    val model = state.selected ?: return
+    val model = state.selected
     val context = LocalContext.current
     var prompt by rememberSaveable { mutableStateOf("") }
+    var pendingSend by remember(model?.id, state.sessionId) { mutableStateOf(false) }
     var imagePath by rememberSaveable { mutableStateOf<String?>(null) }
     var imageError by remember { mutableStateOf<String?>(null) }
     var imageCopying by remember { mutableStateOf(false) }
@@ -233,9 +235,10 @@ internal fun ChatScreen(
     }
     val ready = state.runtimeState == RuntimeState.READY
     val generating = state.runtimeState == RuntimeState.GENERATING
-    val runtimeLabel = state.selectedArtifact?.runtimeLabel ?: "LiteRT-LM"
-    val canSubmit = ready && !imageCopying && (prompt.isNotBlank() || state.pendingAttachments.isNotEmpty())
-    val imageAllowed = model.supportsVision && state.imageInputReady
+    val canSubmit = model != null && !pendingSend &&
+        state.runtimeState in setOf(RuntimeState.IDLE, RuntimeState.READY, RuntimeState.ERROR) &&
+        !imageCopying && (prompt.isNotBlank() || state.pendingAttachments.isNotEmpty())
+    val imageAllowed = model?.supportsVision == true && state.imageInputReady
     // Capability can be lost mid-draft (reload, or stop after uncertain cancellation). Drop the photo
     // here so submit never sends a stale attachment that the ViewModel would reject.
     LaunchedEffect(imageAllowed) {
@@ -245,13 +248,25 @@ internal fun ChatScreen(
             imageError = PHOTO_REMOVED_MESSAGE
         }
     }
-    val submit = {
-        // Keep the draft unless the ViewModel accepted the prompt.
-        if (canSubmit && onSend(prompt, imagePath)) {
+    fun sendDraft() {
+        if (onSend(prompt, imagePath)) {
             prompt = ""
             imagePath = null
             imageError = null
             followLatest = true
+        }
+    }
+    LaunchedEffect(state.runtimeState, state.error, model?.id, pendingSend) {
+        if (pendingSend) {
+            when {
+                ready -> { pendingSend = false; sendDraft() }
+                state.runtimeState == RuntimeState.ERROR || state.error != null -> pendingSend = false
+            }
+        }
+    }
+    val submit = {
+        if (canSubmit) {
+            if (ready) sendDraft() else { pendingSend = true; onLoad() }
         }
     }
 
@@ -262,12 +277,8 @@ internal fun ChatScreen(
             .testTag("chat_screen"),
     ) {
         ChatHeader(
-            title = model.title,
-            runtimeState = state.runtimeState,
             onBack = onBack,
-            onHistory = onHistory,
-            onNewChat = onNewChat,
-            onSwitchModel = onSwitchModel,
+            onNewChat = { pendingSend = false; onNewChat() },
             onRunDetails = { showRunDetails = true },
         )
         AnimatedVisibility(
@@ -289,10 +300,10 @@ internal fun ChatScreen(
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
-                state.runtimeState == RuntimeState.LOADING -> LoadingPanel(model.title)
+                state.runtimeState == RuntimeState.LOADING -> LoadingPanel(model?.title ?: "model")
                 state.runtimeState == RuntimeState.ERROR -> ErrorPanel(
                     state.error ?: "The model could not run on this phone.",
-                    onBack = onBack,
+                    onBack = onSwitchModel,
                     onLoadAnyway = onLoadAnyway.takeIf {
                         state.compatibility?.memoryTier == MemoryAdmissionTier.FITS_AFTER_RECLAIM &&
                             state.compatibility.status != Compatibility.INCOMPATIBLE
@@ -301,10 +312,7 @@ internal fun ChatScreen(
                 state.messages.isEmpty() -> EmptyChat(
                     model = model,
                     imageInputReady = state.imageInputReady,
-                    onStarter = { starter ->
-                        prompt = starter
-                        if (ready) inputFocus.requestFocus()
-                    },
+                    ready = ready,
                 )
                 else -> LazyColumn(
                     state = listState,
@@ -354,9 +362,10 @@ internal fun ChatScreen(
         }
         ComposerDock(
             prompt = prompt,
-            onPromptChange = { prompt = it },
+            onPromptChange = { prompt = it; pendingSend = false },
             runtimeState = state.runtimeState,
-            runtimeLabel = runtimeLabel,
+            modelTitle = model?.title ?: "Choose model",
+            onSwitchModel = { pendingSend = false; onSwitchModel() },
             supportsVision = imageAllowed,
             imagePath = imagePath,
             imageCopying = imageCopying,
@@ -441,109 +450,37 @@ private fun Modifier.messageEntrance(animate: Boolean, fromUser: Boolean): Modif
 // ---------------------------------------------------------------------------------------------
 // Header and telemetry
 
-/** Short mono status shown beside the model name: what the engine is doing right now. */
-private fun engineStatusWord(runtimeState: RuntimeState): String = when (runtimeState) {
-    RuntimeState.IDLE -> "not loaded"
-    RuntimeState.LOADING -> "loading"
-    RuntimeState.READY -> "ready"
-    RuntimeState.GENERATING -> "generating"
-    RuntimeState.STOPPING -> "stopping"
-    RuntimeState.ERROR -> "error"
-}
-
-@Composable
-private fun RuntimeState.signal() = when (this) {
-    RuntimeState.READY, RuntimeState.GENERATING -> Mobie.signals.ready
-    RuntimeState.LOADING, RuntimeState.STOPPING -> Mobie.signals.caution
-    RuntimeState.ERROR -> Mobie.signals.blocked
-    RuntimeState.IDLE -> MaterialTheme.colorScheme.onSurfaceVariant
-}
-
-/**
- * Compact top bar: back, a tappable model chip with its engine status, then new chat, history, and
- * an overflow menu. The chip opens the model switcher.
- */
+/** Navigation stays separate from model selection, which lives in the composer. */
 @Composable
 private fun ChatHeader(
-    title: String,
-    runtimeState: RuntimeState,
     onBack: () -> Unit,
-    onHistory: () -> Unit,
     onNewChat: () -> Unit,
-    onSwitchModel: () -> Unit,
     onRunDetails: () -> Unit,
 ) {
-    val dotColor by animateColorAsState(runtimeState.signal(), tween(MotionMedium), label = "engine dot")
-    val pulsing = runtimeState == RuntimeState.LOADING || runtimeState == RuntimeState.GENERATING ||
-        runtimeState == RuntimeState.STOPPING
     var menuOpen by remember { mutableStateOf(false) }
-    val muted = MaterialTheme.colorScheme.onSurfaceVariant
-    Column(Modifier.fillMaxWidth().statusBarsPadding()) {
-        Row(
-            Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
-                LucideIcon(LucideR.drawable.lucide_ic_arrow_left, "Back", Modifier.size(22.dp))
+    Row(
+        Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = 60.dp).padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
+            LucideIcon(LucideR.drawable.lucide_ic_menu, "Open menu", Modifier.size(24.dp))
+        }
+        Text("Mobie", style = MaterialTheme.typography.titleLarge.copy(fontFamily = FontFamily.Serif),
+            modifier = Modifier.weight(1f).padding(start = 8.dp).semantics { heading() })
+        IconButton(onClick = onNewChat, modifier = Modifier.size(48.dp)) {
+            LucideIcon(LucideR.drawable.lucide_ic_message_square_plus, "Start a new chat", Modifier.size(22.dp))
+        }
+        Box {
+            IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(48.dp)) {
+                LucideIcon(LucideR.drawable.lucide_ic_ellipsis_vertical, "More options", Modifier.size(22.dp))
             }
-            // Tappable model chip: name, a status dot, and the engine state in mono.
-            Row(
-                Modifier
-                    .weight(1f, fill = false)
-                    .heightIn(min = 40.dp)
-                    .clip(PillShape)
-                    .border(1.dp, Mobie.signals.hairline, PillShape)
-                    .clickable(role = Role.Button, onClickLabel = "Switch model", onClick = onSwitchModel)
-                    .padding(start = 14.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.semantics { heading() }.weight(1f, fill = false),
-                )
-                Row(
-                    Modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    StatusDot(dotColor, pulsing = pulsing, size = 7.dp)
-                    Text(
-                        engineStatusWord(runtimeState),
-                        style = Mobie.numeric.tiny,
-                        color = muted,
-                        maxLines = 1,
-                    )
-                }
-                LucideIcon(LucideR.drawable.lucide_ic_chevron_down, null, Modifier.size(14.dp), tint = muted)
-            }
-            Spacer(Modifier.weight(1f))
-            IconButton(onClick = onNewChat, modifier = Modifier.size(48.dp)) {
-                LucideIcon(LucideR.drawable.lucide_ic_message_square_plus, "Start a new chat", Modifier.size(22.dp))
-            }
-            IconButton(onClick = onHistory, modifier = Modifier.size(48.dp)) {
-                LucideIcon(LucideR.drawable.lucide_ic_history, "Chat history", Modifier.size(22.dp))
-            }
-            Box {
-                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(48.dp)) {
-                    LucideIcon(LucideR.drawable.lucide_ic_ellipsis_vertical, "More options", Modifier.size(22.dp))
-                }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    DropdownMenuItem(
-                        text = { Text("Run details and sampling") },
-                        leadingIcon = { LucideIcon(LucideR.drawable.lucide_ic_sliders_horizontal, null, Modifier.size(18.dp)) },
-                        onClick = {
-                            menuOpen = false
-                            onRunDetails()
-                        },
-                    )
-                }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(text = { Text("Run details and sampling") }, onClick = {
+                    menuOpen = false
+                    onRunDetails()
+                })
             }
         }
-        Hairline()
     }
 }
 
@@ -568,7 +505,7 @@ private fun RunDetails(
     val decode = stats?.tokensPerSecond?.takeIf { it > 0 }?.let { String.format(Locale.US, "%.1f tok/s", it) }
         ?: live.liveSdkChunksPerSecond?.let { String.format(Locale.US, "%.1f SDK chunks/s", it) }
         ?: "Waiting for output"
-    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerLow)) {
+    Column(Modifier.fillMaxWidth().heightIn(max = 400.dp).verticalScroll(rememberScrollState()).background(MaterialTheme.colorScheme.surfaceContainerLow)) {
         // One readout line: the section name, live speed, and a close action.
         Row(
             Modifier
@@ -645,7 +582,7 @@ private fun RunDetails(
                 style = TermButtonStyle.Ghost,
                 modifier = Modifier.padding(vertical = 4.dp),
             )
-            settingsError?.let { Text("[!] $it", style = Mobie.numeric.tiny, color = Mobie.signals.blocked) }
+            settingsError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
         }
         Hairline()
     }
@@ -677,201 +614,60 @@ private fun runJson(state: MobieUiState): String {
     }.toString(2)
 }
 
-@Composable
-private fun TelemetryValue(label: String?, value: String, unit: String? = null) {
-    val muted = MaterialTheme.colorScheme.onSurfaceVariant
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-        if (label != null) Text(label, style = MaterialTheme.typography.labelSmall, color = muted, maxLines = 1)
-        RollingText(
-            value,
-            style = Mobie.numeric.small,
-            color = if (value == "—") muted else MaterialTheme.colorScheme.onSurface,
-        )
-        if (unit != null) Text(unit, style = MaterialTheme.typography.labelSmall, color = muted, maxLines = 1)
-    }
-}
-
 // ---------------------------------------------------------------------------------------------
 // Non-conversation states
 
 @Composable
 private fun LoadingPanel(modelTitle: String) {
-    Box(Modifier.fillMaxSize().padding(20.dp), contentAlignment = Alignment.Center) {
-        TuiWindow(
-            title = "loading weights",
-            meta = "wait",
-            borderColor = Mobie.signals.caution.copy(alpha = .45f),
-            modifier = Modifier.fillMaxWidth().widthIn(max = 420.dp).appear(),
-        ) {
-            Column(
-                Modifier
-                    .padding(16.dp)
-                    .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text("[~] Loading $modelTitle into memory", style = Mobie.numeric.small, color = Mobie.signals.caution)
-                IndeterminateTrack(Mobie.signals.caution)
-                Text(
-                    "The first load can take a while. Later loads are usually faster.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-}
-
-/** A short block sliding across a thin track, like a cursor scanning a progress bar. */
-@Composable
-private fun IndeterminateTrack(color: Color) {
-    val track = Mobie.signals.track
-    val transition = rememberInfiniteTransition(label = "load track")
-    // Read in the draw phase so the sweep never recomposes the panel.
-    val position by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(1400, easing = EmphasizedEase), RepeatMode.Restart),
-        label = "load track position",
-    )
-    Canvas(Modifier.fillMaxWidth().height(6.dp)) {
-        drawRect(track)
-        val segment = size.width * .22f
-        val start = (size.width + segment) * position - segment
-        val left = start.coerceAtLeast(0f)
-        val right = (start + segment).coerceAtMost(size.width)
-        if (right > left) {
-            drawRect(color, topLeft = Offset(left, 0f), size = Size(right - left, size.height))
-        }
+    Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally) {
+        androidx.compose.material3.CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
+        Spacer(Modifier.height(20.dp))
+        Text("Opening $modelTitle…", style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(8.dp))
+        Text("The first load can take a moment.", style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @Composable
 private fun ErrorPanel(message: String, onBack: () -> Unit, onLoadAnyway: (() -> Unit)? = null) {
-    Box(Modifier.fillMaxSize().padding(20.dp), contentAlignment = Alignment.Center) {
-        TuiWindow(
-            title = "engine error",
-            meta = "failed",
-            borderColor = Mobie.signals.blocked.copy(alpha = .5f),
-            modifier = Modifier.fillMaxWidth().widthIn(max = 420.dp).appear(),
-        ) {
-            Column(
-                Modifier
-                    .padding(16.dp)
-                    .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Assertive },
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text("[!] Chat couldn't start", style = Mobie.numeric.small, color = Mobie.signals.blocked)
-                Text(message, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Hairline()
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-            ) {
-                TermButton("back", onClick = onBack, style = TermButtonStyle.Ghost)
-                // Only offered when the model fits once Android frees memory, matching the model
-                // screen's "Load anyway"; models that can never fit get no override.
-                if (onLoadAnyway != null) TermButton("load anyway", onClick = onLoadAnyway)
-            }
-        }
+    Column(Modifier.fillMaxSize().padding(28.dp), verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("Couldn't open this model", style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(12.dp))
+        Text(message, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center)
+        Spacer(Modifier.height(20.dp))
+        TermButton("Choose another model", onClick = onBack, style = TermButtonStyle.Ghost)
+        if (onLoadAnyway != null) TermButton("Try after freeing memory", onClick = onLoadAnyway)
     }
 }
 
 @Composable
-private fun EmptyChat(model: AiModel, imageInputReady: Boolean, onStarter: (String) -> Unit) {
-    val starters = remember(model.supportsVision, imageInputReady) {
-        buildList {
-            add("Explain how on-device AI works")
-            add("Write a short poem about the sea")
-            add("Summarize the pros and cons of electric cars")
-            if (model.supportsVision && imageInputReady) add("Describe an image") else add("Help me plan a weekend trip")
-        }
-    }
+private fun EmptyChat(model: AiModel?, imageInputReady: Boolean, ready: Boolean) {
     Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 24.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 32.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(
-            model.title,
-            style = Mobie.numeric.tiny,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.appear(),
-        )
+        LucideIcon(LucideR.drawable.lucide_ic_sparkles, null, Modifier.size(32.dp), tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.height(24.dp))
+        Text("What can I help with?",
+            style = MaterialTheme.typography.headlineLarge.copy(fontFamily = FontFamily.Serif, fontWeight = FontWeight.Normal),
+            textAlign = TextAlign.Center, modifier = Modifier.semantics { heading() })
         Spacer(Modifier.height(14.dp))
-        Text(
-            "What can I help with?",
-            style = MaterialTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.onSurface,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.semantics { heading() }.appear(delayMillis = 60),
-        )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Runs on this phone. Nothing leaves the device.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.appear(delayMillis = 100),
-        )
-        if (model.supportsVision && !imageInputReady) {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "This phone loaded text chat only. Photo input is unavailable for this session.",
-                style = Mobie.numeric.tiny,
-                color = Mobie.signals.caution,
-                textAlign = TextAlign.Center,
-            )
-        }
-        Spacer(Modifier.height(28.dp))
-        Column(
-            Modifier.fillMaxWidth().widthIn(max = 480.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            starters.forEachIndexed { index, starter ->
-                val vision = starter == "Describe an image"
-                // Suggestions only fill the composer; nothing is sent until the user presses send.
-                SuggestionChip(
-                    text = starter,
-                    hint = if (vision) "Attach a photo with + first" else null,
-                    modifier = Modifier.appear(delayMillis = 140 + index * 50),
-                    onClick = { onStarter(if (vision) "Describe this image in detail." else starter) },
-                )
-            }
+        Text("Your conversations stay on this phone.", style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+        if (ready && model?.supportsVision == true) {
+            Spacer(Modifier.height(16.dp))
+            Text(if (imageInputReady) "Chat about text or an attached photo on this phone. Image generation isn't available."
+                else "This phone loaded text chat only. Photo input is unavailable for this session.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center)
         }
     }
 }
-
-/** A pill suggestion that fills the composer when tapped. */
-@Composable
-private fun SuggestionChip(text: String, hint: String?, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Row(
-        modifier
-            .fillMaxWidth()
-            .heightIn(min = 48.dp)
-            .clip(PillShape)
-            .border(1.dp, Mobie.signals.hairline, PillShape)
-            .background(MaterialTheme.colorScheme.surfaceContainer, PillShape)
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 18.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
-            if (hint != null) {
-                Text(hint, style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-    }
-}
-
 
 // ---------------------------------------------------------------------------------------------
 // Messages
@@ -1459,15 +1255,13 @@ private fun List<MdSpan>.toAnnotated(codeStyle: SpanStyle): AnnotatedString = bu
 // ---------------------------------------------------------------------------------------------
 // Composer
 
-// ---------------------------------------------------------------------------------------------
-// Composer
-
 @Composable
 private fun ComposerDock(
     prompt: String,
     onPromptChange: (String) -> Unit,
     runtimeState: RuntimeState,
-    runtimeLabel: String,
+    modelTitle: String,
+    onSwitchModel: () -> Unit,
     supportsVision: Boolean,
     imagePath: String?,
     imageCopying: Boolean,
@@ -1487,35 +1281,24 @@ private fun ComposerDock(
 ) {
     val ready = runtimeState == RuntimeState.READY
     val generating = runtimeState == RuntimeState.GENERATING
+    val editable = runtimeState != RuntimeState.LOADING && runtimeState != RuntimeState.STOPPING
     val placeholder = when (runtimeState) {
         RuntimeState.READY -> "Ask anything"
         RuntimeState.LOADING -> "Loading model…"
         RuntimeState.GENERATING -> "Generating…"
         RuntimeState.STOPPING -> "Stopping…"
-        RuntimeState.ERROR -> "Model unavailable"
-        RuntimeState.IDLE -> "Model not loaded"
+        RuntimeState.ERROR -> "Message Mobie…"
+        RuntimeState.IDLE -> "Message Mobie…"
     }
-    val fieldInteraction = remember { MutableInteractionSource() }
-    val focused by fieldInteraction.collectIsFocusedAsState()
-    val fieldBorder by animateColorAsState(
-        when {
-            ready && focused -> MaterialTheme.colorScheme.primary
-            ready -> MaterialTheme.colorScheme.outline.copy(alpha = .6f)
-            else -> Mobie.signals.hairline
-        },
-        tween(MotionMedium),
-        label = "composer border",
-    )
-    val fieldShape = RoundedCornerShape(24.dp)
+    val fieldShape = RoundedCornerShape(28.dp)
     Column(
-        Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.background)
+        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)
             .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime)),
     ) {
-        Hairline()
         Column(
-            Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 8.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)
+                .clip(fieldShape).background(MaterialTheme.colorScheme.surfaceContainer)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, fieldShape).padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             AnimatedVisibility(
@@ -1595,69 +1378,38 @@ private fun ComposerDock(
                     }
                 }
             }
-            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AttachMenuButton(
-                    enabled = ready && !imageCopying,
-                    supportsVision = supportsVision,
-                    onPickFile = onPickFile,
-                    onPickPhoto = onPickPhoto,
-                )
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .heightIn(min = 48.dp)
-                        .clip(fieldShape)
-                        .background(MaterialTheme.colorScheme.surfaceContainerLow, fieldShape)
-                        .border(if (ready && focused) 1.5.dp else 1.dp, fieldBorder, fieldShape)
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                ) {
-                    BasicTextField(
-                        value = prompt,
-                        onValueChange = onPromptChange,
-                        enabled = ready,
-                        textStyle = MaterialTheme.typography.bodyLarge.copy(
-                            color = if (ready) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                        ),
-                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                        maxLines = 6,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                        keyboardActions = KeyboardActions(onSend = { onSubmit() }),
-                        interactionSource = fieldInteraction,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .focusRequester(focusRequester)
-                            .testTag("chat_input"),
-                        decorationBox = { inner ->
-                            Box {
-                                if (prompt.isEmpty()) {
-                                    Text(
-                                        placeholder,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                                inner()
-                            }
-                        },
-                    )
+            BasicTextField(
+                value = prompt, onValueChange = onPromptChange, enabled = editable,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary), maxLines = 6,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { onSubmit() }),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = 8.dp, vertical = 8.dp)
+                    .focusRequester(focusRequester).testTag("chat_input"),
+                decorationBox = { inner -> Box {
+                    if (prompt.isEmpty()) Text(placeholder, style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    inner()
+                } },
+            )
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                AttachMenuButton(enabled = ready && !imageCopying, supportsVision = supportsVision,
+                    onPickFile = onPickFile, onPickPhoto = onPickPhoto)
+                if (supportsVision) IconButton(onClick = onPickPhoto, enabled = ready && !imageCopying, modifier = Modifier.size(48.dp)) {
+                    LucideIcon(LucideR.drawable.lucide_ic_image, "Attach image", Modifier.size(20.dp))
                 }
+                Row(Modifier.weight(1f, fill = false).heightIn(min = 48.dp).clip(PillShape)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .clickable(role = Role.Button, onClickLabel = "Switch model", onClick = onSwitchModel)
+                    .padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(modelTitle, style = MaterialTheme.typography.labelLarge, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    LucideIcon(LucideR.drawable.lucide_ic_chevron_down, null, Modifier.size(14.dp))
+                }
+                Spacer(Modifier.weight(1f))
                 SendStopButton(generating = generating, canSubmit = canSubmit, onSubmit = onSubmit, onStop = onStop)
-            }
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                LucideIcon(LucideR.drawable.lucide_ic_lock, null, Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(
-                    "Stays on this phone · $runtimeLabel",
-                    style = Mobie.numeric.tiny,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
             }
         }
     }

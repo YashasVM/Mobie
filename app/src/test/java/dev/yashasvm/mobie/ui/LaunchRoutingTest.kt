@@ -13,23 +13,16 @@ class LaunchRoutingTest {
     )
 
     @Test
-    fun firstRunShowsWelcomeEvenWhenModelsExist() {
-        val destination = initialDestination(welcomeSeen = false, installed = listOf(entry("a")), lastUsedId = "a")
-
-        assertEquals(LaunchDestination.Welcome, destination)
-    }
-
-    @Test
-    fun noInstalledModelOpensCatalog() {
-        assertEquals(LaunchDestination.Catalog, initialDestination(true, emptyList(), lastUsedId = null))
-        assertEquals(LaunchDestination.Catalog, initialDestination(true, emptyList(), lastUsedId = "gone"))
+    fun noInstalledModelOpensEmptyChat() {
+        assertEquals(LaunchDestination.EmptyChat, initialDestination( emptyList(), lastUsedId = null))
+        assertEquals(LaunchDestination.EmptyChat, initialDestination( emptyList(), lastUsedId = "gone"))
     }
 
     @Test
     fun opensLastUsedInstalledModel() {
         val installed = listOf(entry("newest"), entry("last"), entry("older"))
 
-        val destination = initialDestination(true, installed, lastUsedId = "last")
+        val destination = initialDestination( installed, lastUsedId = "last")
 
         assertEquals("last", (destination as LaunchDestination.Chat).entry.model.id)
     }
@@ -38,8 +31,8 @@ class LaunchRoutingTest {
     fun fallsBackToFirstInstalledWhenLastUsedIsMissing() {
         val installed = listOf(entry("newest"), entry("older"))
 
-        val missing = initialDestination(true, installed, lastUsedId = "deleted")
-        val never = initialDestination(true, installed, lastUsedId = null)
+        val missing = initialDestination( installed, lastUsedId = "deleted")
+        val never = initialDestination( installed, lastUsedId = null)
 
         assertEquals("newest", (missing as LaunchDestination.Chat).entry.model.id)
         assertEquals("newest", (never as LaunchDestination.Chat).entry.model.id)
@@ -47,7 +40,7 @@ class LaunchRoutingTest {
 
     @Test
     fun chatDestinationCarriesTheInstalledEntryPath() {
-        val destination = initialDestination(true, listOf(entry("only")), lastUsedId = null)
+        val destination = initialDestination( listOf(entry("only")), lastUsedId = null)
 
         assertTrue(destination is LaunchDestination.Chat)
         assertEquals("/data/models/only.litertlm", (destination as LaunchDestination.Chat).entry.localPath)
