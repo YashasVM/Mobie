@@ -168,7 +168,9 @@ class ModelScreensTest {
                 )
             }
         }
-        composeRule.onNodeWithContentDescription("Attach image").assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("Add to message").performClick()
+        composeRule.onNodeWithText("File").assertIsDisplayed()
+        composeRule.onNodeWithText("Photo").assertDoesNotExist()
         composeRule.onNodeWithText("This phone loaded text chat only. Photo input is unavailable for this session.").assertIsDisplayed()
         captureEvidence("mobie-text-only-fallback.png")
     }
@@ -187,7 +189,8 @@ class ModelScreensTest {
                 )
             }
         }
-        composeRule.onNodeWithContentDescription("Attach image").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Add to message").performClick()
+        composeRule.onNodeWithText("Photo").assertIsDisplayed()
         composeRule.onNodeWithText("Chat about text or an attached photo on this phone. Image generation isn't available.").assertIsDisplayed()
         captureEvidence("mobie-image-input.png")
     }

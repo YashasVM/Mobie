@@ -3,6 +3,7 @@ package dev.yashasvm.mobie.core.runtime
 import dev.yashasvm.mobie.core.model.ModelFormat
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -76,7 +77,7 @@ class InferenceStallGuardRuntimeAdapter(
      * call may cover a GPU attempt followed by the CPU fallback.
      */
     private suspend fun boundedLoad(block: suspend () -> Result<Unit>): Result<Unit> {
-        val outcome = requestBoundedCall(loadTimeoutMs, block) ?: run {
+        val outcome = requestBoundedCall(loadTimeoutMs, block = block) ?: run {
             recoveryRequired = true
             return Result.failure(
                 IllegalStateException(
@@ -110,7 +111,7 @@ class InferenceStallGuardRuntimeAdapter(
         }
 
         val events = Channel<InferenceEvent>(Channel.BUFFERED)
-        val producerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val producerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         val producer = producerScope.launch {
             try {
                 delegate.generate(prompt, imagePath, config).collect { event ->
@@ -180,6 +181,7 @@ class InferenceStallGuardRuntimeAdapter(
                 if (event is InferenceEvent.Complete || event is InferenceEvent.Error) {
                     sawTerminalEvent = true
                 }
+                if (event is InferenceEvent.Error && event.requiresReload) recoveryRequired = true
                 emit(event)
                 if (sawTerminalEvent) {
                     producer.cancel()
@@ -238,17 +240,28 @@ class InferenceStallGuardRuntimeAdapter(
      * cancellation. Run native cancellation in a detached supervisor and only await its result for
      * the configured bound, so the caller can regain control even if that worker remains wedged.
      */
+    @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
     private suspend fun requestBoundedCancellation(): Result<Unit>? =
-        requestBoundedCall(cancellationTimeoutMs) { delegate.cancel() }
+        requestBoundedCall(cancellationTimeoutMs, start = CoroutineStart.ATOMIC) { delegate.cancel() }
 
+    @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
     private suspend fun requestBoundedLifecycleCall(block: suspend () -> Unit): Result<Unit>? =
-        requestBoundedCall(lifecycleTimeoutMs, block)
+        requestBoundedCall(lifecycleTimeoutMs, start = CoroutineStart.ATOMIC, block = block)
 
-    private suspend fun <T> requestBoundedCall(timeoutMs: Long, block: suspend () -> T): Result<T>? {
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class, kotlinx.coroutines.DelicateCoroutinesApi::class)
+    private suspend fun <T> requestBoundedCall(
+        timeoutMs: Long,
+        start: CoroutineStart = CoroutineStart.DEFAULT,
+        block: suspend () -> T,
+    ): Result<T>? {
         val completion = CompletableDeferred<Result<T>>()
-        val detachedScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        val worker = detachedScope.launch {
-            completion.complete(runCatching { block() })
+        val detachedScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val worker = detachedScope.launch(start = start) {
+            completion.complete(runCatching {
+                // Cleanup must reach the delegate even if its bounded caller has already timed out.
+                // Loads remain cancellable so a queued, expired load cannot allocate a late engine.
+                if (start == CoroutineStart.ATOMIC) withContext(NonCancellable) { block() } else block()
+            })
         }
         return try {
             withTimeoutOrNull(timeoutMs) { completion.await() }

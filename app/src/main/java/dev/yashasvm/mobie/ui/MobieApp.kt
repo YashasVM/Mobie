@@ -102,8 +102,15 @@ fun MobieApp(
             when (screen) {
                 AppScreen.CHAT -> ChatHome(
                     state = state,
-                    onSend = viewModel::sendMessage,
+                    onSend = { prompt, imagePath ->
+                        viewModel.sendMessage(prompt, imagePath, state.pendingAttachments).also { sent ->
+                            if (sent) viewModel.clearPendingAttachments()
+                        }
+                    },
                     onStop = viewModel::stopGeneration,
+                    onAttachDocument = viewModel::attachDocument,
+                    onRemoveAttachment = viewModel::removePendingAttachment,
+                    onDismissAttachmentError = viewModel::dismissAttachmentError,
                     onNewChat = viewModel::newChat,
                     onOpenThread = viewModel::openThread,
                     onRenameChat = viewModel::renameChat,
@@ -111,7 +118,6 @@ fun MobieApp(
                     onPickModel = viewModel::startInstalledChat,
                     onOpenModels = viewModel::openModels,
                     onGetModel = viewModel::findModel,
-                    onSamplerChange = viewModel::updateSampler,
                     onComputeSettings = { showComputeSettings = true },
                     onLoadAnyway = { viewModel.runInstalled(allowReclaim = true) },
                 )

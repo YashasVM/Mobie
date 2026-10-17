@@ -12,6 +12,7 @@ class RuntimeModelOwnershipTest {
         ownership.markLoaded("model-a")
 
         assertTrue(ownership.owns("model-a"))
+        assertTrue(ownership.isLoaded("model-a"))
         assertFalse(ownership.owns("model-b"))
     }
 
@@ -24,6 +25,8 @@ class RuntimeModelOwnershipTest {
 
         assertTrue(ownership.owns("model-a"))
         assertTrue(ownership.owns("model-b"))
+        assertFalse(ownership.isLoaded("model-a"))
+        assertFalse(ownership.isLoaded("model-b"))
     }
 
     @Test

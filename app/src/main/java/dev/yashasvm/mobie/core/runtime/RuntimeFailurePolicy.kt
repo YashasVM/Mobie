@@ -111,7 +111,7 @@ internal fun isFatalRuntimeFailure(error: Throwable): Boolean =
 
 /** Plain-language event for a failure that escaped the native call. Errors leave native state uncertain. */
 internal fun runtimeFailureEvent(error: Throwable): InferenceEvent.Error =
-    InferenceEvent.Error(error.message ?: "Inference failed", requiresReload = error !is Exception)
+    InferenceEvent.Error(error.message ?: "Inference failed", requiresReload = error !is Exception || error is NativeCleanupException)
 
 internal fun rethrowNonRecoverableRuntimeFailure(error: Throwable) {
     if (error is CancellationException) throw error

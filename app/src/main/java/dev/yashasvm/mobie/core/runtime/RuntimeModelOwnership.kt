@@ -22,5 +22,7 @@ internal class RuntimeModelOwnership {
         ownershipKnown = false
     }
 
+    fun isLoaded(modelId: String): Boolean = ownershipKnown && loadedModelId == modelId
+
     fun owns(modelId: String): Boolean = !ownershipKnown || loadedModelId == modelId
 }

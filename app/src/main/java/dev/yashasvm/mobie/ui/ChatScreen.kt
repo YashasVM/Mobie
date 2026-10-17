@@ -3,6 +3,11 @@ package dev.yashasvm.mobie.ui
 import android.content.ClipData
 import android.content.Context
 import android.graphics.BitmapFactory
+import dev.yashasvm.mobie.core.attachment.AttachmentMeta
+import dev.yashasvm.mobie.core.attachment.AttachmentPolicy
+import dev.yashasvm.mobie.core.attachment.DocumentAttachment
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -164,6 +169,9 @@ internal fun ChatScreen(
     onComputeSettings: () -> Unit = {},
     onLoadAnyway: () -> Unit = {},
     onGetModel: (String) -> Unit = {},
+    onAttachDocument: (Uri) -> Unit = {},
+    onRemoveAttachment: (Int) -> Unit = {},
+    onDismissAttachmentError: () -> Unit = {},
 ) {
     val readOnly = state.readOnlyChat
     val model = state.selected
@@ -179,6 +187,9 @@ internal fun ChatScreen(
     val inputFocus = remember { FocusRequester() }
     val entrances = remember { MessageEntrances() }
     entrances.sync(state.messages)
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        uri?.let(onAttachDocument)
+    }
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri ?: return@rememberLauncherForActivityResult
         scope.launch {
@@ -229,7 +240,7 @@ internal fun ChatScreen(
     val ready = state.runtimeState == RuntimeState.READY
     val generating = state.runtimeState == RuntimeState.GENERATING
     val runtimeLabel = state.selectedArtifact?.runtimeLabel ?: "LiteRT-LM"
-    val canSubmit = readOnly == null && ready && !imageCopying && prompt.isNotBlank()
+    val canSubmit = readOnly == null && ready && !imageCopying && (prompt.isNotBlank() || state.pendingAttachments.isNotEmpty())
     val imageAllowed = readOnly == null && model?.supportsVision == true && state.imageInputReady
     val reclaimRetry = onLoadAnyway.takeIf {
         state.compatibility?.memoryTier == MemoryAdmissionTier.FITS_AFTER_RECLAIM &&
@@ -360,7 +371,12 @@ internal fun ChatScreen(
             error = state.error.takeIf { state.runtimeState != RuntimeState.ERROR || state.messages.isNotEmpty() },
             imageError = imageError,
             focusRequester = inputFocus,
-            onAttach = { imagePicker.launch("image/*") },
+            onPickFile = { filePicker.launch(AttachmentPolicy.PICKER_MIME_TYPES) },
+            onPickPhoto = { imagePicker.launch("image/*") },
+            pendingAttachments = state.pendingAttachments,
+            attachmentError = state.attachmentError,
+            onRemoveAttachment = onRemoveAttachment,
+            onDismissAttachmentError = onDismissAttachmentError,
             onRemoveImage = {
                 val stale = imagePath
                 imagePath = null
@@ -853,12 +869,48 @@ private fun EmptyChat(model: AiModel, loaded: Boolean, imageInputReady: Boolean,
 
 /** Your message: a rounded bubble aligned to the right, like any chat app. */
 @Composable
+internal fun AttachmentChip(meta: AttachmentMeta, modifier: Modifier = Modifier, onRemove: (() -> Unit)? = null) {
+    Row(
+        modifier
+            .clip(PillShape)
+            .border(1.dp, Mobie.signals.hairline, PillShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh, PillShape)
+            .padding(start = 12.dp, end = if (onRemove != null) 0.dp else 14.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        LucideIcon(LucideR.drawable.lucide_ic_file_text, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+        Column(Modifier.widthIn(max = 240.dp)) {
+            Text(
+                meta.name,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                if (meta.truncated) "${formatBytes(meta.sizeBytes)} · truncated" else formatBytes(meta.sizeBytes),
+                style = Mobie.numeric.tiny,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+        }
+        if (onRemove != null) {
+            IconButton(onClick = onRemove, modifier = Modifier.size(48.dp)) {
+                LucideIcon(LucideR.drawable.lucide_ic_x, "Remove ${meta.name}", Modifier.size(16.dp))
+            }
+        }
+    }
+}
+
+@Composable
 private fun UserMessage(message: ChatMessage, modifier: Modifier = Modifier) {
     Column(
         modifier.fillMaxWidth().padding(start = 48.dp),
         horizontalAlignment = Alignment.End,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
+        message.attachments.forEach { AttachmentChip(it.meta) }
         message.imagePath?.let { AttachedImage(it) }
         if (message.text.isNotBlank()) {
             SelectionContainer {
@@ -1262,7 +1314,12 @@ private fun ComposerDock(
     error: String?,
     imageError: String?,
     focusRequester: FocusRequester,
-    onAttach: () -> Unit,
+    onPickFile: () -> Unit,
+    onPickPhoto: () -> Unit,
+    pendingAttachments: List<DocumentAttachment>,
+    attachmentError: String?,
+    onRemoveAttachment: (Int) -> Unit,
+    onDismissAttachmentError: () -> Unit,
     onRemoveImage: () -> Unit,
     onSubmit: () -> Unit,
     onStop: () -> Unit,
@@ -1313,6 +1370,16 @@ private fun ComposerDock(
                     Text("Attaching image…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
+            if (pendingAttachments.isNotEmpty()) {
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    pendingAttachments.forEachIndexed { index, attachment ->
+                        AttachmentChip(attachment.meta, onRemove = { onRemoveAttachment(index) })
+                    }
+                }
+            }
             AnimatedVisibility(
                 visible = imagePath != null,
                 enter = fadeIn(tween(MotionMedium)) + expandVertically(tween(MotionMedium, easing = EmphasizedEase)),
@@ -1350,6 +1417,22 @@ private fun ComposerDock(
                     modifier = Modifier.appear(offsetDp = 6f).semantics { liveRegion = LiveRegionMode.Polite },
                 )
             }
+            attachmentError?.let {
+                Row(
+                    Modifier.appear(offsetDp = 6f).semantics(mergeDescendants = false) { liveRegion = LiveRegionMode.Polite },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        it,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f).padding(start = 4.dp),
+                    )
+                    IconButton(onClick = onDismissAttachmentError, modifier = Modifier.size(48.dp)) {
+                        LucideIcon(LucideR.drawable.lucide_ic_x, "Dismiss file error", Modifier.size(16.dp))
+                    }
+                }
+            }
             Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(
                     Modifier
@@ -1358,14 +1441,11 @@ private fun ComposerDock(
                         .clip(fieldShape)
                         .background(MaterialTheme.colorScheme.surfaceContainer, fieldShape)
                         .border(1.dp, fieldBorder, fieldShape)
-                        .padding(start = if (supportsVision) 4.dp else 18.dp, end = 16.dp),
+                        .padding(start = 4.dp, end = 16.dp),
                     verticalAlignment = Alignment.Bottom,
                 ) {
-                    if (supportsVision) {
-                        IconButton(onClick = onAttach, enabled = ready && !imageCopying) {
-                            LucideIcon(LucideR.drawable.lucide_ic_image, "Attach image", Modifier.size(20.dp))
-                        }
-                    }
+                    AttachMenuButton(enabled = ready && !imageCopying, supportsVision = supportsVision,
+                        onPickFile = onPickFile, onPickPhoto = onPickPhoto)
                     BasicTextField(
                         value = prompt,
                         onValueChange = onPromptChange,
@@ -1565,5 +1645,35 @@ internal suspend fun copyImageToCache(context: Context, uri: Uri): String? {
         return null
     } finally {
         if (!copied) withContext(NonCancellable + Dispatchers.IO) { image?.delete() }
+    }
+}
+
+@Composable
+private fun AttachMenuButton(enabled: Boolean, supportsVision: Boolean, onPickFile: () -> Unit, onPickPhoto: () -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }, enabled = enabled, modifier = Modifier.size(48.dp)) {
+            LucideIcon(LucideR.drawable.lucide_ic_plus, "Add to message", Modifier.size(22.dp))
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text("File") },
+                leadingIcon = { LucideIcon(LucideR.drawable.lucide_ic_file_text, null, Modifier.size(18.dp)) },
+                onClick = {
+                    open = false
+                    onPickFile()
+                },
+            )
+            if (supportsVision) {
+                DropdownMenuItem(
+                    text = { Text("Photo") },
+                    leadingIcon = { LucideIcon(LucideR.drawable.lucide_ic_image, null, Modifier.size(18.dp)) },
+                    onClick = {
+                        open = false
+                        onPickPhoto()
+                    },
+                )
+            }
+        }
     }
 }

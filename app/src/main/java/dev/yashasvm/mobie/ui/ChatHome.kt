@@ -58,7 +58,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.composables.icons.lucide.R as LucideR
-import dev.yashasvm.mobie.core.runtime.SamplerSettings
 import dev.yashasvm.mobie.data.download.InstalledModelEntry
 import dev.yashasvm.mobie.data.history.ChatThread
 import dev.yashasvm.mobie.ui.theme.Mobie
@@ -81,9 +80,11 @@ internal fun ChatHome(
     onPickModel: (InstalledModelEntry) -> Unit,
     onOpenModels: (CatalogTab) -> Unit,
     onGetModel: (String) -> Unit,
-    onSamplerChange: (SamplerSettings) -> String? = { null },
     onComputeSettings: () -> Unit = {},
     onLoadAnyway: () -> Unit = {},
+    onAttachDocument: (android.net.Uri) -> Unit = {},
+    onRemoveAttachment: (Int) -> Unit = {},
+    onDismissAttachmentError: () -> Unit = {},
 ) {
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -128,6 +129,9 @@ internal fun ChatHome(
                     state = state,
                     onSend = onSend,
                     onStop = onStop,
+                    onAttachDocument = onAttachDocument,
+                    onRemoveAttachment = onRemoveAttachment,
+                    onDismissAttachmentError = onDismissAttachmentError,
                     onOpenDrawer = openDrawer,
                     onOpenModelPicker = { showPicker = true },
                     onNewChat = onNewChat,

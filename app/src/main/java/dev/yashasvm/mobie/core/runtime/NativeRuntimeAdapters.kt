@@ -74,6 +74,7 @@ class LiteRtLmRuntimeAdapter(
     override fun configureThinking(enabled: Boolean?) { configuredThinking = enabled }
     private val appContext = context.applicationContext
     private val backendFingerprint = "${Build.FINGERPRINT}:${BuildConfig.LITERT_LM_VERSION}"
+    private val cleanupGuard = NativeCleanupGuard()
     private val lifecycle = Mutex()
     private val generation = Mutex()
     private val cancellationState = RuntimeCancellationState()
@@ -111,7 +112,8 @@ class LiteRtLmRuntimeAdapter(
 
     private suspend fun loadInternal(
         modelPath: String, vision: Boolean, history: List<RuntimeMessage>, allowReclaim: Boolean,
-    ): Result<Unit> = withContext(Dispatchers.Default) {
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        cleanupGuard.ensureSafe()
         val transition = cancellationState.beginLifecycleTransition()
         try {
             val cancellationFailure = requestCancellationForLifecycleTransition()
@@ -175,17 +177,8 @@ class LiteRtLmRuntimeAdapter(
                             if (options.artifactIdentity.isNotBlank()) {
                                 computeSettings.memory.invalidate(options.artifactIdentity, backendFingerprint)
                             }
-                            runRuntimeCleanupUnlessFatal(error) { loadedEngine.engine.close() }
-                            engine = null
-                            visionReady = false
-                            selectedCompute = null
-                            selectedCapabilities = null
-                            contextWindowTokens = DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS
-                            committedHistory = emptyList()
-                            conversationDirty = false
-                            nativeConversationHasImage = false
-                            cancelRequested = false
-                            loadedRamEstimateBytes = 0L
+                            if (error !is Exception) cleanupGuard.markUncertain(error)
+                            runRuntimeCleanupUnlessFatal(error) { closeRuntime() }
                             throw error
                         }
                     }
@@ -200,6 +193,7 @@ class LiteRtLmRuntimeAdapter(
 
     /** Everything that can refuse a reload. Runs while the previous engine is still loaded. */
     private fun admitLoad(modelPath: String, vision: Boolean, allowReclaim: Boolean): AdmittedLoad {
+        cleanupGuard.ensureSafe()
         val options = computeOptions
         val capabilities = ModelInfo.from(modelPath).use { info ->
             require(info is ModelInfo.Llm) { "This artifact is not a chat model." }
@@ -224,7 +218,8 @@ class LiteRtLmRuntimeAdapter(
     }
 
     override suspend fun resetConversation(history: List<RuntimeMessage>): Result<Unit> =
-        withContext(Dispatchers.Default) {
+        withContext(Dispatchers.IO) {
+            cleanupGuard.ensureSafe()
             resetRuntimeConversation(
                 cancellationState = cancellationState,
                 generation = generation,
@@ -246,6 +241,7 @@ class LiteRtLmRuntimeAdapter(
         config: GenerationConfig,
     ): Flow<InferenceEvent> {
         return generationEventFlow {
+            cleanupGuard.ensureSafe()
             val generationStartedAt = SystemClock.elapsedRealtime()
             val partialAnswer = StringBuilder()
             val generationPermit = cancellationState.captureGenerationPermit()
@@ -405,16 +401,18 @@ class LiteRtLmRuntimeAdapter(
                     cancelRequested = false
                 }
             }
-        }.flowOn(Dispatchers.Default)
+        }.flowOn(Dispatchers.IO)
     }
 
-    override suspend fun cancel() = withContext(Dispatchers.Default) {
+    override suspend fun cancel() = withContext(Dispatchers.IO) {
+        cleanupGuard.ensureSafe()
         val cancellationFailure = requestExplicitCancellation()
         if (cancellationFailure != null) throw cancellationFailure
         Unit
     }
 
-    override suspend fun unload() = withContext(Dispatchers.Default) {
+    override suspend fun unload() = withContext(Dispatchers.IO) {
+        cleanupGuard.ensureSafe()
         val transition = cancellationState.beginLifecycleTransition()
         try {
             val cancellationFailure = requestCancellationForLifecycleTransition()
@@ -592,7 +590,8 @@ class LiteRtLmRuntimeAdapter(
             createdEngine.initialize()
             return createdEngine
         } catch (error: Throwable) {
-            runRuntimeCleanupUnlessFatal(error) { createdEngine.close() }
+            if (error !is Exception) cleanupGuard.markUncertain(error)
+            runRuntimeCleanupUnlessFatal(error) { cleanupGuard.close { createdEngine.close() } }
             throw error
         }
     }
@@ -609,6 +608,7 @@ class LiteRtLmRuntimeAdapter(
         restoreHistoryImage: Boolean = true,
         sampler: SamplerSettings = activeSampler,
     ) {
+        cleanupGuard.ensureSafe()
         val activeEngine = engine
             ?: throw IllegalStateException("Load a model before rebuilding the conversation")
         // A live cache can retain more text than the conservative replay byte allowance. A new
@@ -635,7 +635,7 @@ class LiteRtLmRuntimeAdapter(
                 conversationDirty = false
                 activeSampler = sampler
             },
-            closePrevious = { stale -> stale.close() },
+            closePrevious = { stale -> cleanupGuard.close { stale.close() } },
         )
     }
 
@@ -817,13 +817,21 @@ class LiteRtLmRuntimeAdapter(
     }
 
     private fun closeRuntime() {
-        val previousConversation = conversation
-        val previousEngine = engine
-        conversation = null
-        engine = null
         visionReady = false
         selectedCompute = null
         selectedCapabilities = null
+        // JNI may free only part of its state before throwing. Never retry those pointers or
+        // report a later empty unload as success after losing their ownership.
+        cleanupGuard.close {
+            runAllRuntimeCleanup(
+                { activeHintTracker?.close() },
+                { conversation?.close() },
+                { engine?.close() },
+            )
+        }
+        activeHintTracker = null
+        conversation = null
+        engine = null
         activeOptions = ComputeOptions()
         contextWindowTokens = DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS
         committedHistory = emptyList()
@@ -832,11 +840,6 @@ class LiteRtLmRuntimeAdapter(
         cancelRequested = false
         loadedRamEstimateBytes = 0L
         cancellationState.reset()
-        runAllRuntimeCleanup(
-            { activeHintTracker?.close(); activeHintTracker = null },
-            { previousConversation?.close() },
-            { previousEngine?.close() },
-        )
     }
 
     /** Debug.getPss() reads this process directly; ActivityManager's per-process PSS is rate-limited and can be stale. */

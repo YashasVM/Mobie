@@ -20,7 +20,7 @@ import dev.yashasvm.mobie.data.history.ChatHistoryStore
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
-class AppContainer(context: Context) {
+class AppContainer(context: Context, private val runtimeOverride: RuntimeRegistry? = null) {
     val appContext: Context = context.applicationContext
     private val http = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
@@ -32,6 +32,7 @@ class AppContainer(context: Context) {
     val catalog by lazy { HuggingFaceCatalogRepository(http, tokenStore) }
     val conversion by lazy { ConversionRepository(http) }
     val downloads by lazy { ModelDownloadManager(appContext) }
+    val attachments by lazy { dev.yashasvm.mobie.data.attachment.AttachmentReader(appContext) }
     val chatHistory by lazy { ChatHistoryStore(appContext) }
     val samplerSettings by lazy { SamplerSettingsStore(appContext) }
     val deviceProfile by lazy { DeviceProfileProvider(appContext) }
@@ -41,7 +42,7 @@ class AppContainer(context: Context) {
     private val liteRtRuntime by lazy { LiteRtLmRuntimeAdapter(appContext, computeSettings) }
     private val stallGuardedLiteRtRuntime by lazy { InferenceStallGuardRuntimeAdapter(liteRtRuntime) }
     val runtimes by lazy {
-        RuntimeRegistry(
+        runtimeOverride ?: RuntimeRegistry(
             setOf(
                 ThermalGuardRuntimeAdapter(
                     delegate = stallGuardedLiteRtRuntime,

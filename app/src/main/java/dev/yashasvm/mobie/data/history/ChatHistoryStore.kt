@@ -1,6 +1,7 @@
 package dev.yashasvm.mobie.data.history
 
 import android.content.Context
+import dev.yashasvm.mobie.core.attachment.DocumentAttachment
 import android.content.SharedPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -20,7 +21,26 @@ data class HistoryMessage(
     val imagePath: String? = null,
     val thinking: String = "",
     val interrupted: Boolean = false,
+    val attachments: List<HistoryAttachment> = emptyList(),
 )
+
+@Serializable
+data class HistoryAttachment(
+    val name: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val text: String,
+    val truncated: Boolean = false,
+)
+
+internal fun DocumentAttachment.toHistory(): HistoryAttachment =
+    HistoryAttachment(name, mimeType, sizeBytes, text, truncated)
+
+internal fun HistoryAttachment.toDocument(): DocumentAttachment =
+    DocumentAttachment(name, mimeType, sizeBytes, text, truncated)
+
+/** Shared by the store and its tests so the persisted format is checked with the real configuration. */
+internal val chatHistoryJson: Json = Json { ignoreUnknownKeys = true }
 
 @Serializable
 data class ChatHistorySession(
@@ -53,7 +73,7 @@ class ChatHistoryStore private constructor(openPreferences: () -> SharedPreferen
 
     // First access, including opening the preferences file, happens under the IO lock.
     private val preferences by lazy(openPreferences)
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = chatHistoryJson
     private val lock = Mutex()
 
     // Guarded by [lock]; avoids decoding unchanged transcripts on each read.

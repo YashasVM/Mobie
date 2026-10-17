@@ -1,0 +1,8 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <provider
+            android:name="dev.yashasvm.mobie.AttachmentFixtureProvider"
+            android:authorities="dev.yashasvm.mobie.test.documents"
+            android:exported="true" />
+    </application>
+</manifest>
