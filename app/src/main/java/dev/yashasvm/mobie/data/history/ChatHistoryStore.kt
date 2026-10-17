@@ -1,11 +1,16 @@
 package dev.yashasvm.mobie.data.history
 
 import android.content.Context
+import dev.yashasvm.mobie.core.attachment.DocumentAttachment
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.UUID
 
+/**
+ * Persisted chat message. [attachments] was added after the first release: it defaults to empty and
+ * Json ignores unknown keys, so older saved transcripts decode unchanged and empty lists are not written.
+ */
 @Serializable
 data class HistoryMessage(
     val fromUser: Boolean,
@@ -13,7 +18,26 @@ data class HistoryMessage(
     val imagePath: String? = null,
     val thinking: String = "",
     val interrupted: Boolean = false,
+    val attachments: List<HistoryAttachment> = emptyList(),
 )
+
+@Serializable
+data class HistoryAttachment(
+    val name: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val text: String,
+    val truncated: Boolean = false,
+)
+
+internal fun DocumentAttachment.toHistory(): HistoryAttachment =
+    HistoryAttachment(name, mimeType, sizeBytes, text, truncated)
+
+internal fun HistoryAttachment.toDocument(): DocumentAttachment =
+    DocumentAttachment(name, mimeType, sizeBytes, text, truncated)
+
+/** Shared by the store and its tests so the persisted format is checked with the real configuration. */
+internal val chatHistoryJson: Json = Json { ignoreUnknownKeys = true }
 
 @Serializable
 data class ChatHistorySession(
@@ -25,7 +49,7 @@ data class ChatHistorySession(
 
 class ChatHistoryStore(context: Context) {
     private val preferences = context.getSharedPreferences("chat_history", Context.MODE_PRIVATE)
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = chatHistoryJson
     // In-memory cache keyed by modelId. Eliminates redundant JSON deserialization when the ViewModel
     // calls sessions() immediately after write() within the same event handler.
     private val sessionsCache = HashMap<String, List<ChatHistorySession>>()
@@ -61,8 +85,8 @@ class ChatHistoryStore(context: Context) {
 
     fun startNewSession(modelId: String): String {
         val id = UUID.randomUUID().toString()
-        val sessions = (listOf(ChatHistorySession(id, "New local chat", System.currentTimeMillis())) + sessions(modelId))
-            .take(MAX_SESSIONS)
+        val sessions = (listOf(ChatHistorySession(id, "New local chat", System.currentTimeMillis())) +
+            sessions(modelId).filter { it.messages.isNotEmpty() }.take(MAX_SESSIONS))
         sessionsCache[modelId] = sessions
         preferences.edit()
             .putString(sessionsKey(modelId), json.encodeToString(sessions))

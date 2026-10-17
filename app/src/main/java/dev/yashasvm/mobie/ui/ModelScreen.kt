@@ -14,6 +14,12 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -32,12 +38,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,15 +51,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.work.WorkInfo
 import com.composables.icons.lucide.R as LucideR
@@ -70,11 +69,9 @@ import dev.yashasvm.mobie.core.runtime.ComputeBackend
 import dev.yashasvm.mobie.data.download.DownloadProgress
 import dev.yashasvm.mobie.data.download.isCancellable
 import dev.yashasvm.mobie.ui.theme.Mobie
-import java.util.Locale
 
 /**
- * Pre-flight spec sheet for one model, styled as a terminal screen: a verdict box, a memory budget
- * window, storage and artifact key/value grids, and a pinned action dock for download / cancel / run.
+ * Model details, device fit, and download safeguards with a pinned download or run action.
  */
 @Composable
 internal fun ModelScreen(
@@ -96,7 +93,7 @@ internal fun ModelScreen(
     val entrance = rememberEntranceTracker()
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        ModelTopBar(path = model.id, runtime = artifact.runtimeLabel, onBack = onBack)
+        ModelTopBar(onBack = onBack)
         LazyColumn(
             modifier = Modifier.weight(1f).fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -104,6 +101,9 @@ internal fun ModelScreen(
         ) {
             item(key = "identity") { ModelIdentity(model, artifact, Modifier.entrance(entrance, "identity", 0)) }
             item(key = "verdict") { VerdictPanel(state.compatibility, Modifier.entrance(entrance, "verdict", 1)) }
+            item(key = "checklist") {
+                ChecklistPanel(model, artifact, state, Modifier.entrance(entrance, "checklist", 2))
+            }
             item(key = "memory") {
                 MemoryPanel(state.compatibility, state.device, Modifier.entrance(entrance, "memory", 2))
             }
@@ -141,75 +141,123 @@ internal fun ModelScreen(
     }
 
     if (confirmWarning) {
-        AlertDialog(
-            onDismissRequest = { confirmWarning = false },
-            title = { Text("Free memory before running") },
-            text = { Text(state.compatibility?.reason.orEmpty()) },
-            confirmButton = {
-                TextButton(onClick = { confirmWarning = false; onDownload(true) }) { Text("Download anyway") }
-            },
-            dismissButton = { TextButton(onClick = { confirmWarning = false }) { Text("Cancel") } },
+        ConfirmSheet(
+            title = "Free memory before downloading",
+            body = state.compatibility?.reason.orEmpty(),
+            confirmLabel = "Download anyway",
+            onConfirm = { confirmWarning = false; onDownload(true) },
+            onDismiss = { confirmWarning = false },
         )
     }
     if (confirmRun) {
-        AlertDialog(
-            onDismissRequest = { confirmRun = false },
-            title = { Text("Free memory before loading") },
-            text = { Text(state.compatibility?.reason.orEmpty()) },
-            confirmButton = {
-                TextButton(onClick = { confirmRun = false; onRun(true) }) { Text("Load anyway") }
-            },
-            dismissButton = { TextButton(onClick = { confirmRun = false }) { Text("Cancel") } },
+        ConfirmSheet(
+            title = "Free memory before loading",
+            body = state.compatibility?.reason.orEmpty(),
+            confirmLabel = "Load anyway",
+            onConfirm = { confirmRun = false; onRun(true) },
+            onDismiss = { confirmRun = false },
         )
     }
 }
 
-/** Top bar: back, the model as a path (`model/<id>`), and the runtime tag. */
+/** Bottom sheet for a warning the user may override. Cancel is the default, easy way out. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ModelTopBar(path: String, runtime: String, onBack: () -> Unit) {
-    val dim = MaterialTheme.colorScheme.onSurfaceVariant
-    val ink = MaterialTheme.colorScheme.onSurface
-    Column(Modifier.fillMaxWidth().statusBarsPadding()) {
-        Row(
-            Modifier.fillMaxWidth().padding(start = 4.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
+private fun ConfirmSheet(
+    title: String,
+    body: String,
+    confirmLabel: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
-                LucideIcon(LucideR.drawable.lucide_ic_arrow_left, "Back", Modifier.size(22.dp))
-            }
-            Text(
-                buildAnnotatedString {
-                    withStyle(SpanStyle(color = dim)) { append("model/") }
-                    withStyle(SpanStyle(color = ink)) { append(middleEllipsis(path, 36)) }
-                },
-                style = Mobie.numeric.small,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f).padding(start = 4.dp),
-            )
-            Tag(runtime, icon = LucideR.drawable.lucide_ic_cpu)
+            Text(title, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
+            Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            TermButton(confirmLabel, onClick = onConfirm, modifier = Modifier.fillMaxWidth(), style = TermButtonStyle.Primary)
+            TermButton("Cancel", onClick = onDismiss, modifier = Modifier.fillMaxWidth(), style = TermButtonStyle.Ghost)
         }
-        Hairline()
     }
 }
 
-/** Repo id as the large heading, author above it, and the facts that matter as tags. */
+/**
+ * The pre-download checklist. Every fact the user needs before committing storage and memory is
+ * listed here: size, estimated RAM, free storage, runtime, quantization, license, access, and the
+ * compatibility verdict.
+ */
+@Composable
+private fun ChecklistPanel(model: AiModel, artifact: ModelArtifact, state: MobieUiState, modifier: Modifier = Modifier) {
+    val result = state.compatibility
+    val peak = result?.estimatedRamBytes?.takeIf { it > 0 }
+    val needed = result?.requiredStorageBytes?.takeIf { it > 0 } ?: artifact.sizeBytes
+    val free = state.device?.availableStorageBytes?.takeIf { it > 0 }
+    val license = model.license ?: "Check model card"
+    val storageShort = needed > 0 && free != null && needed > free
+    Panel(modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            SectionLabel("Before you download")
+            Spacer(Modifier.height(6.dp))
+            StatRow("Download size", if (artifact.sizeBytes > 0) formatBytes(artifact.sizeBytes) else "Unknown")
+            Hairline()
+            StatRow("Estimated RAM", peak?.let { formatBytes(it) } ?: "Unknown")
+            Hairline()
+            StatRow(
+                "Free storage",
+                free?.let { formatBytes(it) } ?: "Unknown",
+                valueColor = if (storageShort) Mobie.signals.blocked else null,
+            )
+            Hairline()
+            StatRow("Runtime", artifact.runtimeLabel)
+            Hairline()
+            StatRow("Quantization", artifact.quantization ?: "Publisher default")
+            Hairline()
+            StatRow("License", license, stacked = license.length > 24)
+            Hairline()
+            StatRow("Access", if (model.gated) "Needs Hugging Face approval" else "Public")
+            Hairline()
+            StatRow(
+                "Compatibility",
+                statusLabel(result?.status),
+                valueColor = result?.status.signalColor(),
+            )
+        }
+    }
+}
+
+/** Keeps the model detail screen connected to the model library. */
+@Composable
+private fun ModelTopBar(onBack: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().statusBarsPadding().padding(start = 4.dp, end = 20.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
+            LucideIcon(LucideR.drawable.lucide_ic_arrow_left, "Back", Modifier.size(22.dp))
+        }
+        Text("Model details", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
+    }
+}
+
+/** Human-readable name first, with the publisher and supported inputs beneath it. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ModelIdentity(model: AiModel, artifact: ModelArtifact, modifier: Modifier = Modifier) {
     Column(modifier.padding(top = 14.dp, bottom = 2.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (model.author.isNotBlank()) {
-            Text("by ${model.author}", style = Mobie.numeric.small, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(model.author, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Text(
-            model.id,
-            style = Mobie.numeric.large,
+            model.title.ifBlank { model.id.substringAfterLast('/') },
+            style = MaterialTheme.typography.headlineLarge,
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.semantics { heading() },
         )
-        if (model.title.isNotBlank() && model.title != model.id.substringAfter('/')) {
-            Text(model.title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
-        }
         if (model.description.isNotBlank()) {
             Text(
                 model.description,
@@ -224,7 +272,7 @@ private fun ModelIdentity(model: AiModel, artifact: ModelArtifact, modifier: Mod
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Tag("Type: ${model.type.displayLabel()}")
+            Tag(model.type.displayLabel())
             Tag(
                 if (model.gated) "Gated" else "Public",
                 icon = if (model.gated) LucideR.drawable.lucide_ic_lock else LucideR.drawable.lucide_ic_globe,
@@ -249,22 +297,29 @@ private fun VerdictPanel(result: CompatibilityResult?, modifier: Modifier = Modi
     val mark = when (status) {
         Compatibility.COMPATIBLE -> "✓"
         Compatibility.WARNING -> "!"
-        Compatibility.INCOMPATIBLE, Compatibility.CONVERSION_REQUIRED -> "x"
+        Compatibility.INCOMPATIBLE, Compatibility.CONVERSION_REQUIRED -> "✕"
         null -> "…"
     }
+    val shape = RoundedCornerShape(24.dp)
     Column(
         modifier
             .fillMaxWidth()
-            .border(1.dp, color)
-            .background(color.copy(alpha = .06f))
-            .padding(14.dp),
+            .clip(shape)
+            .background(color.copy(alpha = .08f), shape)
+            .border(1.dp, color.copy(alpha = .45f), shape)
+            .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("[$mark]", style = Mobie.numeric.large, color = color)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(
+                Modifier.size(32.dp).clip(CircleShape).background(color.copy(alpha = .18f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(mark, style = Mobie.numeric.medium, color = color)
+            }
             AnimatedContent(
                 targetState = when (status) {
-                    Compatibility.COMPATIBLE -> "Runs on this phone"
+                    Compatibility.COMPATIBLE -> "Fits this phone’s memory"
                     Compatibility.WARNING ->
                         if (result?.memoryTier == MemoryAdmissionTier.FITS_AFTER_RECLAIM) "Fits after freeing memory" else "Check before running"
                     Compatibility.INCOMPATIBLE -> "Won't fit on this phone"
@@ -305,8 +360,8 @@ private fun MemoryPanel(result: CompatibilityResult?, device: DeviceProfile?, mo
     val total = device?.totalRamBytes ?: 0L
     val available = device?.availableRamBytes ?: 0L
 
-    TuiWindow("memory budget", modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    TuiWindow("Memory", modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             MemoryBar(
                 segments = segments,
                 capacityBytes = total,
@@ -371,7 +426,7 @@ private fun MemoryPanel(result: CompatibilityResult?, device: DeviceProfile?, mo
 }
 
 /**
- * One terminal key/value row: dim key on the left, value on the right. Use [stacked] for values
+ * One key/value row: muted key on the left, value on the right. Use [stacked] for values
  * too long to share a line (such as file names), which puts the value under the key.
  */
 @Composable
@@ -387,15 +442,15 @@ private fun KvRow(
     val ink = valueColor ?: MaterialTheme.colorScheme.onSurface
     if (stacked) {
         Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(key, style = Mobie.numeric.small, color = dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(key, style = MaterialTheme.typography.bodySmall, color = dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(value, style = Mobie.numeric.small, color = ink)
         }
     } else {
         Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.weight(.42f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 // The swatch column is always reserved so keys line up whether or not they have one.
-                Box(Modifier.size(8.dp).background(swatch ?: Color.Transparent))
-                Text(key, style = Mobie.numeric.small, color = dim, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Box(Modifier.size(8.dp).clip(CircleShape).background(swatch ?: Color.Transparent))
+                Text(key, style = MaterialTheme.typography.bodyMedium, color = dim, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             Text(
                 value,
@@ -426,8 +481,8 @@ private fun StoragePanel(
         else -> Mobie.signals.blocked
     }
     val after = if (needed > 0 && free > 0) free - needed else 0L
-    TuiWindow("storage", modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    TuiWindow("Storage", modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 KvRow("Needs", formatBytes(needed))
                 KvRow("Free", formatBytes(free))
@@ -463,8 +518,8 @@ private fun ArtifactPanel(artifact: ModelArtifact, model: AiModel, modifier: Mod
         add(SpecLine("License", model.license ?: "Check model card"))
         add(SpecLine("Access", if (model.gated) "Hugging Face approval required" else "Public"))
     }
-    TuiWindow("artifact", modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    TuiWindow("Files and details", modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             rows.forEach { line ->
                 KvRow(
                     line.label,
@@ -499,14 +554,14 @@ private fun ComputeSettingsPanel(
     onCpuThreadsChange: (Int?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    TuiWindow("compute", modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    TuiWindow("Performance", modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                FlagHeader("--backend", "where the model runs")
+                FlagHeader("Processing", "Where the model runs")
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(ComputeBackend.AUTO, ComputeBackend.CPU, ComputeBackend.GPU).forEach { choice ->
-                        FlagChoice(
-                            label = choice.name.lowercase(Locale.US),
+                        ChoiceChip(
+                            label = when (choice) { ComputeBackend.AUTO -> "Automatic"; ComputeBackend.CPU -> "CPU"; ComputeBackend.GPU -> "GPU"; ComputeBackend.NPU -> "NPU" },
                             selected = backend == choice,
                             onClick = { onBackendChange(choice) },
                         )
@@ -514,11 +569,11 @@ private fun ComputeSettingsPanel(
                 }
             }
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                FlagHeader("--threads", "cpu threads")
+                FlagHeader("CPU threads", "Changes apply on next load")
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FlagChoice("auto", selected = cpuThreads == null, onClick = { onCpuThreadsChange(null) })
+                    ChoiceChip("Auto", selected = cpuThreads == null, onClick = { onCpuThreadsChange(null) })
                     (1..8).forEach { count ->
-                        FlagChoice(
+                        ChoiceChip(
                             label = count.toString(),
                             selected = cpuThreads == count,
                             onClick = { onCpuThreadsChange(count) },
@@ -535,34 +590,12 @@ private fun ComputeSettingsPanel(
     }
 }
 
-/** A terminal flag name followed by a plain-language hint, e.g. `--backend  where the model runs`. */
+/** A settings label followed by a short explanation. */
 @Composable
 private fun FlagHeader(flag: String, hint: String) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(flag, style = Mobie.numeric.small, color = MaterialTheme.colorScheme.primary)
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(flag, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
         Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-/** A square option button. The selected option is filled, like an inverted tmux cursor. */
-@Composable
-private fun FlagChoice(label: String, selected: Boolean, onClick: () -> Unit) {
-    val accent = MaterialTheme.colorScheme.primary
-    Box(
-        Modifier
-            .heightIn(min = 44.dp)
-            .widthIn(min = 44.dp)
-            .background(if (selected) accent else Color.Transparent)
-            .border(1.dp, if (selected) accent else MaterialTheme.colorScheme.outline)
-            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
-            .padding(horizontal = 12.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            label,
-            style = Mobie.numeric.small,
-            color = if (selected) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurface,
-        )
     }
 }
 
@@ -672,11 +705,14 @@ private fun ActionDock(
 @Composable
 private fun AccessNotice() {
     val caution = Mobie.signals.caution
+    val shape = RoundedCornerShape(24.dp)
     Row(
         Modifier
             .fillMaxWidth()
-            .border(1.dp, caution.copy(alpha = .5f))
-            .padding(12.dp),
+            .clip(shape)
+            .background(caution.copy(alpha = .08f), shape)
+            .border(1.dp, caution.copy(alpha = .45f), shape)
+            .padding(14.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         LucideIcon(LucideR.drawable.lucide_ic_lock, null, Modifier.padding(top = 2.dp).size(18.dp), tint = caution)
@@ -726,7 +762,6 @@ private fun DownloadStatus(download: DownloadProgress) {
                 !known -> {
                     if (active) StatusDot(MaterialTheme.colorScheme.primary, pulsing = true, size = 8.dp)
                     Text("Starting download…", style = Mobie.numeric.small, color = MaterialTheme.colorScheme.onSurface)
-                    if (active) BlinkingCursor(width = 7.dp, height = 13.dp)
                 }
                 else -> {
                     if (active) StatusDot(MaterialTheme.colorScheme.primary, pulsing = true, size = 8.dp)

@@ -12,6 +12,10 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.hasScrollToNodeAction
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.performScrollToNode
 import dev.yashasvm.mobie.core.model.AiModel
 import dev.yashasvm.mobie.core.model.Compatibility
 import dev.yashasvm.mobie.core.model.CompatibilityResult
@@ -81,7 +85,11 @@ class ModelScreensTest {
             }
         }
 
-        composeRule.onNodeWithText("Type: Text generation").assertIsDisplayed()
+        composeRule.onNodeWithText("Text generation").assertIsDisplayed()
+        composeRule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Before you download"))
+        for (label in listOf("Download size", "Estimated RAM", "Free storage", "Runtime", "Quantization", "License", "Access", "Compatibility")) {
+            composeRule.onNodeWithText(label).performScrollTo().assertIsDisplayed()
+        }
         composeRule.onNodeWithTag("model_primary_action").assertIsDisplayed().performClick()
         assertTrue(downloadRequested)
     }
