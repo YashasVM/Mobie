@@ -295,7 +295,7 @@ internal fun ChatScreen(
                 )
                 else -> LazyColumn(
                     state = listState,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().testTag("chat_messages"),
                     contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 18.dp),
                     verticalArrangement = Arrangement.spacedBy(22.dp),
                 ) {
