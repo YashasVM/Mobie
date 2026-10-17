@@ -40,139 +40,154 @@ data class MobieSignals(
     val hairline: Color,
 )
 
-/** Tabular-figure styles for numbers that are measured or estimated (tok/s, RAM, sizes, latency). */
+/**
+ * Styles for numbers that are measured or estimated (tok/s, RAM, sizes, latency) and for code.
+ * Numbers use the body face with tabular figures so live values never jitter; only [code] is
+ * monospace.
+ */
 @Immutable
 data class MobieNumericType(
     val large: TextStyle,
     val medium: TextStyle,
     val small: TextStyle,
     val tiny: TextStyle,
+    /** Monospace for code blocks, inline code, and file names. */
+    val code: TextStyle,
 )
 
-// Palette shared with the mobie(1) website: a warm near-black terminal, one amber accent, and
-// classic ANSI-ish status colors. Light mode is the same idea printed on paper.
+// A calm, neutral palette in the spirit of modern chat apps: warm charcoal (dark) or warm paper
+// (light) surfaces, one amber accent carried over from the Mobie mark, and status colors that
+// only appear where a state needs explaining. Every text color here passes WCAG AA (4.5:1)
+// against every surface container it can sit on.
 private val DarkSignals = MobieSignals(
-    ready = Color(0xFF8FD16A),
-    caution = Color(0xFFE8D27A),
-    blocked = Color(0xFFFF6B57),
-    thinking = Color(0xFF7FB4D9),
-    track = Color(0xFF22211D),
-    hairline = Color(0xFF2A2925),
+    ready = Color(0xFF7CC890),
+    caution = Color(0xFFE6C364),
+    blocked = Color(0xFFF2867D),
+    thinking = Color(0xFF8DB8E2),
+    track = Color(0xFF2E2E2B),
+    hairline = Color(0xFF353532),
 )
 
 private val LightSignals = MobieSignals(
-    ready = Color(0xFF3F7A1E),
-    caution = Color(0xFF8A6A00),
-    blocked = Color(0xFFC0391F),
-    thinking = Color(0xFF2D6A93),
-    track = Color(0xFFE4E0D3),
-    hairline = Color(0xFFD3CEBF),
+    ready = Color(0xFF2C6E3A),
+    caution = Color(0xFF7D5800),
+    blocked = Color(0xFFB3261E),
+    thinking = Color(0xFF2B6293),
+    track = Color(0xFFE6E4DE),
+    hairline = Color(0xFFE2E0D9),
 )
 
 private val MobieDarkColors = darkColorScheme(
-    primary = Color(0xFFFFB547),
-    onPrimary = Color(0xFF0C0C0B),
-    primaryContainer = Color(0xFF3A2A10),
-    onPrimaryContainer = Color(0xFFFFD9A0),
-    secondary = Color(0xFF6F6C63),
-    onSecondary = Color(0xFF0C0C0B),
-    secondaryContainer = Color(0xFF1C1B18),
-    onSecondaryContainer = Color(0xFFD6D3C8),
-    tertiary = Color(0xFF7FB4D9),
-    onTertiary = Color(0xFF0C0C0B),
-    tertiaryContainer = Color(0xFF15222B),
-    onTertiaryContainer = Color(0xFFC6DDED),
-    background = Color(0xFF0C0C0B),
-    onBackground = Color(0xFFD6D3C8),
-    surface = Color(0xFF0C0C0B),
-    onSurface = Color(0xFFD6D3C8),
-    surfaceVariant = Color(0xFF141412),
-    onSurfaceVariant = Color(0xFF8A877D),
-    surfaceContainerLowest = Color(0xFF080807),
-    surfaceContainerLow = Color(0xFF10100E),
-    surfaceContainer = Color(0xFF141412),
-    surfaceContainerHigh = Color(0xFF191916),
-    surfaceContainerHighest = Color(0xFF1F1E1B),
-    outline = Color(0xFF6F6C63),
-    outlineVariant = Color(0xFF2A2925),
-    error = Color(0xFFFF6B57),
-    onError = Color(0xFF0C0C0B),
-    inverseSurface = Color(0xFFD6D3C8),
-    inverseOnSurface = Color(0xFF0C0C0B),
-    inversePrimary = Color(0xFF8A5A00),
+    primary = Color(0xFFF0A848),
+    onPrimary = Color(0xFF1B1A17),
+    primaryContainer = Color(0xFF3D2E14),
+    onPrimaryContainer = Color(0xFFFFD9A3),
+    secondary = Color(0xFFC9C7BF),
+    onSecondary = Color(0xFF1B1A17),
+    secondaryContainer = Color(0xFF363633),
+    onSecondaryContainer = Color(0xFFECEBE6),
+    tertiary = Color(0xFF8DB8E2),
+    onTertiary = Color(0xFF10202F),
+    tertiaryContainer = Color(0xFF1E2C39),
+    onTertiaryContainer = Color(0xFFCFE2F4),
+    background = Color(0xFF1C1C1A),
+    onBackground = Color(0xFFECEBE6),
+    surface = Color(0xFF1C1C1A),
+    onSurface = Color(0xFFECEBE6),
+    surfaceVariant = Color(0xFF2E2E2B),
+    onSurfaceVariant = Color(0xFFABA9A1),
+    surfaceContainerLowest = Color(0xFF161614),
+    surfaceContainerLow = Color(0xFF21211F),
+    surfaceContainer = Color(0xFF262624),
+    surfaceContainerHigh = Color(0xFF2E2E2B),
+    surfaceContainerHighest = Color(0xFF363633),
+    outline = Color(0xFF6E6C65),
+    outlineVariant = Color(0xFF3A3A36),
+    error = Color(0xFFF2867D),
+    onError = Color(0xFF1B1A17),
+    inverseSurface = Color(0xFFECEBE6),
+    inverseOnSurface = Color(0xFF1C1C1A),
+    inversePrimary = Color(0xFF94500A),
 )
 
 private val MobieLightColors = lightColorScheme(
-    primary = Color(0xFF9A5B00),
-    onPrimary = Color(0xFFFFFBF2),
-    primaryContainer = Color(0xFFFFE2B5),
-    onPrimaryContainer = Color(0xFF2E1B00),
-    secondary = Color(0xFF6A665C),
-    onSecondary = Color(0xFFFFFBF2),
-    secondaryContainer = Color(0xFFEAE6DA),
-    onSecondaryContainer = Color(0xFF1D1C18),
-    tertiary = Color(0xFF2D6A93),
-    onTertiary = Color(0xFFFFFBF2),
-    tertiaryContainer = Color(0xFFD6E7F2),
+    primary = Color(0xFF94500A),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFFFE2BD),
+    onPrimaryContainer = Color(0xFF3A2000),
+    secondary = Color(0xFF5C5A53),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFEEECE6),
+    onSecondaryContainer = Color(0xFF1F1E1B),
+    tertiary = Color(0xFF2B6293),
+    onTertiary = Color(0xFFFFFFFF),
+    tertiaryContainer = Color(0xFFD9E7F5),
     onTertiaryContainer = Color(0xFF0B2233),
-    background = Color(0xFFF4F1E8),
-    onBackground = Color(0xFF1D1C18),
-    surface = Color(0xFFF4F1E8),
-    onSurface = Color(0xFF1D1C18),
-    surfaceVariant = Color(0xFFECE8DC),
-    onSurfaceVariant = Color(0xFF5E5A50),
-    surfaceContainerLowest = Color(0xFFFBF9F3),
-    surfaceContainerLow = Color(0xFFF7F4EC),
-    surfaceContainer = Color(0xFFEFEBE0),
-    surfaceContainerHigh = Color(0xFFE9E5D9),
-    surfaceContainerHighest = Color(0xFFE2DED1),
-    outline = Color(0xFF8C887C),
-    outlineVariant = Color(0xFFD3CEBF),
-    error = Color(0xFFC0391F),
-    onError = Color(0xFFFFFBF2),
+    background = Color(0xFFFBFAF7),
+    onBackground = Color(0xFF1F1E1B),
+    surface = Color(0xFFFBFAF7),
+    onSurface = Color(0xFF1F1E1B),
+    surfaceVariant = Color(0xFFEEECE6),
+    onSurfaceVariant = Color(0xFF5C5A53),
+    surfaceContainerLowest = Color(0xFFFFFFFF),
+    surfaceContainerLow = Color(0xFFF5F4EF),
+    surfaceContainer = Color(0xFFF0EEE9),
+    surfaceContainerHigh = Color(0xFFE9E7E1),
+    surfaceContainerHighest = Color(0xFFE3E1DA),
+    outline = Color(0xFF8D8A82),
+    outlineVariant = Color(0xFFDDDAD3),
+    error = Color(0xFFB3261E),
+    onError = Color(0xFFFFFFFF),
+    inverseSurface = Color(0xFF31302C),
+    inverseOnSurface = Color(0xFFF4F2EC),
+    inversePrimary = Color(0xFFF0A848),
 )
 
-/** IBM Plex Mono, the face the website uses. Everything in Mobie is set in it. */
-private val TerminalFace = FontFamily(
+/** The platform sans (Roboto / the OEM default) for everything people read. */
+private val BodyFace = FontFamily.Default
+
+/** IBM Plex Mono, bundled. Used only for code. */
+private val CodeFace = FontFamily(
     Font(R.font.plex_mono_regular, FontWeight.Normal),
     Font(R.font.plex_mono_medium, FontWeight.Medium),
     Font(R.font.plex_mono_semibold, FontWeight.SemiBold),
     Font(R.font.plex_mono_bold, FontWeight.Bold),
 )
 
-// Never go below 12sp: these are read on a phone at arm's length, often while text streams in.
-// A monospace face runs wide, so sizes sit a step below a proportional scale.
+// Comfortable reading sizes: chat and body text at 16sp with a 1.5 line height; nothing below 12sp.
 private val MobieTypography = Typography(
-    displaySmall = TextStyle(fontFamily = TerminalFace, fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.8).sp),
-    headlineLarge = TextStyle(fontFamily = TerminalFace, fontSize = 26.sp, lineHeight = 32.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.6).sp),
-    headlineMedium = TextStyle(fontFamily = TerminalFace, fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.4).sp),
-    headlineSmall = TextStyle(fontFamily = TerminalFace, fontSize = 19.sp, lineHeight = 25.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.3).sp),
-    titleLarge = TextStyle(fontFamily = TerminalFace, fontSize = 17.sp, lineHeight = 23.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.2).sp),
-    titleMedium = TextStyle(fontFamily = TerminalFace, fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.Medium),
-    titleSmall = TextStyle(fontFamily = TerminalFace, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium),
-    bodyLarge = TextStyle(fontFamily = TerminalFace, fontSize = 15.sp, lineHeight = 24.sp),
-    bodyMedium = TextStyle(fontFamily = TerminalFace, fontSize = 14.sp, lineHeight = 21.sp),
-    bodySmall = TextStyle(fontFamily = TerminalFace, fontSize = 13.sp, lineHeight = 19.sp),
-    labelLarge = TextStyle(fontFamily = TerminalFace, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium),
-    labelMedium = TextStyle(fontFamily = TerminalFace, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp),
-    labelSmall = TextStyle(fontFamily = TerminalFace, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium),
+    displaySmall = TextStyle(fontFamily = BodyFace, fontSize = 32.sp, lineHeight = 40.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.5).sp),
+    headlineLarge = TextStyle(fontFamily = BodyFace, fontSize = 28.sp, lineHeight = 36.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.4).sp),
+    headlineMedium = TextStyle(fontFamily = BodyFace, fontSize = 24.sp, lineHeight = 32.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.3).sp),
+    headlineSmall = TextStyle(fontFamily = BodyFace, fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.2).sp),
+    titleLarge = TextStyle(fontFamily = BodyFace, fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.1).sp),
+    titleMedium = TextStyle(fontFamily = BodyFace, fontSize = 17.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold),
+    titleSmall = TextStyle(fontFamily = BodyFace, fontSize = 15.sp, lineHeight = 22.sp, fontWeight = FontWeight.Medium),
+    bodyLarge = TextStyle(fontFamily = BodyFace, fontSize = 16.sp, lineHeight = 24.sp, letterSpacing = 0.1.sp),
+    bodyMedium = TextStyle(fontFamily = BodyFace, fontSize = 15.sp, lineHeight = 22.sp, letterSpacing = 0.1.sp),
+    bodySmall = TextStyle(fontFamily = BodyFace, fontSize = 13.sp, lineHeight = 19.sp, letterSpacing = 0.1.sp),
+    labelLarge = TextStyle(fontFamily = BodyFace, fontSize = 15.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.1.sp),
+    labelMedium = TextStyle(fontFamily = BodyFace, fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.2.sp),
+    labelSmall = TextStyle(fontFamily = BodyFace, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.2.sp),
 )
 
-// Monospace digits are already fixed-width, so live values (tok/s, progress) never jitter.
+// Tabular figures keep live values (tok/s, progress) from shifting as digits change.
+private const val TabularFigures = "tnum"
 private val MobieNumeric = MobieNumericType(
-    large = TextStyle(fontFamily = TerminalFace, fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold),
-    medium = TextStyle(fontFamily = TerminalFace, fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.Medium),
-    small = TextStyle(fontFamily = TerminalFace, fontSize = 13.sp, lineHeight = 19.sp, fontWeight = FontWeight.Medium),
-    tiny = TextStyle(fontFamily = TerminalFace, fontSize = 12.sp, lineHeight = 16.sp),
+    large = TextStyle(fontFamily = BodyFace, fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold, fontFeatureSettings = TabularFigures),
+    medium = TextStyle(fontFamily = BodyFace, fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.Medium, fontFeatureSettings = TabularFigures),
+    small = TextStyle(fontFamily = BodyFace, fontSize = 14.sp, lineHeight = 20.sp, fontFeatureSettings = TabularFigures),
+    tiny = TextStyle(fontFamily = BodyFace, fontSize = 12.sp, lineHeight = 16.sp, fontFeatureSettings = TabularFigures),
+    code = TextStyle(fontFamily = CodeFace, fontSize = 14.sp, lineHeight = 21.sp),
 )
 
-// Terminal windows have square corners. A 2dp radius keeps Material controls from looking chipped.
+// Soft, consistent rounding: chips and small controls 8dp, cards 16dp, sheets and bubbles 20dp+.
 private val MobieShapes = Shapes(
-    extraSmall = RoundedCornerShape(2.dp),
-    small = RoundedCornerShape(2.dp),
-    medium = RoundedCornerShape(2.dp),
-    large = RoundedCornerShape(2.dp),
-    extraLarge = RoundedCornerShape(2.dp),
+    extraSmall = RoundedCornerShape(6.dp),
+    small = RoundedCornerShape(8.dp),
+    medium = RoundedCornerShape(12.dp),
+    large = RoundedCornerShape(16.dp),
+    extraLarge = RoundedCornerShape(24.dp),
 )
 
 private val LocalMobieSignals = staticCompositionLocalOf { DarkSignals }
