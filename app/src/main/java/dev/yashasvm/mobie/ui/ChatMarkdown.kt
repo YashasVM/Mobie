@@ -132,4 +132,3 @@ internal fun parseInlineMarkdown(text: String): List<MdSpan> {
         merged
     }
 }
-

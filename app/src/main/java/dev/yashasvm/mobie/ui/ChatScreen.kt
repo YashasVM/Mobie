@@ -84,6 +84,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
@@ -196,11 +197,29 @@ internal fun ChatScreen(
             }
         }
     }
-    // Scroll in buckets of streamed characters instead of on every token.
+    var followLatest by remember { mutableStateOf(true) }
+    var automaticScroll by remember { mutableStateOf(false) }
+    var previousMessageCount by remember { mutableStateOf(0) }
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
+            if (!scrolling && !automaticScroll) followLatest = !listState.canScrollForward
+        }
+    }
+    // Follow replies only while the reader stays at the bottom. A new prompt resumes following.
     val streamedLengthBucket = state.messages.lastOrNull()?.let { (it.text.length + it.thinking.length) / 120 } ?: 0
     LaunchedEffect(state.messages.size, streamedLengthBucket) {
-        // The list ends with a spacer item at index messages.size; scrolling to it reveals the bottom.
-        if (state.messages.isNotEmpty()) listState.animateScrollToItem(state.messages.size)
+        if (state.messages.size > previousMessageCount && state.messages.lastOrNull()?.fromUser == true) {
+            followLatest = true
+        }
+        previousMessageCount = state.messages.size
+        if (state.messages.isNotEmpty() && followLatest) {
+            automaticScroll = true
+            try {
+                listState.animateScrollToItem(state.messages.size)
+            } finally {
+                automaticScroll = false
+            }
+        }
     }
     val ready = state.runtimeState == RuntimeState.READY
     val generating = state.runtimeState == RuntimeState.GENERATING
