@@ -3,6 +3,7 @@ package dev.yashasvm.mobie.core.runtime
 import java.io.File
 import java.security.MessageDigest
 import java.util.Properties
+import dev.yashasvm.mobie.BuildConfig
 
 /**
  * Conservative proof that LiteRT's persistent optimized cache still belongs to the exact installed
@@ -14,7 +15,7 @@ import java.util.Properties
  * merely because it exists.
  */
 internal object LiteRtCacheState {
-    const val LITERT_LM_VERSION = "0.16.1"
+    const val LITERT_LM_VERSION = BuildConfig.LITERT_LM_VERSION
     private const val MARKER_SCHEMA = "2"
     private const val MARKER_FILE = ".mobie-cache-ready.properties"
 

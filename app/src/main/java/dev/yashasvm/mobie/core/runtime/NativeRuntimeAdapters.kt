@@ -7,7 +7,11 @@ import android.os.Build
 import android.os.Debug
 import android.os.PowerManager
 import android.os.SystemClock
+import android.util.Log
+import dev.yashasvm.mobie.BuildConfig
 import com.google.ai.edge.litertlm.Backend
+import com.google.ai.edge.litertlm.ActivationDataType
+import com.google.ai.edge.litertlm.ModelInfo
 import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.Conversation
@@ -18,6 +22,7 @@ import com.google.ai.edge.litertlm.ExperimentalApi
 import com.google.ai.edge.litertlm.ExperimentalFlags
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.SamplerConfig
+import com.google.ai.edge.litertlm.ThinkingConfig
 import dev.yashasvm.mobie.core.model.ModelFormat
 import dev.yashasvm.mobie.core.model.inferArtifactContextWindow
 import java.io.File
@@ -26,8 +31,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.sync.Mutex
@@ -63,17 +66,27 @@ class LiteRtLmRuntimeAdapter(
     override val format = ModelFormat.LITERT_LM
     override val supportsImageInput: Boolean get() = visionReady
     override val activeCompute: ActiveCompute? get() = selectedCompute
-    override fun configureCompute(options: ComputeOptions) { computeOptions = options }
+    override val computeCapabilities: ComputeCapabilities? get() = selectedCapabilities
+    override fun configureCompute(options: ComputeOptions) {
+        computeOptions = options.forCoreCount(Runtime.getRuntime().availableProcessors())
+    }
     override fun configureSampler(sampler: SamplerSettings) { configuredSampler = sampler }
+    override fun configureThinking(enabled: Boolean?) { configuredThinking = enabled }
     private val appContext = context.applicationContext
+    private val backendFingerprint = "${Build.FINGERPRINT}:${BuildConfig.LITERT_LM_VERSION}"
     private val lifecycle = Mutex()
     private val generation = Mutex()
     private val cancellationState = RuntimeCancellationState()
     private var engine: Engine? = null
-    private var conversation: Conversation? = null
+    /** Read by the cancel path on another thread, so it must not be cached per thread. */
+    @Volatile private var conversation: Conversation? = null
+    /** Estimated RAM of the loaded engine; credited as reclaimable when a reload is admitted. */
+    private var loadedRamEstimateBytes = 0L
     @Volatile private var visionReady = false
     @Volatile private var computeOptions = ComputeOptions()
     @Volatile private var selectedCompute: ActiveCompute? = null
+    @Volatile private var selectedCapabilities: ComputeCapabilities? = null
+    private var activeOptions = ComputeOptions()
     private var activeHintTracker: InferenceHintTracker? = null
     private val hintFactory = AndroidInferenceHintFactory(appContext)
     private var contextWindowTokens = DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS
@@ -83,6 +96,7 @@ class LiteRtLmRuntimeAdapter(
     private var activeSampler = SamplerSettings()
     /** The user's stored sampler, so the first conversation after load does not need a rebuild. */
     @Volatile private var configuredSampler = SamplerSettings()
+    @Volatile private var configuredThinking: Boolean? = null
     @Volatile private var cancelRequested = false
 
     override suspend fun load(
@@ -107,28 +121,31 @@ class LiteRtLmRuntimeAdapter(
                         if (cancellationFailure != null) {
                             rethrowAfterRuntimeCleanup(cancellationFailure) { closeRuntime() }
                         }
-                        closeRuntime()
-                        val configuredContextWindowTokens = selectRuntimeContextWindowTokens(modelPath)
-                        val options = computeOptions
-                        // Auto always ends with CPU, the cheapest backend, so gate on that; GPU is
-                        // admitted separately per attempt in initializeTextBackend.
-                        val gateBackend = if (options.backend == ComputeBackend.AUTO) ComputeBackend.CPU else options.backend
-                        ensureLoadHeadroom(modelPath, configuredContextWindowTokens, allowReclaim, vision, gateBackend)
+                        // Every refusal (capability, memory, storage, thermal) happens here while the
+                        // previous engine is still loaded. It is released only after the replacement is admitted.
+                        val admitted = admitThenReleaseRuntime(
+                            admit = { admitLoad(modelPath, vision, allowReclaim) },
+                            release = { closeRuntime() },
+                        )
+                        val options = admitted.options
+                        val capabilities = admitted.capabilities
                         ExperimentalFlags.enableBenchmark = true
                         val loadedEngine = initializeTextBackend(
                             modelPath = modelPath,
                             vision = vision,
-                            contextWindowTokens = configuredContextWindowTokens,
+                            capabilities = capabilities,
                             options = options,
                             allowReclaim = allowReclaim,
                         )
                         try {
-                            contextWindowTokens = configuredContextWindowTokens
+                            contextWindowTokens = loadedEngine.contextWindowTokens
                             val restored = ConversationHistoryPolicy.select(history, contextWindowTokens)
                             val sampler = configuredSampler
                             engine = loadedEngine.engine
                             visionReady = loadedEngine.visionReady
                             selectedCompute = loadedEngine.compute
+                            selectedCapabilities = capabilities
+                            activeOptions = options
                             conversation = loadedEngine.engine.createConversation(
                                 conversationConfig(restored, sampler = sampler),
                             )
@@ -141,25 +158,41 @@ class LiteRtLmRuntimeAdapter(
                             LiteRtCacheState.markReady(
                                 liteRtCacheDirectory(modelFile),
                                 modelFile,
-                                configuredContextWindowTokens,
+                                loadedEngine.contextWindowTokens,
                             )
                             if (options.artifactIdentity.isNotBlank() && loadedEngine.rememberPreferred) {
-                                computeSettings.memory.remember(options.artifactIdentity, Build.FINGERPRINT, loadedEngine.compute.backend)
+                                computeSettings.memory.remember(options.artifactIdentity, backendFingerprint, loadedEngine.compute.backend)
                             }
+                            // Last, so a failed load never leaves a credit for an engine that is not loaded.
+                            loadedRamEstimateBytes = RuntimeLoadMemoryPolicy.estimatedRamBytes(
+                                modelWeightsBytes = modelFile.length(),
+                                contextWindowTokens = loadedEngine.contextWindowTokens,
+                                backend = loadedEngine.compute.backend,
+                                visionEncoderLoaded = loadedEngine.visionReady,
+                            )
                             Unit
                         } catch (error: Throwable) {
                             if (options.artifactIdentity.isNotBlank()) {
-                                computeSettings.memory.invalidate(options.artifactIdentity, Build.FINGERPRINT)
+                                computeSettings.memory.invalidate(options.artifactIdentity, backendFingerprint)
                             }
-                            runRuntimeCleanupUnlessFatal(error) { loadedEngine.engine.close() }
+                            // closeRuntime cleared the field above, so any conversation here belongs to the new
+                            // engine. Close it first: a session must never outlive the engine it was created on.
+                            val createdConversation = conversation
+                            conversation = null
+                            runRuntimeCleanupUnlessFatal(error) {
+                                runAllRuntimeCleanup({ createdConversation?.close() }, { loadedEngine.engine.close() })
+                            }
                             engine = null
                             visionReady = false
                             selectedCompute = null
+                            selectedCapabilities = null
+                            activeOptions = ComputeOptions()
                             contextWindowTokens = DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS
                             committedHistory = emptyList()
                             conversationDirty = false
                             nativeConversationHasImage = false
                             cancelRequested = false
+                            loadedRamEstimateBytes = 0L
                             throw error
                         }
                     }
@@ -170,43 +203,47 @@ class LiteRtLmRuntimeAdapter(
         }
     }
 
+    private class AdmittedLoad(val options: ComputeOptions, val capabilities: ComputeCapabilities)
+
+    /** Everything that can refuse a reload. Runs while the previous engine is still loaded. */
+    private fun admitLoad(modelPath: String, vision: Boolean, allowReclaim: Boolean): AdmittedLoad {
+        val options = computeOptions
+        val capabilities = ModelInfo.from(modelPath).use { info ->
+            require(info is ModelInfo.Llm) { "This artifact is not a chat model." }
+            ComputeCapabilities(info.maxContextTokens(), info.isDynamicContext(),
+                info.supportsThinking(), info.hasSpeculativeDecodingSupport())
+        }
+        capabilities.validate(options)
+        // Explicit GPU on a device that cannot run it is refused here, before anything is released.
+        ComputeBackendPolicy.unavailableReason(options.backend, gpuPlausibleOnDevice())?.let { throw IllegalStateException(it) }
+        // Auto always ends with CPU, the cheapest backend, so gate on that; GPU is admitted separately
+        // per attempt in initializeTextBackend, with its own context.
+        val gateBackend = if (options.backend == ComputeBackend.AUTO) ComputeBackend.CPU else options.backend
+        ensureLoadHeadroom(
+            modelPath = modelPath,
+            contextWindowTokens = contextWindowTokensFor(modelPath, capabilities, options.contextTokens, gateBackend),
+            allowReclaim = allowReclaim,
+            vision = vision,
+            backend = gateBackend,
+            reclaimableBytes = loadedRamEstimateBytes,
+        )
+        return AdmittedLoad(options, capabilities)
+    }
+
     override suspend fun resetConversation(history: List<RuntimeMessage>): Result<Unit> =
         withContext(Dispatchers.Default) {
-            val transition = cancellationState.beginLifecycleTransition()
-            try {
-                val cancellationFailure = requestCancellationForLifecycleTransition()
-                generation.withLock {
-                    lifecycle.withLock {
-                        recoverableRuntimeResult {
-                            val activeEngine = engine
-                                ?: throw IllegalStateException("Load a model before resetting the conversation")
-                            val restored = ConversationHistoryPolicy.select(history, contextWindowTokens)
-                            val previous = conversation
-                            conversationDirty = true
-                            val replaceConversation = {
-                                replaceRuntimeResourceBeforeClosingPrevious(
-                                    previous = previous,
-                                    createReplacement = { activeEngine.createConversation(conversationConfig(restored)) },
-                                    installReplacement = { replacement ->
-                                        conversation = replacement
-                                        committedHistory = restored
-                                        nativeConversationHasImage = hasRestorableHistoryImage(restored)
-                                        conversationDirty = false
-                                        cancelRequested = false
-                                    },
-                                    closePrevious = { stale -> stale.close() },
-                                )
-                            }
-                            if (cancellationFailure != null) {
-                                rethrowAfterRuntimeCleanup(cancellationFailure, replaceConversation)
-                            }
-                            replaceConversation()
-                            Unit
-                        }
-                    }
-                }
-            } finally {
-                cancellationState.endLifecycleTransition(transition)
+            resetRuntimeConversation(
+                cancellationState = cancellationState,
+                generation = generation,
+                lifecycle = lifecycle,
+                requestCancellation = ::requestCancellationForLifecycleTransition,
+            ) {
+                checkNotNull(engine) { "Load a model before resetting the conversation" }
+                // Persist the requested chat even if native allocation fails. The next send must
+                // replay this history, rather than resurrecting the previous chat.
+                committedHistory = ConversationHistoryPolicy.select(history, contextWindowTokens)
+                rebuildConversationFromCommittedHistory()
+                cancelRequested = false
             }
         }
 
@@ -215,7 +252,7 @@ class LiteRtLmRuntimeAdapter(
         imagePath: String?,
         config: GenerationConfig,
     ): Flow<InferenceEvent> {
-        return flow {
+        return generationEventFlow {
             val generationStartedAt = SystemClock.elapsedRealtime()
             val partialAnswer = StringBuilder()
             val generationPermit = cancellationState.captureGenerationPermit()
@@ -234,7 +271,7 @@ class LiteRtLmRuntimeAdapter(
                             "Vision initialization failed on this device. The model is still available for text-only chat.",
                         )
                     }
-                    if (conversationDirty || requestedSampler != activeSampler || (imagePath != null && nativeConversationHasImage)) {
+                    if (conversation == null || conversationDirty || requestedSampler != activeSampler || (imagePath != null && nativeConversationHasImage)) {
                         rebuildConversationFromCommittedHistory(
                             restoreHistoryImage = imagePath == null,
                             sampler = requestedSampler,
@@ -248,7 +285,7 @@ class LiteRtLmRuntimeAdapter(
                             contextWindowTokens = contextWindowTokens,
                             history = committedHistory,
                             prompt = prompt,
-                            requestedMaxOutputTokens = config.maxNewTokens,
+                            requestedMaxOutputTokens = minOf(config.maxNewTokens, activeOptions.maxOutputTokens),
                             hasImage = imagePath != null,
                             historyHasImage = nativeConversationHasImage,
                             // initialMessages are lazily prefetched by the pinned SDK. Zero occupancy
@@ -356,14 +393,16 @@ class LiteRtLmRuntimeAdapter(
                         rememberCompletedTurn(prompt, partialAnswer.toString(), imagePath)
                         emit(InferenceEvent.Complete)
                     } catch (error: Throwable) {
-                        rethrowFatalRuntimeFailure(error)
+                        if (isFatalRuntimeFailure(error)) throw error
                         if (cancellationState.shouldAttemptCleanup()) {
                             cancellationState.attempt { activeConversation.cancelProcess() }
                                 ?.let(error::addSuppressed)
                         }
                         rememberInterruptedTurn(prompt, partialAnswer.toString().takeIf { it.isNotBlank() }, imagePath)
-                        rethrowNonRecoverableRuntimeFailure(error)
-                        emit(InferenceEvent.Error(error.message ?: "Inference failed"))
+                        // Rethrow instead of emitting. Emitting here would repeat an emit that just failed when
+                        // the collector threw, which breaks Flow exception transparency. generationEventFlow
+                        // reports the failure once, and only for failures that did not come from the collector.
+                        throw error
                     } finally {
                         activeHintTracker = null
                         hints.close()
@@ -373,9 +412,6 @@ class LiteRtLmRuntimeAdapter(
                     cancelRequested = false
                 }
             }
-        }.catch { error ->
-            rethrowNonRecoverableRuntimeFailure(error)
-            emit(InferenceEvent.Error(error.message ?: "Inference failed"))
         }.flowOn(Dispatchers.Default)
     }
 
@@ -421,10 +457,11 @@ class LiteRtLmRuntimeAdapter(
         vision: Boolean,
         contextWindowTokens: Int,
         textBackend: Backend,
+        options: ComputeOptions,
     ): LoadedEngine {
         if (!vision) {
             return LoadedEngine(
-                initializeEngine(modelPath, textBackend, visionBackend = null, contextWindowTokens = contextWindowTokens),
+                initializeEngine(modelPath, textBackend, visionBackend = null, contextWindowTokens = contextWindowTokens, options = options),
                 visionReady = false,
             )
         }
@@ -441,7 +478,7 @@ class LiteRtLmRuntimeAdapter(
         ) {
             try {
                 return LoadedEngine(
-                    initializeEngine(modelPath, textBackend, visionBackend = Backend.GPU(), contextWindowTokens = contextWindowTokens),
+                    initializeEngine(modelPath, textBackend, visionBackend = Backend.GPU(), contextWindowTokens = contextWindowTokens, options = options),
                     visionReady = true,
                 )
             } catch (error: Exception) {
@@ -452,14 +489,14 @@ class LiteRtLmRuntimeAdapter(
 
         return try {
             LoadedEngine(
-                initializeEngine(modelPath, textBackend, visionBackend = Backend.CPU(), contextWindowTokens = contextWindowTokens),
+                initializeEngine(modelPath, textBackend, visionBackend = Backend.CPU(), contextWindowTokens = contextWindowTokens, options = options),
                 visionReady = true,
             )
         } catch (cpuVisionError: Exception) {
             rethrowCancellation(cpuVisionError)
             try {
                 LoadedEngine(
-                    initializeEngine(modelPath, textBackend, visionBackend = null, contextWindowTokens = contextWindowTokens),
+                    initializeEngine(modelPath, textBackend, visionBackend = null, contextWindowTokens = contextWindowTokens, options = options),
                     visionReady = false,
                 )
             } catch (textOnlyError: Exception) {
@@ -474,41 +511,61 @@ class LiteRtLmRuntimeAdapter(
     private fun initializeTextBackend(
         modelPath: String,
         vision: Boolean,
-        contextWindowTokens: Int,
+        capabilities: ComputeCapabilities,
         options: ComputeOptions,
         allowReclaim: Boolean,
     ): LoadedEngine {
-        val gpuPlausible = LiteRtVisionBackendPolicy.shouldAttemptGpu(
-            Build.SUPPORTED_ABIS, Build.FINGERPRINT, Build.MODEL, Build.HARDWARE, Build.PRODUCT,
-        )
+        val gpuPlausible = gpuPlausibleOnDevice()
         val remembered = options.artifactIdentity.takeIf { it.isNotBlank() }
-            ?.let { computeSettings.memory.get(it, Build.FINGERPRINT) }
+            ?.let { computeSettings.memory.get(it, backendFingerprint) }
         val attempts = ComputeBackendPolicy.attempts(options.backend, gpuPlausible, remembered)
-        val admitted = admitAttemptsForMemory(options.backend, attempts) { backend ->
-            memoryBlockReason(modelPath, contextWindowTokens, allowReclaim, vision, backend)
+        // One context per attempted backend. Admission and the engine both read this map, so the
+        // memory verdict is judged at exactly the context that the attempt allocates.
+        val contexts = attempts.associateWith { backend ->
+            contextWindowTokensFor(modelPath, capabilities, options.contextTokens, backend)
         }
+        val admitted = admitAttemptsForMemory(options.backend, attempts) { backend ->
+            memoryBlockReason(modelPath, contexts.getValue(backend), allowReclaim, vision, backend)
+        }
+        admitted.skippedReason?.let { Log.w("MobieCompute", it) }
+        // Resolve topology only if CPU is actually attempted, then reuse that exact count in stats.
+        // This cache lasts one load, so the next load observes any change in available processors.
+        val cpuThreads by lazy { LiteRtCpuThreadPolicy.threadCount(override = options.cpuThreads) }
         val result = loadWithBackendFallback(
             attempts = admitted.attempts,
             load = { backend ->
-                val threads = cpuThreadsFor(backend, options)
+                val contextWindowTokens = contexts.getValue(backend)
+                Log.i("MobieCompute", "Loading ${backend.name}; LiteRT-LM ${BuildConfig.LITERT_LM_VERSION}; context=$contextWindowTokens")
+                val threads = if (backend == ComputeBackend.CPU) cpuThreads else null
                 val nativeBackend = when (backend) {
                     ComputeBackend.CPU -> Backend.CPU(threadCount = threads)
                     ComputeBackend.GPU -> Backend.GPU()
                     ComputeBackend.AUTO, ComputeBackend.NPU -> error("Unsupported text backend: $backend")
                 }
                 // Each failed attempt closes its own engine (see initializeEngine) before the next backend starts.
-                initializeEngineWithVisionFallback(modelPath, vision, contextWindowTokens, nativeBackend)
+                try {
+                    initializeEngineWithVisionFallback(modelPath, vision, contextWindowTokens, nativeBackend, options)
+                        .copy(contextWindowTokens = contextWindowTokens)
+                } catch (failure: Exception) {
+                    rethrowCancellation(failure)
+                    val description = describeBackendLoadFailure(backend, failure)
+                    if (description == failure.message) throw failure
+                    throw IllegalStateException(description, failure)
+                }
             },
-            onFailure = { backend, _ ->
+            onFailure = { backend, failure ->
+                Log.w("MobieCompute", "${backend.name} initialization failed", failure)
                 if (remembered == backend && options.artifactIdentity.isNotBlank()) {
-                    computeSettings.memory.invalidate(options.artifactIdentity, Build.FINGERPRINT)
+                    computeSettings.memory.invalidate(options.artifactIdentity, backendFingerprint)
                 }
             },
         )
+        Log.i("MobieCompute", "Selected ${result.backend.name}; fallback=${result.fallbackReason ?: admitted.skippedReason ?: "none"}")
         return result.value.copy(
             compute = ActiveCompute(
                 backend = result.backend,
-                cpuThreads = cpuThreadsFor(result.backend, options),
+                cpuThreads = if (result.backend == ComputeBackend.CPU) cpuThreads else null,
+                contextTokens = result.value.contextWindowTokens,
                 fallbackReason = listOfNotNull(admitted.skippedReason, result.fallbackReason)
                     .joinToString(" ").ifEmpty { null },
             ),
@@ -516,10 +573,7 @@ class LiteRtLmRuntimeAdapter(
         )
     }
 
-    private fun cpuThreadsFor(backend: ComputeBackend, options: ComputeOptions): Int? =
-        if (backend == ComputeBackend.CPU) LiteRtCpuThreadPolicy.threadCount(override = options.cpuThreads) else null
-
-    private fun initializeEngine(modelPath: String, textBackend: Backend, visionBackend: Backend?, contextWindowTokens: Int): Engine {
+    private fun initializeEngine(modelPath: String, textBackend: Backend, visionBackend: Backend?, contextWindowTokens: Int, options: ComputeOptions): Engine {
         val modelFile = File(modelPath)
         val cacheDirectory = liteRtCacheDirectory(modelFile).apply {
             if (!isDirectory && !mkdirs()) {
@@ -534,6 +588,11 @@ class LiteRtLmRuntimeAdapter(
                 maxNumTokens = contextWindowTokens,
                 maxNumImages = if (visionBackend != null) 1 else null,
                 cacheDir = cacheDirectory.absolutePath,
+                activationDataType = when (options.activationType) {
+                    ActivationType.AUTO -> null
+                    ActivationType.FP16 -> ActivationDataType.FLOAT16
+                    ActivationType.FP32 -> ActivationDataType.FLOAT32
+                },
             ),
         )
         try {
@@ -563,8 +622,14 @@ class LiteRtLmRuntimeAdapter(
         // conversation loses its measured occupancy, so bound the actual pending preface again.
         val restored = ConversationHistoryPolicy.select(committedHistory, contextWindowTokens)
         val previous = conversation
-        replaceRuntimeResourceBeforeClosingPrevious(
+        conversationDirty = true
+        replaceRuntimeResourceAfterClosingPrevious(
             previous = previous,
+            clearPrevious = {
+                conversation = null
+                committedHistory = restored
+                nativeConversationHasImage = false
+            },
             createReplacement = {
                 activeEngine.createConversation(
                     conversationConfig(restored, restoreHistoryImage = restoreHistoryImage, sampler = sampler),
@@ -640,27 +705,45 @@ class LiteRtLmRuntimeAdapter(
         }
         return ConversationConfig(
             initialMessages = restored,
+            thinkingConfig = (activeOptions.takeIf { it.thinkingEnabled != null } ?: activeOptions.copy(thinkingEnabled = configuredThinking))
+                .thinkingRequest()?.let { ThinkingConfig(enableThinking = it.enabled, thinkingTokenBudget = it.budget) },
             samplerConfig = SamplerConfig(
                 topK = sampler.topK,
                 topP = sampler.topP,
                 temperature = sampler.temperature,
                 seed = sampler.seed,
             ),
-            maxOutputToken = DEFAULT_MAX_OUTPUT_TOKENS,
+            maxOutputToken = activeOptions.maxOutputTokens,
+            enableSpeculativeDecoding = activeOptions.speculativeDecoding,
+            prefillPrefaceOnInit = activeOptions.prefillPrefaceOnInit && restored.isNotEmpty(),
         )
     }
 
-    private fun selectRuntimeContextWindowTokens(modelPath: String): Int {
+    private fun gpuPlausibleOnDevice(): Boolean = LiteRtVisionBackendPolicy.shouldAttemptGpu(
+        Build.SUPPORTED_ABIS, Build.FINGERPRINT, Build.MODEL, Build.HARDWARE, Build.PRODUCT,
+    )
+
+    /**
+     * Context for one backend, through the same policy the pre-flight resolver uses. Only total RAM
+     * sizes the Auto context; the explicit override and fixed artifact sizes are honoured as given.
+     */
+    private fun contextWindowTokensFor(
+        modelPath: String,
+        capabilities: ComputeCapabilities,
+        requested: Int?,
+        backend: ComputeBackend,
+    ): Int = capabilities.resolveContext(requested) {
         val manager = appContext.getSystemService(ActivityManager::class.java)
         val memory = MemorySnapshotReader(manager).read()
         val modelFile = File(modelPath)
-        return LiteRtContextWindowPolicy.select(
+        LiteRtContextWindowPolicy.select(
             advertisedContextWindowTokens = runtimeContextWindowTokens(modelPath),
             modelWeightsBytes = modelFile.length(),
             totalRamBytes = memory.totalBytes,
             availableRamBytes = memory.availableNowBytes,
             lowMemoryThresholdBytes = memory.thresholdBytes,
             isLowRamDevice = manager.isLowRamDevice,
+            backend = backend,
         )
     }
 
@@ -670,8 +753,9 @@ class LiteRtLmRuntimeAdapter(
         allowReclaim: Boolean,
         vision: Boolean,
         backend: ComputeBackend,
+        reclaimableBytes: Long = 0L,
     ) {
-        val memoryReason = memoryBlockReason(modelPath, contextWindowTokens, allowReclaim, vision, backend)
+        val memoryReason = memoryBlockReason(modelPath, contextWindowTokens, allowReclaim, vision, backend, reclaimableBytes)
         if (memoryReason != null) throw IllegalStateException(memoryReason)
 
         val modelFile = File(modelPath)
@@ -694,6 +778,7 @@ class LiteRtLmRuntimeAdapter(
         allowReclaim: Boolean,
         vision: Boolean,
         backend: ComputeBackend,
+        reclaimableBytes: Long = 0L,
     ): String? {
         val manager = appContext.getSystemService(ActivityManager::class.java)
         val memory = MemorySnapshotReader(manager).read()
@@ -710,6 +795,7 @@ class LiteRtLmRuntimeAdapter(
             allowReclaim = allowReclaim,
             visionEncoderLoaded = vision,
             backend = backend,
+            reclaimableBytes = reclaimableBytes,
         )
     }
 
@@ -740,11 +826,14 @@ class LiteRtLmRuntimeAdapter(
         engine = null
         visionReady = false
         selectedCompute = null
+        selectedCapabilities = null
+        activeOptions = ComputeOptions()
         contextWindowTokens = DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS
         committedHistory = emptyList()
         conversationDirty = false
         nativeConversationHasImage = false
         cancelRequested = false
+        loadedRamEstimateBytes = 0L
         cancellationState.reset()
         runAllRuntimeCleanup(
             { activeHintTracker?.close(); activeHintTracker = null },
@@ -766,6 +855,8 @@ class LiteRtLmRuntimeAdapter(
         val compute: ActiveCompute = ActiveCompute(ComputeBackend.CPU),
         /** Only a first-choice GPU success under Auto is remembered; a fallback is not a preference. */
         val rememberPreferred: Boolean = false,
+        /** Context the engine was created with. Set by initializeTextBackend for the attempt that succeeded. */
+        val contextWindowTokens: Int = DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS,
     )
 
     private companion object {

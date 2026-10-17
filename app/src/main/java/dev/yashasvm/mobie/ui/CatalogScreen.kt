@@ -15,18 +15,6 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
-import androidx.compose.material3.SwipeToDismissBox
-import androidx.compose.material3.SwipeToDismissBoxValue
-import androidx.compose.material3.rememberSwipeToDismissBoxState
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import androidx.compose.runtime.derivedStateOf
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -102,9 +90,9 @@ import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.data.download.InstalledModelEntry
 import dev.yashasvm.mobie.ui.theme.Mobie
 
-private const val TAB_DISCOVER = 0
-private const val TAB_INSTALLED = 1
-private const val TAB_SETTINGS = 2
+internal const val TAB_DISCOVER = 0
+internal const val TAB_INSTALLED = 1
+internal const val TAB_SETTINGS = 2
 private const val TAB_COUNT = 3
 
 /** List items before this index stagger in; later ones (reached by scrolling) appear without delay. */
@@ -119,7 +107,6 @@ private val GroupGap = 18.dp
  * parses catalog responses or touches a runtime.
  */
 @Composable
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 internal fun CatalogScreen(
     state: MobieUiState,
     onQuery: (String) -> Unit,
@@ -131,8 +118,17 @@ internal fun CatalogScreen(
     darkTheme: Boolean = true,
     onDarkThemeChange: (Boolean) -> Unit = {},
     onSaveToken: (String) -> Unit = {},
+    initialTab: Int = TAB_DISCOVER,
+    /** Reports tab changes so the caller can reopen the same tab after a detour to a model page. */
+    onTabChange: (Int) -> Unit = {},
+    /** When set, back from Discover returns to the chat home; other tabs first go back to Discover. */
+    onBack: (() -> Unit)? = null,
 ) {
-    var selectedTab by rememberSaveable { mutableIntStateOf(TAB_DISCOVER) }
+    var selectedTab by rememberSaveable { mutableIntStateOf(initialTab) }
+    fun selectTab(tab: Int) {
+        selectedTab = tab
+        onTabChange(tab)
+    }
     var pendingDelete by remember { mutableStateOf<InstalledModelEntry?>(null) }
     val resolver = remember { CompatibilityResolver() }
     // One tracker per list, hoisted above the tab switcher so revisiting a tab doesn't replay entrances.
@@ -140,22 +136,21 @@ internal fun CatalogScreen(
     val installedEntrance = rememberEntranceTracker()
     val settingsEntrance = rememberEntranceTracker()
 
-    BackHandler(enabled = selectedTab != TAB_DISCOVER) { selectedTab = TAB_DISCOVER }
-
-    // One list state per tab so each keeps its scroll position and the top bar knows when content sits under it.
-    val listStates = List(TAB_COUNT) { rememberLazyListState() }
-    val scrolled by remember(selectedTab) {
-        derivedStateOf {
-            val list = listStates[selectedTab]
-            list.firstVisibleItemIndex > 0 || list.firstVisibleItemScrollOffset > 0
-        }
+    BackHandler(enabled = onBack != null || selectedTab != TAB_DISCOVER) {
+        if (selectedTab != TAB_DISCOVER) selectTab(TAB_DISCOVER) else onBack?.invoke()
     }
 
     Column(Modifier.fillMaxSize()) {
-        HomeTopBar(
-            title = TabTitles[selectedTab],
-            scrolled = scrolled,
-            trailing = if (selectedTab == TAB_DISCOVER) chipName(state.device) ?: deviceName(state.device) else null,
+        // tmux-style status line: session name, the current window, and the device at the right.
+        // Switching happens in the bottom bar, which is within thumb reach.
+        StatusLine(
+            segments = listOf(
+                StatusSegment("mobie"),
+                StatusSegment("${selectedTab + 1}:" + listOf("discover", "library", "settings").getOrElse(selectedTab) { "" }),
+            ),
+            selected = 0,
+            trailing = deviceName(state.device) ?: "mobie",
+            modifier = Modifier.statusBarsPadding(),
         )
         AnimatedContent(
             targetState = selectedTab,
@@ -173,12 +168,10 @@ internal fun CatalogScreen(
             },
             label = "catalog tab",
         ) { tab ->
-            val list = @Composable {
-                LazyColumn(
-                    state = listStates[tab],
-                    modifier = Modifier.fillMaxSize().imePadding(),
-                    contentPadding = PaddingValues(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 28.dp),
-                ) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().imePadding(),
+                contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 28.dp),
+            ) {
                 when (tab) {
                     TAB_INSTALLED -> installedTab(
                         state = state,
@@ -186,7 +179,7 @@ internal fun CatalogScreen(
                         tracker = installedEntrance,
                         onOpen = onOpenInstalled,
                         onDelete = { pendingDelete = it },
-                        onBrowse = { selectedTab = TAB_DISCOVER },
+                        onBrowse = { selectTab(TAB_DISCOVER) },
                     )
                     TAB_SETTINGS -> settingsTab(
                         tokenConfigured = state.tokenConfigured,
@@ -205,20 +198,9 @@ internal fun CatalogScreen(
                         onFeatured = onFeatured,
                     )
                 }
-                }
-            }
-            if (tab == TAB_DISCOVER) {
-                // Pull down to refresh the catalog, the gesture people expect on a phone list.
-                PullToRefreshBox(
-                    isRefreshing = state.loading && state.models.isNotEmpty(),
-                    onRefresh = { if (state.query.isBlank()) onFeatured() else onSearch() },
-                    modifier = Modifier.fillMaxSize(),
-                ) { list() }
-            } else {
-                list()
             }
         }
-        ConsoleNavBar(selectedTab) { selectedTab = it }
+        ConsoleNavBar(selectedTab, ::selectTab)
     }
 
     pendingDelete?.let { entry ->
@@ -255,16 +237,16 @@ private fun LazyListScope.discoverTab(
     onSelect: (AiModel) -> Unit,
     onFeatured: () -> Unit,
 ) {
-    item(key = "rig") { DeviceStrip(state.device, Modifier.entrance(tracker, "rig", 0).padding(top = 4.dp, bottom = 12.dp)) }
-    // Search stays pinned under the top bar while the list scrolls beneath it.
-    stickyHeader(key = "search") {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.background)
-                .entrance(tracker, "search", 1)
-                .padding(bottom = 10.dp),
-        ) {
+    item(key = "header") {
+        ScreenHeader(
+            title = "Models for this phone",
+            subtitle = "Sized against this phone's memory. Once downloaded, they run fully offline.",
+            modifier = Modifier.entrance(tracker, "header", 0).padding(bottom = GroupGap),
+        )
+    }
+    item(key = "rig") { DeviceRig(state.device, Modifier.entrance(tracker, "rig", 1).padding(bottom = GroupGap)) }
+    item(key = "search") {
+        Box(Modifier.entrance(tracker, "search", 2).padding(bottom = GroupGap)) {
             SearchField(state.query, onQuery, onSearch, onClear = onFeatured)
         }
     }
@@ -302,8 +284,8 @@ private fun LazyListScope.discoverTab(
             )
         }
         else -> itemsIndexed(state.models, key = { _, model -> model.id }) { index, model ->
-            val compatibility = remember(model, state.device) {
-                state.device?.let { resolver.resolve(model.bestArtifact, it) }
+            val compatibility = remember(model, state.device, state.computeBackend) {
+                state.device?.let { resolver.resolve(model.bestArtifact, it, backend = state.computeBackend) }
             }
             val installed = state.installedModels.any { it.model.id == model.id }
             Box(Modifier.animateItem(fadeInSpec = null, fadeOutSpec = tween(MotionShort))) {
@@ -320,41 +302,71 @@ private fun LazyListScope.discoverTab(
     }
 }
 
-/** The phone's budget at a glance: free memory and storage over one meter. Models below are sized against it. */
+/** Device facts as a terminal window: a memory meter over a key/value list. */
 @Composable
-private fun DeviceStrip(device: DeviceProfile?, modifier: Modifier = Modifier) {
+private fun DeviceRig(device: DeviceProfile?, modifier: Modifier = Modifier) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            StripFact(
-                "memory free",
-                device?.let { "${bytesOrDash(it.availableRamBytes)} / ${bytesOrDash(it.totalRamBytes)}" } ?: "…",
-                valueColor = if (device?.isLowMemory == true) Mobie.signals.caution else MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.weight(1f),
-            )
-            StripFact("storage free", bytesOrDash(device?.availableStorageBytes))
-        }
-        if (device != null && device.totalRamBytes > 0) {
-            val used = (device.totalRamBytes - device.availableRamBytes).coerceAtLeast(0)
-            MemoryBar(
-                segments = listOf(MemorySegment("In use", used, muted)),
-                capacityBytes = device.totalRamBytes,
-                height = 6.dp,
-            )
+    TuiWindow(
+        title = "device — ${deviceName(device) ?: "this phone"}",
+        meta = if (device == null) "reading…" else chipName(device),
+        modifier = modifier.fillMaxWidth().animateContentSize(tween(MotionMedium, easing = EmphasizedEase)),
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (device != null && device.totalRamBytes > 0) {
+                val used = (device.totalRamBytes - device.availableRamBytes).coerceAtLeast(0)
+                MemoryBar(
+                    segments = listOf(MemorySegment("In use", used, muted)),
+                    capacityBytes = device.totalRamBytes,
+                    height = 8.dp,
+                )
+                Text(
+                    "${formatBytes(used)} in use of ${formatBytes(device.totalRamBytes)}",
+                    style = Mobie.numeric.tiny,
+                    color = muted,
+                )
+            }
+            // Two columns keep the panel short; the chip already sits in the title bar.
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    KeyValueRow("ram", bytesOrDash(device?.totalRamBytes), Modifier.weight(1f))
+                    KeyValueRow(
+                        "avail",
+                        bytesOrDash(device?.availableRamBytes),
+                        Modifier.weight(1f),
+                        valueColor = if (device?.isLowMemory == true) Mobie.signals.caution else MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    KeyValueRow("disk", bytesOrDash(device?.availableStorageBytes), Modifier.weight(1f))
+                    KeyValueRow("abi", device?.supportedAbis?.firstOrNull() ?: "—", Modifier.weight(1f))
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun StripFact(
-    label: String,
+private fun KeyValueRow(
+    key: String,
     value: String,
     modifier: Modifier = Modifier,
     valueColor: Color = MaterialTheme.colorScheme.onSurface,
 ) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(label, style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-        Text(value, style = Mobie.numeric.medium, color = valueColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    Row(modifier.fillMaxWidth()) {
+        Text(
+            key,
+            style = Mobie.numeric.small,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(56.dp),
+        )
+        Text(
+            value,
+            style = Mobie.numeric.small,
+            color = valueColor,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -425,8 +437,9 @@ private fun ModelRow(
     val estimatedRam = compatibility?.estimatedRamBytes ?: 0
     val context = compatibility?.contextWindowTokens?.takeIf { it > 0 } ?: artifact?.contextWindowTokens ?: 0
     val ramShownBelow = device != null && device.totalRamBytes > 0 && estimatedRam > 0
-    val specs = listOfNotNull(
-        specLine(artifact?.quantization, estimatedRam, context, ramShownBelow).ifBlank { null },
+    val specs = specLine(artifact?.quantization, estimatedRam, context, ramShownBelow)
+    val flags = listOfNotNull(
+        "by ${model.author}",
         "installed".takeIf { installed },
         "vision".takeIf { model.supportsVision },
         "needs access".takeIf { model.gated },
@@ -454,7 +467,7 @@ private fun ModelRow(
         Row(
             Modifier.padding(start = 24.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
                 statusLabel(status),
@@ -462,18 +475,25 @@ private fun ModelRow(
                 color = tone.tint(statusColor),
                 maxLines = 1,
             )
-            if (device != null && device.totalRamBytes > 0 && estimatedRam > 0) {
-                MemoryBar(
-                    segments = listOf(MemorySegment("Estimated RAM", estimatedRam, tone.tint(statusColor))),
-                    capacityBytes = device.totalRamBytes,
-                    markerBytes = device.availableRamBytes.takeIf { it > 0 },
-                    height = 6.dp,
-                    modifier = Modifier.weight(1f),
-                )
-                Text("~${formatBytes(estimatedRam)} RAM", style = Mobie.numeric.tiny, color = tone.dim, maxLines = 1)
-            } else {
-                Spacer(Modifier.weight(1f))
-            }
+            Text(flags, style = Mobie.numeric.tiny, color = tone.dim, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        }
+        if (device != null && device.totalRamBytes > 0 && estimatedRam > 0) {
+            MemoryBar(
+                segments = listOf(MemorySegment("Estimated RAM", estimatedRam, tone.tint(statusColor))),
+                capacityBytes = device.totalRamBytes,
+                markerBytes = device.availableRamBytes.takeIf { it > 0 },
+                height = 6.dp,
+                modifier = Modifier.padding(start = 24.dp),
+            )
+            Text(
+                "needs ~${formatBytes(estimatedRam)} of ${formatBytes(device.totalRamBytes)} · " +
+                    "${formatBytes(device.availableRamBytes)} free",
+                style = Mobie.numeric.tiny,
+                color = tone.dim,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 24.dp),
+            )
         }
     }
 }
@@ -560,6 +580,13 @@ private fun LazyListScope.installedTab(
     onDelete: (InstalledModelEntry) -> Unit,
     onBrowse: () -> Unit,
 ) {
+    item(key = "header") {
+        ScreenHeader(
+            title = "Your local models",
+            subtitle = "Stored on this phone and ready offline. Tap one to start a new chat.",
+            modifier = Modifier.entrance(tracker, "header", 0).padding(bottom = GroupGap),
+        )
+    }
     state.error?.let { message ->
         item(key = "error") {
             TuiWindow(
@@ -599,18 +626,12 @@ private fun LazyListScope.installedTab(
                 title = "Installed",
                 count = state.installedModels.size,
                 trailingNote = if (totalBytes > 0) "${formatBytes(totalBytes)} on disk" else null,
-                modifier = Modifier.entrance(tracker, "section", 1),
-            )
-            Text(
-                "Tap to chat · swipe left to delete",
-                style = Mobie.numeric.tiny,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(bottom = 6.dp),
+                modifier = Modifier.entrance(tracker, "section", 1).padding(bottom = 6.dp),
             )
         }
         itemsIndexed(state.installedModels, key = { _, entry -> entry.model.id }) { index, entry ->
-            val compatibility = remember(entry.model, state.device) {
-                state.device?.let { resolver.resolve(entry.model.bestArtifact, it) }
+            val compatibility = remember(entry.model, state.device, state.computeBackend) {
+                state.device?.let { resolver.resolve(entry.model.bestArtifact, it, backend = state.computeBackend) }
             }
             // Placement animates when a neighbour is deleted; the entrance plays once on the content.
             Box(Modifier.animateItem(fadeInSpec = null, fadeOutSpec = tween(MotionShort))) {
@@ -627,7 +648,6 @@ private fun LazyListScope.installedTab(
 }
 
 @Composable
-@OptIn(ExperimentalMaterial3Api::class)
 private fun InstalledRow(
     entry: InstalledModelEntry,
     compatibility: CompatibilityResult?,
@@ -640,44 +660,7 @@ private fun InstalledRow(
     val estimatedRam = compatibility?.estimatedRamBytes ?: 0
     val context = compatibility?.contextWindowTokens?.takeIf { it > 0 } ?: artifact?.contextWindowTokens ?: 0
     val specs = specLine(artifact?.quantization, estimatedRam, context)
-    val haptics = LocalHapticFeedback.current
-    val swipe = rememberSwipeToDismissBoxState(
-        confirmValueChange = {
-            // Swiping only asks; the dialog confirms. The row springs back either way.
-            if (it == SwipeToDismissBoxValue.EndToStart) {
-                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                onDelete()
-            }
-            false
-        },
-        positionalThreshold = { it * .35f },
-    )
-    SwipeToDismissBox(
-        state = swipe,
-        modifier = modifier,
-        enableDismissFromStartToEnd = false,
-        backgroundContent = {
-            Row(
-                Modifier.fillMaxSize().background(Mobie.signals.blocked).padding(horizontal = 20.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-            ) {
-                Text("delete", style = Mobie.numeric.small, color = MaterialTheme.colorScheme.background)
-                LucideIcon(LucideR.drawable.lucide_ic_trash_2, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.background)
-            }
-        },
-    ) {
-        Box(Modifier.background(MaterialTheme.colorScheme.background)) {
-            InstalledRowContent(entry, specs, onOpen, onDelete)
-        }
-    }
-}
-
-@Composable
-private fun InstalledRowContent(entry: InstalledModelEntry, specs: String, onOpen: () -> Unit, onDelete: () -> Unit) {
-    val model = entry.model
-    val artifact = model.bestArtifact
-    ListRow(onClick = onOpen) { tone ->
+    ListRow(onClick = onOpen, modifier = modifier) { tone ->
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
                 "✓",
@@ -694,25 +677,29 @@ private fun InstalledRowContent(entry: InstalledModelEntry, specs: String, onOpe
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
+            Text(formatBytes(artifact?.sizeBytes ?: 0), style = Mobie.numeric.small, color = tone.ink, maxLines = 1)
+        }
+        if (specs.isNotBlank()) SpecText(specs, tone.dim)
+        Text(
+            listOfNotNull("on this phone", artifact?.runtimeLabel, "vision".takeIf { model.supportsVision }).joinToString(" · "),
+            style = Mobie.numeric.tiny,
+            color = tone.dim,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = 24.dp),
+        )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = onDelete) {
                 LucideIcon(
                     LucideR.drawable.lucide_ic_trash_2,
                     "Delete ${model.title}",
-                    Modifier.size(18.dp),
+                    Modifier.size(20.dp),
                     tint = tone.dim,
                 )
             }
-            LucideIcon(LucideR.drawable.lucide_ic_chevron_right, null, Modifier.size(18.dp), tint = tone.tint(MaterialTheme.colorScheme.primary))
+            TermButton("open", onClick = onOpen, style = TermButtonStyle.Ghost)
         }
-        SpecText(
-            listOfNotNull(
-                formatBytes(artifact?.sizeBytes ?: 0),
-                specs.ifBlank { null },
-                artifact?.runtimeLabel,
-                "vision".takeIf { model.supportsVision },
-            ).joinToString(" · "),
-            tone.dim,
-        )
     }
 }
 
@@ -727,6 +714,13 @@ private fun LazyListScope.settingsTab(
     onDarkThemeChange: (Boolean) -> Unit,
     onSaveToken: (String) -> Unit,
 ) {
+    item(key = "header") {
+        ScreenHeader(
+            title = "Settings",
+            subtitle = "Access, appearance, and how Mobie handles your data.",
+            modifier = Modifier.entrance(tracker, "header", 0).padding(bottom = GroupGap),
+        )
+    }
     item(key = "appearance") {
         SettingsGroup("Appearance", Modifier.entrance(tracker, "appearance", 1).padding(bottom = GroupGap)) {
             Column {
@@ -739,15 +733,19 @@ private fun LazyListScope.settingsTab(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Text("Dark mode", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                    Switch(
-                        checked = darkTheme,
-                        onCheckedChange = null,
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = MaterialTheme.colorScheme.background,
-                            checkedTrackColor = MaterialTheme.colorScheme.primary,
-                        ),
+                    Text(
+                        if (darkTheme) "[x]" else "[ ]",
+                        style = Mobie.numeric.medium,
+                        color = MaterialTheme.colorScheme.primary,
                     )
+                    Column(Modifier.weight(1f)) {
+                        Text("Dark mode", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            if (darkTheme) "On" else "Off",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }
@@ -916,38 +914,20 @@ private fun InfoRow(
 
 // region Shared pieces
 
-private val TabTitles = listOf("Discover", "Library", "Settings")
-
-/**
- * App bar for the home tabs: a prompt and the tab title, with an optional dim note on the right.
- * A hairline fades in once content scrolls beneath it, the way native top bars lift on scroll.
- */
+/** Screen title with a shell prompt. The title text is kept as written so it reads the same to tests and screen readers. */
 @Composable
-private fun HomeTopBar(title: String, scrolled: Boolean, trailing: String? = null) {
-    val rule by animateColorAsState(
-        if (scrolled) MaterialTheme.colorScheme.outline.copy(alpha = .5f) else Color.Transparent,
-        tween(MotionShort),
-        label = "top bar rule",
-    )
-    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).statusBarsPadding()) {
-        Row(
-            Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
+private fun ScreenHeader(title: String, subtitle: String, modifier: Modifier = Modifier) {
+    Column(modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("$", style = Mobie.numeric.large, color = MaterialTheme.colorScheme.primary)
             Text(
                 title,
-                style = MaterialTheme.typography.titleLarge,
+                style = MaterialTheme.typography.headlineSmall,
                 color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                modifier = Modifier.weight(1f).semantics { heading() },
+                modifier = Modifier.semantics { heading() },
             )
-            if (trailing != null) {
-                Text(trailing, style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-            }
         }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(rule))
+        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -1081,13 +1061,12 @@ private fun MessagePanel(
 
 @Composable
 private fun ConsoleNavBar(selectedTab: Int, onSelect: (Int) -> Unit) {
-    // Icon-over-label tabs, like any phone app. The selected tab gets an amber indicator above its icon.
+    // Terminal tab bar: numbered cells, the selected one inverted to amber. Sits at the thumb's reach.
     val items = listOf(
-        Triple("discover", "bottom_nav_discover", LucideR.drawable.lucide_ic_compass),
-        Triple("library", "bottom_nav_installed", LucideR.drawable.lucide_ic_hard_drive),
-        Triple("settings", "bottom_nav_settings", LucideR.drawable.lucide_ic_settings),
+        "discover" to "bottom_nav_discover",
+        "library" to "bottom_nav_installed",
+        "settings" to "bottom_nav_settings",
     )
-    val haptics = LocalHapticFeedback.current
     Column(
         Modifier
             .fillMaxWidth()
@@ -1095,49 +1074,43 @@ private fun ConsoleNavBar(selectedTab: Int, onSelect: (Int) -> Unit) {
             .navigationBarsPadding(),
     ) {
         Hairline()
-        Row(Modifier.fillMaxWidth().height(64.dp)) {
-            items.forEachIndexed { index, (label, tag, icon) ->
+        Row(Modifier.fillMaxWidth().height(52.dp)) {
+            items.forEachIndexed { index, (label, tag) ->
                 val selected = selectedTab == index
                 val interaction = remember { MutableInteractionSource() }
                 val pressed by interaction.collectIsPressedAsState()
+                val lit = selected || pressed
+                val background by animateColorAsState(
+                    if (lit) MaterialTheme.colorScheme.primary else Color.Transparent,
+                    tween(MotionShort),
+                    label = "$label tab fill",
+                )
                 val ink by animateColorAsState(
-                    when {
-                        selected -> MaterialTheme.colorScheme.primary
-                        pressed -> MaterialTheme.colorScheme.onSurface
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant
-                    },
+                    if (lit) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurfaceVariant,
                     tween(MotionShort),
                     label = "$label tab ink",
                 )
-                val indicator by animateColorAsState(
-                    if (selected) MaterialTheme.colorScheme.primary.copy(alpha = .16f) else Color.Transparent,
-                    tween(MotionShort),
-                    label = "$label tab indicator",
-                )
-                Column(
+                if (index > 0) VerticalHairline(52.dp)
+                Box(
                     Modifier
                         .weight(1f)
                         .fillMaxHeight()
+                        .background(background)
                         .testTag(tag)
                         .selectable(
                             selected = selected,
                             interactionSource = interaction,
                             indication = null,
                             role = Role.Tab,
-                        ) {
-                            if (!selected) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onSelect(index)
-                        },
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically),
+                        ) { onSelect(index) },
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Box(
-                        Modifier.width(56.dp).height(28.dp).background(indicator),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        LucideIcon(icon, null, Modifier.size(20.dp), tint = ink)
-                    }
-                    Text(label, style = Mobie.numeric.tiny, color = ink, maxLines = 1)
+                    Text(
+                        "[${index + 1}] $label",
+                        style = Mobie.numeric.small,
+                        color = ink,
+                        maxLines = 1,
+                    )
                 }
             }
         }

@@ -36,6 +36,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -126,7 +127,6 @@ import dev.yashasvm.mobie.core.model.Compatibility
 import dev.yashasvm.mobie.core.model.MemoryAdmissionTier
 import dev.yashasvm.mobie.core.runtime.ActiveCompute
 import dev.yashasvm.mobie.core.runtime.InferenceStats
-import dev.yashasvm.mobie.core.runtime.SamplerSettings
 import dev.yashasvm.mobie.core.device.RunTelemetry
 import org.json.JSONObject
 import dev.yashasvm.mobie.ui.theme.Mobie
@@ -153,10 +153,11 @@ internal fun ChatScreen(
     state: MobieUiState,
     onSend: (String, String?) -> Boolean,
     onStop: () -> Unit = {},
+    onMenu: () -> Unit = {},
     onBack: () -> Unit = {},
     onHistory: () -> Unit = {},
     onNewChat: () -> Unit = {},
-    onSamplerChange: (SamplerSettings) -> String? = { null },
+    onComputeSettings: () -> Unit = {},
     onLoadAnyway: () -> Unit = {},
 ) {
     val model = state.selected ?: return
@@ -231,7 +232,7 @@ internal fun ChatScreen(
             title = model.title,
             runtimeLabel = runtimeLabel,
             runtimeState = state.runtimeState,
-            onBack = onBack,
+            onMenu = onMenu,
             onHistory = onHistory,
             onNewChat = onNewChat,
         )
@@ -246,9 +247,8 @@ internal fun ChatScreen(
                 activeCompute = state.activeCompute,
                 stats = state.stats,
                 live = state.telemetry,
-                sampler = state.sampler,
                 runJson = { runJson(latestState) },
-                onSamplerChange = onSamplerChange,
+                onComputeSettings = onComputeSettings,
             )
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -262,14 +262,7 @@ internal fun ChatScreen(
                             state.compatibility.status != Compatibility.INCOMPATIBLE
                     },
                 )
-                state.messages.isEmpty() -> EmptyChat(
-                    model = model,
-                    imageInputReady = state.imageInputReady,
-                    onStarter = { starter ->
-                        prompt = starter
-                        if (ready) inputFocus.requestFocus()
-                    },
-                )
+                state.messages.isEmpty() -> EmptyChat(model = model, imageInputReady = state.imageInputReady)
                 else -> LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
@@ -409,7 +402,7 @@ private fun ChatHeader(
     title: String,
     runtimeLabel: String,
     runtimeState: RuntimeState,
-    onBack: () -> Unit,
+    onMenu: () -> Unit,
     onHistory: () -> Unit,
     onNewChat: () -> Unit,
 ) {
@@ -426,8 +419,8 @@ private fun ChatHeader(
             Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) {
-                LucideIcon(LucideR.drawable.lucide_ic_arrow_left, "Back", Modifier.size(22.dp))
+            IconButton(onClick = onMenu, modifier = Modifier.testTag("open_menu")) {
+                LucideIcon(LucideR.drawable.lucide_ic_menu, "Open menu", Modifier.size(22.dp))
             }
             Column(Modifier.weight(1f).padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
@@ -472,72 +465,70 @@ private fun ChatHeader(
     }
 }
 
-/** Live callbacks are SDK chunks; final token rates come from LiteRT benchmark data. */
+/**
+ * The strip under the chat header. Left: what the model is running on, as a chip that opens the
+ * run settings for this model. Right: the latest speed, which expands the run details. Live
+ * callbacks are SDK chunks; final token rates come from LiteRT benchmark data.
+ */
 @Composable
 private fun RunDetails(
     activeCompute: ActiveCompute?,
     stats: InferenceStats?,
     live: RunTelemetry,
-    sampler: SamplerSettings,
     runJson: () -> String,
-    onSamplerChange: (SamplerSettings) -> String?,
+    onComputeSettings: () -> Unit,
 ) {
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     var expanded by rememberSaveable { mutableStateOf(false) }
-    var temperature by remember(sampler) { mutableStateOf(sampler.temperature.toString()) }
-    var topK by remember(sampler) { mutableStateOf(sampler.topK.toString()) }
-    var topP by remember(sampler) { mutableStateOf(sampler.topP.toString()) }
-    var seed by remember(sampler) { mutableStateOf(sampler.seed.toString()) }
-    var settingsError by remember { mutableStateOf<String?>(null) }
-    val decode = stats?.tokensPerSecond?.takeIf { it > 0 }?.let { String.format(Locale.US, "%.1f tok/s", it) }
-        ?: live.liveSdkChunksPerSecond?.let { String.format(Locale.US, "%.1f SDK chunks/s", it) }
-        ?: "Waiting for output"
+    val measured = stats?.tokensPerSecond?.takeIf { it > 0 }
+    val decode = measured?.let { String.format(Locale.US, "%.1f tok/s", it) }
+        ?: live.liveSdkChunksPerSecond?.let { String.format(Locale.US, "%.1f chunks/s", it) }
+        ?: "no reply yet"
     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerLow)) {
-        activeCompute?.let { selected ->
-            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            ComputeChip(activeCompute, onComputeSettings)
+            Spacer(Modifier.weight(1f))
+            Row(
+                Modifier
+                    .heightIn(min = 44.dp)
+                    .clickable(role = Role.Button, onClickLabel = if (expanded) "Hide run details" else "Show run details") { expanded = !expanded }
+                    .padding(horizontal = 8.dp)
+                    .testTag("run_details_toggle"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 Text(
-                    "Running on ${selected.label}",
-                    style = Mobie.numeric.tiny,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    decode,
+                    style = Mobie.numeric.small,
+                    color = if (measured != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
                 )
-                selected.fallbackReason?.let { reason ->
-                    Text(reason, style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+                Text(if (expanded) "▾" else "▸", style = Mobie.numeric.small, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        // One readout line, like a status bar cell: the section name on the left, live speed on the right.
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .heightIn(min = 44.dp)
-                .clickable(role = Role.Button) { expanded = !expanded }
-                .padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
+        activeCompute?.fallbackReason?.let { reason ->
             Text(
-                "run details ${if (expanded) "▾" else "▸"}",
-                style = Mobie.numeric.small,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                decode,
-                style = Mobie.numeric.small,
-                color = if (stats?.tokensPerSecond?.let { it > 0 } == true) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
+                reason,
+                style = Mobie.numeric.tiny,
+                color = Mobie.signals.caution,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp).testTag("chat_compute_fallback"),
             )
         }
         if (expanded) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 val first = live.firstChunkMs ?: stats?.timeToFirstTokenMs?.takeIf { it > 0 }
-                Text("First SDK chunk: ${first?.let(::formatMillis) ?: "—"}", style = Mobie.numeric.tiny)
-                Text("Prefill: ${stats?.prefillTokensPerSecond?.takeIf { it > 0 }?.let { String.format(Locale.US, "%.1f tok/s (%d tokens)", it, stats.prefillTokenCount) } ?: "—"}", style = Mobie.numeric.tiny)
-                Text("Decode: ${stats?.tokensPerSecond?.takeIf { it > 0 }?.let { String.format(Locale.US, "%.1f tok/s (%d tokens)", it, stats.decodeTokenCount) } ?: "—"}", style = Mobie.numeric.tiny)
-                Text("App PSS: ${live.pssBytes?.let(::formatBytes) ?: "—"} · Thermal status: ${live.thermalStatus?.toString() ?: "—"}", style = Mobie.numeric.tiny)
+                Text("First text: ${first?.let(::formatMillis) ?: "—"}", style = Mobie.numeric.tiny)
+                Text("Reading prompt: ${stats?.prefillTokensPerSecond?.takeIf { it > 0 }?.let { String.format(Locale.US, "%.1f tok/s (%d tokens)", it, stats.prefillTokenCount) } ?: "—"}", style = Mobie.numeric.tiny)
+                Text("Writing reply: ${stats?.tokensPerSecond?.takeIf { it > 0 }?.let { String.format(Locale.US, "%.1f tok/s (%d tokens)", it, stats.decodeTokenCount) } ?: "—"}", style = Mobie.numeric.tiny)
+                Text("App memory: ${live.pssBytes?.let(::formatBytes) ?: "—"} · Thermal status: ${live.thermalStatus?.toString() ?: "—"}", style = Mobie.numeric.tiny)
                 Text("Battery current: ${live.batteryCurrentMilliAmps?.let { String.format(Locale.US, "%.0f mA", it) } ?: "—"}", style = Mobie.numeric.tiny)
-                Text("Estimated whole-device energy/token: ${live.estimatedEnergyPerTokenMilliWh?.let { String.format(Locale.US, "%.5f mWh", it) } ?: "—"}", style = Mobie.numeric.tiny)
-                Text("Live speed uses SDK chunks; final token counts use LiteRT.", style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Energy per token (whole phone, estimate): ${live.estimatedEnergyPerTokenMilliWh?.let { String.format(Locale.US, "%.5f mWh", it) } ?: "—"}", style = Mobie.numeric.tiny)
+                Text("Live speed counts text chunks as they arrive; final token counts come from LiteRT.", style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TermButton(
                     "Copy run as JSON",
                     onClick = { scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Run JSON", runJson()))) } },
@@ -545,41 +536,54 @@ private fun RunDetails(
                     enabled = stats != null || live.sdkChunks > 0,
                     modifier = Modifier.padding(vertical = 4.dp),
                 )
-                SectionLabel("Sampling", Modifier.padding(top = 6.dp))
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(temperature, { temperature = it }, label = { Text("Temperature") }, singleLine = true, modifier = Modifier.width(120.dp), shape = RectangleShape)
-                    OutlinedTextField(topK, { topK = it }, label = { Text("Top-k") }, singleLine = true, modifier = Modifier.width(100.dp), shape = RectangleShape)
-                    OutlinedTextField(topP, { topP = it }, label = { Text("Top-p") }, singleLine = true, modifier = Modifier.width(100.dp), shape = RectangleShape)
-                    OutlinedTextField(seed, { seed = it }, label = { Text("Seed") }, singleLine = true, modifier = Modifier.width(120.dp), shape = RectangleShape)
-                }
-                TermButton(
-                    "Apply sampling",
-                    onClick = {
-                        val parsed = listOfNotNull(temperature.toDoubleOrNull(), topK.toIntOrNull(), topP.toDoubleOrNull(), seed.toIntOrNull())
-                        settingsError = if (parsed.size != 4) "Enter valid numbers for all sampling fields." else {
-                            onSamplerChange(SamplerSettings(temperature.toDouble(), topK.toInt(), topP.toDouble(), seed.toInt()))
-                        }
-                    },
-                    style = TermButtonStyle.Ghost,
-                    modifier = Modifier.padding(vertical = 4.dp),
-                )
-                settingsError?.let { Text("[!] $it", style = Mobie.numeric.tiny, color = Mobie.signals.blocked) }
             }
         }
         Hairline()
     }
 }
 
-private fun runJson(state: MobieUiState): String {
+/**
+ * `[≡ GPU ›]`: the active backend as a bordered chip. One tap opens the run settings for the loaded
+ * model, so switching CPU / GPU or tuning Advanced never needs a trip back to the model page.
+ */
+@Composable
+private fun ComputeChip(activeCompute: ActiveCompute?, onClick: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val accent = MaterialTheme.colorScheme.primary
+    val ink = if (pressed) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurface
+    val label = activeCompute?.label ?: "Run settings"
+    Row(
+        Modifier
+            .heightIn(min = 40.dp)
+            .background(if (pressed) accent else Color.Transparent)
+            .border(1.dp, if (pressed) accent else MaterialTheme.colorScheme.outline)
+            .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClickLabel = "Open run settings", onClick = onClick)
+            .semantics(mergeDescendants = true) {
+                contentDescription = activeCompute?.let { "Run settings. Running on ${it.label}" } ?: "Run settings"
+            }
+            .padding(horizontal = 10.dp)
+            .testTag("open_compute_settings"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        LucideIcon(LucideR.drawable.lucide_ic_sliders_horizontal, null, Modifier.size(14.dp), tint = if (pressed) ink else accent)
+        Text(label, style = Mobie.numeric.small, color = ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text("›", style = Mobie.numeric.small, color = if (pressed) ink else MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+internal fun runJson(state: MobieUiState): String {
     val stats = state.stats
     val live = state.telemetry
+    val sampler = state.appliedSampler ?: state.sampler
     fun value(value: Any?): Any = value ?: JSONObject.NULL
     return JSONObject().apply {
         put("modelId", value(state.selected?.id))
         put("artifact", value(state.selectedArtifact?.fileName))
         put("compute", value(state.activeCompute?.label))
-        put("sampler", JSONObject().put("temperature", state.sampler.temperature).put("topK", state.sampler.topK)
-            .put("topP", state.sampler.topP).put("seed", state.sampler.seed))
+        put("sampler", JSONObject().put("temperature", sampler.temperature).put("topK", sampler.topK)
+            .put("topP", sampler.topP).put("seed", sampler.seed))
         put("firstSdkChunkMs", value(live.firstChunkMs))
         put("sdkChunks", live.sdkChunks)
         put("liveSdkChunksPerSecond", value(live.liveSdkChunksPerSecond))
@@ -696,15 +700,7 @@ private fun ErrorPanel(message: String, onBack: () -> Unit, onLoadAnyway: (() ->
 }
 
 @Composable
-private fun EmptyChat(model: AiModel, imageInputReady: Boolean, onStarter: (String) -> Unit) {
-    val starters = remember(model.supportsVision, imageInputReady) {
-        buildList {
-            add("Explain how on-device AI works")
-            add("Write a short poem about the sea")
-            add("Summarize the pros and cons of electric cars")
-            if (model.supportsVision && imageInputReady) add("Describe an image") else add("Help me plan a weekend trip")
-        }
-    }
+private fun EmptyChat(model: AiModel, imageInputReady: Boolean) {
     Column(
         Modifier
             .fillMaxSize()
@@ -712,7 +708,7 @@ private fun EmptyChat(model: AiModel, imageInputReady: Boolean, onStarter: (Stri
             .padding(horizontal = 18.dp, vertical = 22.dp),
         verticalArrangement = Arrangement.spacedBy(22.dp, Alignment.CenterVertically),
     ) {
-        // Boot-log intro: each line reads like a command or a check finishing.
+        // A quiet greeting; the message box below is the only call to action.
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             PromptLine("mobie chat --load", Modifier.appear())
             Text(
@@ -735,41 +731,6 @@ private fun EmptyChat(model: AiModel, imageInputReady: Boolean, onStarter: (Stri
                     if (model.supportsVision && !imageInputReady) "!" else "i",
                     if (model.supportsVision && !imageInputReady) Mobie.signals.caution else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            }
-        }
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            SectionLabel("Try", Modifier.appear(delayMillis = 160))
-            starters.forEachIndexed { index, starter ->
-                val vision = starter == "Describe an image"
-                Panel(
-                    Modifier.fillMaxWidth().appear(delayMillis = 200 + index * 60),
-                    color = MaterialTheme.colorScheme.surfaceContainer,
-                    borderColor = MaterialTheme.colorScheme.outline.copy(alpha = .55f),
-                    onClick = { onStarter(if (vision) "Describe this image in detail." else starter) },
-                ) {
-                    Row(
-                        Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Text("›", style = Mobie.numeric.medium, color = MaterialTheme.colorScheme.primary)
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(starter, style = MaterialTheme.typography.bodyLarge)
-                            if (vision) {
-                                Text(
-                                    "Attach a photo with the image button first",
-                                    style = Mobie.numeric.tiny,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                        Text(
-                            if (vision) "[img]" else "[run]",
-                            style = Mobie.numeric.tiny,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
             }
         }
     }

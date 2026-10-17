@@ -22,10 +22,12 @@ import java.util.concurrent.TimeUnit
 
 class AppContainer(context: Context) {
     val appContext: Context = context.applicationContext
-    private val http = OkHttpClient.Builder()
-        .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .build()
+    private val http by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(20, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .build()
+    }
     // Heavy members are created on first use so cold start only pays for what the first screen needs.
     // EncryptedSharedPreferences and Keystore master-key setup are the most expensive of these.
     val tokenStore by lazy { HuggingFaceTokenStore(appContext) }

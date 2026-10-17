@@ -37,6 +37,9 @@ internal class ModelDetailCache<T>(
         }
     }
 
+    @Synchronized
+    fun clear() = entries.clear()
+
     private companion object {
         const val DEFAULT_TTL_MILLIS = 10 * 60 * 1000L
         const val DEFAULT_MAX_ENTRIES = 64
