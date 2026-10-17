@@ -1,6 +1,7 @@
 package dev.yashasvm.mobie.core.runtime
 
 import java.io.File
+import dev.yashasvm.mobie.core.device.CpuThreadPolicy
 import java.io.IOException
 import kotlin.math.max
 
@@ -24,7 +25,7 @@ internal object LiteRtCpuThreadPolicy {
         availableProcessors: Int = Runtime.getRuntime().availableProcessors(),
         override: Int? = null,
     ): Int {
-        if (override != null) return override.coerceIn(1, 8)
+        if (override != null) return requireNotNull(CpuThreadPolicy.clamp(override, availableProcessors))
         val online = availableProcessors.coerceAtLeast(1)
         val measured = frequenciesKhz.filterKeys { it < online }.values.filter { it > 0 }
         if (measured.size < 2) return minOf(2, online)

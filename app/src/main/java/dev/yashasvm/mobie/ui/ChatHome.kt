@@ -64,6 +64,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.composables.icons.lucide.R as LucideR
+import dev.yashasvm.mobie.core.runtime.ComputeBackend
+import dev.yashasvm.mobie.core.runtime.ComputeOptions
 import dev.yashasvm.mobie.core.runtime.SamplerSettings
 import dev.yashasvm.mobie.data.download.InstalledModelEntry
 import dev.yashasvm.mobie.data.history.ChatThread
@@ -87,6 +89,11 @@ internal fun ChatHome(
     onOpenModels: (CatalogTab) -> Unit,
     onGetModel: (String) -> Unit,
     onSamplerChange: (SamplerSettings) -> String? = { null },
+    onBackendChange: (ComputeBackend) -> Unit = {},
+    onCpuThreadsChange: (Int?) -> Unit = {},
+    onComputeOptionsChange: (ComputeOptions) -> Unit = {},
+    onApplyCompute: () -> Unit = {},
+    onResetCompute: () -> Unit = {},
     onLoadAnyway: () -> Unit = {},
 ) {
     val drawerState = rememberDrawerState(DrawerValue.Closed)
@@ -146,6 +153,11 @@ internal fun ChatHome(
                     onOpenModelPicker = { showPicker = true },
                     onNewChat = { draft = ""; activeDraft = ""; onNewChat() },
                     onSamplerChange = onSamplerChange,
+                    onBackendChange = onBackendChange,
+                    onCpuThreadsChange = onCpuThreadsChange,
+                    onComputeOptionsChange = onComputeOptionsChange,
+                    onApplyCompute = onApplyCompute,
+                    onResetCompute = onResetCompute,
                     onLoadAnyway = onLoadAnyway,
                     onGetModel = onGetModel,
                     initialDraft = draft,

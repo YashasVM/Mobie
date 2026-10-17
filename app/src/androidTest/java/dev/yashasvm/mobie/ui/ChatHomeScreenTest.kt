@@ -10,6 +10,8 @@ import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.graphics.asAndroidBitmap
@@ -24,6 +26,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.yashasvm.mobie.core.model.AiModel
 import dev.yashasvm.mobie.core.model.Compatibility
@@ -31,6 +34,9 @@ import dev.yashasvm.mobie.core.model.CompatibilityResult
 import dev.yashasvm.mobie.core.model.MemoryAdmissionTier
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
+import dev.yashasvm.mobie.core.runtime.ComputeBackend
+import dev.yashasvm.mobie.core.runtime.ComputeOptions
+import dev.yashasvm.mobie.core.runtime.SamplerSettings
 import dev.yashasvm.mobie.data.download.InstalledModelEntry
 import dev.yashasvm.mobie.data.history.ChatHistorySession
 import dev.yashasvm.mobie.data.history.ChatThread
@@ -100,12 +106,64 @@ class ChatHomeScreenTest {
     }
 
     @Test
-    fun composerOpensSamplingAndPerformanceSettings() {
+    fun composerOpensAdvancedSamplingSettings() {
         setHome(loadedState())
-        composeRule.onNodeWithText("Temperature").assertDoesNotExist()
+        composeRule.onNodeWithTag("compute_settings").assertDoesNotExist()
         composeRule.onNodeWithTag("chat_settings").performClick()
-        composeRule.onNodeWithText("Temperature").assertIsDisplayed()
-        composeRule.onNodeWithText("Apply sampling").assertIsDisplayed()
+        composeRule.onNodeWithTag("backend_CPU").assertIsDisplayed()
+        composeRule.onNodeWithTag("backend_GPU").assertIsDisplayed()
+        captureEvidence("mobie-chat-controls.png")
+        composeRule.onNodeWithTag("advanced_controls").assertDoesNotExist()
+        composeRule.onNodeWithTag("advanced_toggle").performScrollTo().performClick()
+        composeRule.onNodeWithTag("sampler_temperature").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun composerSwitchesCpuAndGpuOnlyReloadingWhenApplied() {
+        val original = ComputeOptions(backend = ComputeBackend.CPU)
+        val state = mutableStateOf(loadedState().copy(
+            downloadedPath = "/private/test.litertlm",
+            computeOptions = original,
+            appliedComputeOptions = original,
+            appliedSampler = SamplerSettings(),
+        ))
+        var applyCount = 0
+        setHome(
+            onBackendChange = { backend -> state.value = state.value.copy(computeOptions = state.value.computeOptions.copy(backend = backend)) },
+            onApplyCompute = { applyCount++ },
+        ) { state.value }
+        composeRule.onNodeWithTag("chat_settings").performClick()
+        composeRule.onNodeWithTag("backend_CPU").assertIsSelected()
+        composeRule.onNodeWithTag("apply_compute").assertDoesNotExist()
+        composeRule.onNodeWithTag("backend_GPU").performClick().assertIsSelected()
+        composeRule.runOnIdle {
+            assertEquals(ComputeBackend.GPU, state.value.computeBackend)
+            assertEquals(0, applyCount)
+        }
+        composeRule.onNodeWithTag("backend_CPU").performClick().assertIsSelected()
+        composeRule.onNodeWithTag("apply_compute").assertDoesNotExist()
+        composeRule.onNodeWithTag("backend_GPU").performClick()
+        composeRule.onNodeWithTag("apply_compute").performScrollTo().assertIsEnabled().performClick()
+        composeRule.runOnIdle { assertEquals(1, applyCount) }
+    }
+
+    @Test
+    fun composerCannotReloadComputeDuringAReply() {
+        val original = ComputeOptions(backend = ComputeBackend.CPU)
+        var applyCount = 0
+        setHome(onApplyCompute = { applyCount++ }) {
+            loadedState().copy(
+                runtimeState = RuntimeState.GENERATING,
+                downloadedPath = "/private/test.litertlm",
+                computeOptions = original.copy(backend = ComputeBackend.GPU),
+                appliedComputeOptions = original,
+                appliedSampler = SamplerSettings(),
+            )
+        }
+        composeRule.onNodeWithTag("chat_settings").performClick()
+        composeRule.onNodeWithTag("apply_compute").performScrollTo().assertIsNotEnabled()
+        composeRule.onNodeWithText("Wait for the reply", substring = true).assertIsDisplayed()
+        composeRule.runOnIdle { assertEquals(0, applyCount) }
     }
 
     @Test
@@ -291,7 +349,12 @@ class ChatHomeScreenTest {
 
     private fun setHome(state: MobieUiState) = setHome { state }
 
-    private fun setHome(darkTheme: Boolean = true, state: () -> MobieUiState) {
+    private fun setHome(
+        darkTheme: Boolean = true,
+        onBackendChange: (ComputeBackend) -> Unit = {},
+        onApplyCompute: () -> Unit = {},
+        state: () -> MobieUiState,
+    ) {
         composeRule.setContent {
             MobieTheme(darkTheme = darkTheme) {
                 CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground) {
@@ -307,6 +370,8 @@ class ChatHomeScreenTest {
                         onOpenModels = { openedModels = it },
                         onGetModel = { gotModel = it },
                         onLoadAnyway = { reclaimRetries++ },
+                        onBackendChange = onBackendChange,
+                        onApplyCompute = onApplyCompute,
                     )
                 }
             }
@@ -352,9 +417,10 @@ class ChatHomeScreenTest {
     private fun captureEvidence(name: String) {
         composeRule.waitForIdle()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
+        instrumentation.uiAutomation.waitForIdle(500, 5_000)
         val file = File(checkNotNull(instrumentation.targetContext.getExternalFilesDir(null)), name)
         file.outputStream().use { output ->
-            composeRule.onAllNodes(isRoot()).onLast().captureToImage().asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output)
+            checkNotNull(instrumentation.uiAutomation.takeScreenshot()).compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output)
         }
     }
 }

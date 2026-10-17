@@ -75,7 +75,6 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -94,7 +93,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -124,6 +122,9 @@ import androidx.compose.ui.unit.sp
 import com.composables.icons.lucide.R as LucideR
 import dev.yashasvm.mobie.core.model.Compatibility
 import dev.yashasvm.mobie.core.model.MemoryAdmissionTier
+import dev.yashasvm.mobie.core.device.CompatibilityResolver
+import dev.yashasvm.mobie.core.runtime.ComputeBackend
+import dev.yashasvm.mobie.core.runtime.ComputeOptions
 import dev.yashasvm.mobie.core.runtime.ActiveCompute
 import dev.yashasvm.mobie.core.runtime.InferenceStats
 import dev.yashasvm.mobie.core.runtime.SamplerSettings
@@ -157,6 +158,11 @@ internal fun ChatScreen(
     onOpenModelPicker: () -> Unit = {},
     onNewChat: () -> Unit = {},
     onSamplerChange: (SamplerSettings) -> String? = { null },
+    onBackendChange: (ComputeBackend) -> Unit = {},
+    onCpuThreadsChange: (Int?) -> Unit = {},
+    onComputeOptionsChange: (ComputeOptions) -> Unit = {},
+    onApplyCompute: () -> Unit = {},
+    onResetCompute: () -> Unit = {},
     onLoadAnyway: () -> Unit = {},
     onGetModel: (String) -> Unit = {},
     initialDraft: String = "",
@@ -349,16 +355,58 @@ internal fun ChatScreen(
             containerColor = MaterialTheme.colorScheme.surface,
         ) {
             Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding()) {
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Chat controls", style = MaterialTheme.typography.titleLarge)
+                    if (imageAllowed) {
+                        Text(
+                            "Chat about text or an attached photo on this phone. Image generation isn't available.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text(
+                        state.activeCompute?.let { "Running on ${it.label}" } ?: "Processor will be reported after loading.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.testTag("chat_active_compute"),
+                    )
+                    state.activeCompute?.fallbackReason?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = Mobie.signals.caution)
+                    }
+                    val resolver = remember { CompatibilityResolver() }
+                    val backendAdmissions = remember(state.device, state.selectedArtifact, state.computeOptions, state.computeCapabilities, state.selected) {
+                        AdvancedComputePolicy.backendAdmissions(
+                            state.device, state.selectedArtifact, state.selected?.supportsVision == true,
+                            state.computeOptions, state.computeCapabilities, resolver,
+                        )
+                    }
+                    ComputeSettingsPanel(
+                        backend = state.computeBackend,
+                        cpuThreads = state.cpuThreads,
+                        onBackendChange = onBackendChange,
+                        onCpuThreadsChange = onCpuThreadsChange,
+                        hardware = state.hardware,
+                        artifactSizeBytes = state.selectedArtifact?.sizeBytes ?: 0,
+                        measurements = state.decodeMeasurements,
+                        backendAdmissions = backendAdmissions,
+                        options = state.computeOptions,
+                        sampler = state.sampler,
+                        capabilities = state.computeCapabilities,
+                        activeCompute = state.activeCompute,
+                        needsApply = state.computeNeedsApply,
+                        loaded = state.appliedComputeOptions != null,
+                        runtimeState = state.runtimeState,
+                        downloaded = state.downloadedPath != null,
+                        onOptionsChange = onComputeOptionsChange,
+                        onSamplerChange = onSamplerChange,
+                        onApply = onApplyCompute,
+                        onReset = onResetCompute,
+                    )
+                }
                 RunDetails(
-                    capabilityDescription = if (imageAllowed) {
-                        "Chat about text or an attached photo on this phone. Image generation isn't available."
-                    } else null,
                     activeCompute = state.activeCompute,
                     stats = state.stats,
                     live = state.telemetry,
-                    sampler = state.sampler,
                     runJson = { runJson(state) },
-                    onSamplerChange = onSamplerChange,
                 )
             }
         }
@@ -474,59 +522,18 @@ internal fun ChatHeader(
 /** Live callbacks are SDK chunks; final token rates come from LiteRT benchmark data. */
 @Composable
 private fun RunDetails(
-    capabilityDescription: String?,
     activeCompute: ActiveCompute?,
     stats: InferenceStats?,
     live: RunTelemetry,
-    sampler: SamplerSettings,
     runJson: () -> String,
-    onSamplerChange: (SamplerSettings) -> String?,
 ) {
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     var expanded by rememberSaveable { mutableStateOf(false) }
-    var temperature by remember(sampler) { mutableStateOf(sampler.temperature.toString()) }
-    var topK by remember(sampler) { mutableStateOf(sampler.topK.toString()) }
-    var topP by remember(sampler) { mutableStateOf(sampler.topP.toString()) }
-    var seed by remember(sampler) { mutableStateOf(sampler.seed.toString()) }
-    var settingsError by remember { mutableStateOf<String?>(null) }
     val decode = stats?.tokensPerSecond?.takeIf { it > 0 }?.let { String.format(Locale.US, "%.1f tok/s", it) }
         ?: live.liveSdkChunksPerSecond?.let { String.format(Locale.US, "%.1f SDK chunks/s", it) }
         ?: "Waiting for output"
     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerLow)) {
-        Column(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text("Chat controls", style = MaterialTheme.typography.titleLarge)
-            capabilityDescription?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Text(
-                "Reasoning is determined by the model. When available, you can expand it in the reply.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            SectionLabel("Sampling", Modifier.padding(top = 6.dp))
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(temperature, { temperature = it }, label = { Text("Temperature") }, singleLine = true, modifier = Modifier.width(120.dp), shape = RectangleShape)
-                OutlinedTextField(topK, { topK = it }, label = { Text("Top-k") }, singleLine = true, modifier = Modifier.width(100.dp), shape = RectangleShape)
-                OutlinedTextField(topP, { topP = it }, label = { Text("Top-p") }, singleLine = true, modifier = Modifier.width(100.dp), shape = RectangleShape)
-                OutlinedTextField(seed, { seed = it }, label = { Text("Seed") }, singleLine = true, modifier = Modifier.width(120.dp), shape = RectangleShape)
-            }
-            TermButton(
-                "Apply sampling",
-                onClick = {
-                    val parsed = listOfNotNull(temperature.toDoubleOrNull(), topK.toIntOrNull(), topP.toDoubleOrNull(), seed.toIntOrNull())
-                    settingsError = if (parsed.size != 4) "Enter valid numbers for all sampling fields." else {
-                        onSamplerChange(SamplerSettings(temperature.toDouble(), topK.toInt(), topP.toDouble(), seed.toInt()))
-                    }
-                },
-                style = TermButtonStyle.Ghost,
-                modifier = Modifier.padding(vertical = 4.dp),
-            )
-            settingsError?.let { Text("[!] $it", style = Mobie.numeric.tiny, color = Mobie.signals.blocked) }
-        }
         // One readout line, like a status bar cell: the section name on the left, live speed on the right.
         Row(
             Modifier
@@ -584,16 +591,17 @@ private fun RunDetails(
     }
 }
 
-private fun runJson(state: MobieUiState): String {
+internal fun runJson(state: MobieUiState): String {
     val stats = state.stats
     val live = state.telemetry
+    val sampler = state.appliedSampler ?: state.sampler
     fun value(value: Any?): Any = value ?: JSONObject.NULL
     return JSONObject().apply {
         put("modelId", value(state.selected?.id))
         put("artifact", value(state.selectedArtifact?.fileName))
         put("compute", value(state.activeCompute?.label))
-        put("sampler", JSONObject().put("temperature", state.sampler.temperature).put("topK", state.sampler.topK)
-            .put("topP", state.sampler.topP).put("seed", state.sampler.seed))
+        put("sampler", JSONObject().put("temperature", sampler.temperature).put("topK", sampler.topK)
+            .put("topP", sampler.topP).put("seed", sampler.seed))
         put("firstSdkChunkMs", value(live.firstChunkMs))
         put("sdkChunks", live.sdkChunks)
         put("liveSdkChunksPerSecond", value(live.liveSdkChunksPerSecond))

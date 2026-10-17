@@ -101,6 +101,11 @@ fun MobieApp(
                     onOpenModels = viewModel::openModels,
                     onGetModel = viewModel::findModel,
                     onSamplerChange = viewModel::updateSampler,
+                    onBackendChange = viewModel::setComputeBackend,
+                    onCpuThreadsChange = viewModel::setCpuThreads,
+                    onComputeOptionsChange = viewModel::updateComputeOptions,
+                    onApplyCompute = viewModel::applyComputeSettings,
+                    onResetCompute = viewModel::resetComputeSettings,
                     onLoadAnyway = { viewModel.runInstalled(allowReclaim = true) },
                 )
                 AppScreen.MODEL -> ModelScreen(
@@ -110,6 +115,12 @@ fun MobieApp(
                     onCancelDownload = viewModel::cancelDownload,
                     onBackendChange = viewModel::setComputeBackend,
                     onCpuThreadsChange = viewModel::setCpuThreads,
+                    onComputeOptionsChange = viewModel::updateComputeOptions,
+                    onSamplerChange = viewModel::updateSampler,
+                    onApplyCompute = viewModel::applyComputeSettings,
+                    onResetCompute = viewModel::resetComputeSettings,
+                    onMemoryRefresh = viewModel::refreshMemory,
+                    onFreeMemory = viewModel::freeUpMemory,
                     onBack = { viewModel.back() },
                 )
                 AppScreen.CATALOG -> CatalogScreen(
