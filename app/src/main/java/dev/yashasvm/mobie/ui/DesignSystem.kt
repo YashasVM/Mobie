@@ -94,7 +94,7 @@ import kotlinx.coroutines.delay
 // panels, telemetry, and status colors read as one system.
 
 // Grouped content uses rounded cards; chips and badges are fully rounded pills.
-internal val PanelShape: Shape = RoundedCornerShape(24.dp)
+internal val PanelShape: Shape = RoundedCornerShape(16.dp)
 internal val PillShape: Shape = RoundedCornerShape(50)
 
 /** Raised surface with a 1dp hairline border. The base container for every grouped block. */
@@ -199,6 +199,12 @@ internal fun Hairline(modifier: Modifier = Modifier) {
     Box(modifier.fillMaxWidth().height(1.dp).background(Mobie.signals.hairline))
 }
 
+/** The Mobie mark: an amber block, the same glyph as the site favicon. */
+@Composable
+internal fun MobieMark(modifier: Modifier = Modifier, height: Dp = 20.dp) {
+    Box(modifier.size(height * .56f, height).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(height * .08f)))
+}
+
 /** Small circular status indicator, optionally pulsing during live work. */
 @Composable
 internal fun StatusDot(color: Color, modifier: Modifier = Modifier, pulsing: Boolean = false, size: Dp = 7.dp) {
@@ -232,7 +238,7 @@ internal fun BlinkingCursor(
         animationSpec = infiniteRepeatable(tween(530, easing = StepEasing), RepeatMode.Reverse),
         label = "cursor alpha",
     )
-    Box(modifier.size(width, height).graphicsLayer { this.alpha = alpha.value }.background(color, CircleShape))
+    Box(modifier.size(width, height).graphicsLayer { this.alpha = alpha.value }.background(color, RoundedCornerShape(1.dp)))
 }
 
 /** Jumps between start and end values, like a terminal cursor, instead of fading. */
