@@ -17,6 +17,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -50,8 +51,14 @@ internal fun SettingsScreen(
                 Text("Color mode", style = MaterialTheme.typography.bodyLarge)
                 Text("Choose the look that's comfortable for you.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    FilterChip(selected = !darkTheme, onClick = { onDarkThemeChange(false) }, label = { Text("Light") }, modifier = Modifier.testTag("theme_light"))
-                    FilterChip(selected = darkTheme, onClick = { onDarkThemeChange(true) }, label = { Text("Dark") }, modifier = Modifier.testTag("theme_dark"))
+                    FilterChip(selected = !darkTheme, onClick = { onDarkThemeChange(false) }, colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                            selectedLabelColor = MaterialTheme.colorScheme.primary,
+                        ), border = FilterChipDefaults.filterChipBorder(enabled = true, selected = !darkTheme, borderColor = MaterialTheme.colorScheme.outlineVariant, selectedBorderColor = MaterialTheme.colorScheme.primary), label = { Text("Light") }, modifier = Modifier.testTag("theme_light"))
+                    FilterChip(selected = darkTheme, onClick = { onDarkThemeChange(true) }, colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                            selectedLabelColor = MaterialTheme.colorScheme.primary,
+                        ), border = FilterChipDefaults.filterChipBorder(enabled = true, selected = darkTheme, borderColor = MaterialTheme.colorScheme.outlineVariant, selectedBorderColor = MaterialTheme.colorScheme.primary), label = { Text("Dark") }, modifier = Modifier.testTag("theme_dark"))
                 }
             }
         }
@@ -76,7 +83,7 @@ internal fun SettingsScreen(
             }
         }
         item {
-            Text("Mobie · Local AI, at your pace", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp))
+            Text("mobie · local AI, at your pace", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp))
         }
     }
     if (editingToken) {
@@ -107,10 +114,13 @@ internal fun SettingsScreen(
 
 @Composable
 private fun SettingsCard(title: String, content: @Composable () -> Unit) {
-    Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
-        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(title, style = MaterialTheme.typography.titleLarge)
-            content()
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(title.lowercase(), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(horizontal = 4.dp))
+        Panel(Modifier.fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                content()
+            }
         }
     }
 }

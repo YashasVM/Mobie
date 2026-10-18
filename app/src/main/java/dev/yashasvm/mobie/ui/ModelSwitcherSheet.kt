@@ -1,6 +1,7 @@
 package dev.yashasvm.mobie.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -43,8 +44,8 @@ internal fun ModelSwitcherSheet(
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         tonalElevation = 0.dp,
     ) {
         LazyColumn(
@@ -53,7 +54,7 @@ internal fun ModelSwitcherSheet(
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             item {
-                Text("Select model", style = MaterialTheme.typography.titleLarge,
+                Text("Switch model", style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 16.dp))
             }
             if (installed.isEmpty()) item {
@@ -70,8 +71,9 @@ internal fun ModelSwitcherSheet(
                     artifact?.runtimeLabel,
                 ).joinToString(" · ")
                 Row(
-                    Modifier.fillMaxWidth().heightIn(min = 80.dp).clip(RoundedCornerShape(18.dp))
-                        .background(MaterialTheme.colorScheme.surfaceContainer)
+                    Modifier.fillMaxWidth().heightIn(min = 80.dp).clip(RoundedCornerShape(16.dp))
+                        .background(if (active) MaterialTheme.colorScheme.primaryContainer.copy(alpha = .45f) else MaterialTheme.colorScheme.surfaceContainer)
+                        .border(1.dp, if (active) MaterialTheme.colorScheme.primary.copy(alpha = .6f) else MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
                         .semantics { selected = active }
                         .clickable(role = Role.Button, onClickLabel = "Select ${entry.model.title}", onClick = { onPick(entry) })
                         .padding(18.dp),
@@ -81,7 +83,7 @@ internal fun ModelSwitcherSheet(
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(entry.model.title, style = MaterialTheme.typography.titleMedium,
                             maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        if (specs.isNotBlank()) Text(specs, style = MaterialTheme.typography.bodyMedium,
+                        if (specs.isNotBlank()) Text(specs, style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     if (active) LucideIcon(LucideR.drawable.lucide_ic_check, "Selected", Modifier.size(22.dp),
@@ -89,11 +91,11 @@ internal fun ModelSwitcherSheet(
                 }
             }
             item {
-                Row(Modifier.fillMaxWidth().padding(top = 16.dp).clip(RoundedCornerShape(18.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainer).heightIn(min = 64.dp)
+                Row(Modifier.fillMaxWidth().padding(top = 12.dp).clip(RoundedCornerShape(16.dp))
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp)).heightIn(min = 64.dp)
                     .clickable(role = Role.Button, onClick = onGetMore).padding(horizontal = 18.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    Text("More models", style = MaterialTheme.typography.titleMedium)
+                    Text("Get more models", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.weight(1f))
                     LucideIcon(LucideR.drawable.lucide_ic_chevron_right, null, Modifier.size(20.dp))
                 }

@@ -46,6 +46,7 @@ import dev.yashasvm.mobie.core.model.AiModel
 import dev.yashasvm.mobie.core.model.Compatibility
 import dev.yashasvm.mobie.core.model.CompatibilityResult
 import dev.yashasvm.mobie.data.download.InstalledModelEntry
+import dev.yashasvm.mobie.ui.theme.Mobie
 
 /** Model library and catalog. All fit estimates come from the shared compatibility policy. */
 @Composable
@@ -63,9 +64,9 @@ internal fun CatalogScreen(
     val resolver = remember { CompatibilityResolver() }
 
     Column(Modifier.fillMaxSize()) {
-        TabRow(selectedTabIndex = if (installedTab) 0 else 1, containerColor = MaterialTheme.colorScheme.background) {
-            Tab(selected = installedTab, onClick = { installedTab = true }, modifier = Modifier.testTag("bottom_nav_installed"), text = { Text("Installed") })
-            Tab(selected = !installedTab, onClick = { installedTab = false }, modifier = Modifier.testTag("models_browse"), text = { Text("Browse") })
+        TabRow(selectedTabIndex = if (installedTab) 0 else 1, containerColor = MaterialTheme.colorScheme.background, contentColor = MaterialTheme.colorScheme.primary, divider = { Hairline() }) {
+            Tab(selected = installedTab, onClick = { installedTab = true }, modifier = Modifier.testTag("bottom_nav_installed"), text = { Text("Installed", style = MaterialTheme.typography.labelLarge) }, unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant)
+            Tab(selected = !installedTab, onClick = { installedTab = false }, modifier = Modifier.testTag("models_browse"), text = { Text("Browse", style = MaterialTheme.typography.labelLarge) }, unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         LazyColumn(
             modifier = Modifier.fillMaxSize().imePadding(),
@@ -113,7 +114,7 @@ internal fun CatalogScreen(
                             }
                         },
                         modifier = Modifier.fillMaxWidth().testTag("model_search"),
-                        shape = RoundedCornerShape(18.dp),
+                        shape = RoundedCornerShape(16.dp),
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         keyboardActions = KeyboardActions(onSearch = { onSearch() }),
@@ -125,7 +126,7 @@ internal fun CatalogScreen(
                 }
                 state.device?.let { device ->
                     item {
-                        Text("${formatBytes(device.availableRamBytes)} memory available · ${formatBytes(device.availableStorageBytes)} storage free", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("${formatBytes(device.availableRamBytes)} memory available · ${formatBytes(device.availableStorageBytes)} storage free", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 when {
@@ -174,35 +175,25 @@ private fun CatalogModelCard(
     onDelete: (() -> Unit)? = null,
 ) {
     val artifact = model.bestArtifact
-    Card(onClick = onClick, shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
-        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Panel(Modifier.fillMaxWidth(), onClick = onClick) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.Top) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(model.title, style = MaterialTheme.typography.titleMedium)
-                    Text(model.author, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(model.author, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                if (installed) Tag("Installed", color = Mobie.signals.ready)
                 if (onDelete != null) {
-                    IconButton(onClick = onDelete) { LucideIcon(LucideR.drawable.lucide_ic_trash_2, "Delete ${model.title}", Modifier.size(20.dp)) }
+                    IconButton(onClick = onDelete, modifier = Modifier.size(48.dp).padding(start = 4.dp)) { LucideIcon(LucideR.drawable.lucide_ic_trash_2, "Delete ${model.title}", Modifier.size(20.dp)) }
                 }
             }
-            Text(
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                 listOfNotNull(
                     artifact?.sizeBytes?.takeIf { it > 0 }?.let(::formatBytes) ?: "Size unknown",
                     artifact?.quantization,
                     artifact?.runtimeLabel,
-                ).joinToString(" · "),
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Text(
-                listOfNotNull(
-                    "Installed".takeIf { installed },
-                    "Photos supported".takeIf { model.supportsVision },
-                    if (model.gated) "Access required" else null,
-                    "License: ${model.license ?: "check publisher"}",
-                ).joinToString(" · "),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+                ).forEach { Tag(it) }
+            }
             compatibility?.let { fit ->
                 val label = when (fit.status) {
                     Compatibility.COMPATIBLE -> "Fits device estimates"
@@ -210,21 +201,32 @@ private fun CatalogModelCard(
                     Compatibility.INCOMPATIBLE -> "Doesn't fit this device"
                     Compatibility.CONVERSION_REQUIRED -> "Unsupported format"
                 }
-                Text(label, style = MaterialTheme.typography.bodyMedium, color = if (fit.status == Compatibility.INCOMPATIBLE || fit.status == Compatibility.CONVERSION_REQUIRED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
-                if (fit.estimatedRamBytes > 0) {
-                    Text("Estimated memory: ${formatBytes(fit.estimatedRamBytes)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                if (fit.status != Compatibility.COMPATIBLE) {
-                    Text(fit.reason, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    SignalTag(label, fit.status.signalColor())
+                    if (fit.estimatedRamBytes > 0) {
+                        Text("Estimated memory: ${formatBytes(fit.estimatedRamBytes)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (fit.status != Compatibility.COMPATIBLE) {
+                        Text(fit.reason, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
+            Text(
+                listOfNotNull(
+                    "Photos supported".takeIf { model.supportsVision },
+                    if (model.gated) "Access required" else null,
+                    "License: ${model.license ?: "check publisher"}",
+                ).joinToString(" · "),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
 
 @Composable
 private fun ModelNotice(title: String, body: String, action: String, onAction: () -> Unit) {
-    Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+    Panel(Modifier.fillMaxWidth()) {
         Column(Modifier.fillMaxWidth().padding(20.dp).semantics { liveRegion = LiveRegionMode.Polite }, verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)

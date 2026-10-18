@@ -6,6 +6,7 @@ import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -16,7 +17,9 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -75,11 +78,22 @@ fun MobieApp(
     ModalNavigationDrawer(
         drawerState = drawer,
         drawerContent = {
-            ModalDrawerSheet(drawerContainerColor = MaterialTheme.colorScheme.background) {
-                Text("Mobie", style = MaterialTheme.typography.displaySmall, modifier = Modifier.padding(28.dp))
-                AppPage.entries.forEach { destination ->
+            ModalDrawerSheet(drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerLow, drawerShape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp)) {
+                Row(Modifier.statusBarsPadding().padding(start = 28.dp, top = 28.dp, bottom = 20.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    MobieMark(height = 26.dp)
+                    Text("mobie", style = MaterialTheme.typography.headlineMedium)
+                }
+                AppPage.entries.forEachIndexed { index, destination ->
                     NavigationDrawerItem(
-                        label = { Text(destination.title) },
+                        label = { Text("$index:${destination.title.lowercase()}", style = MaterialTheme.typography.labelLarge) },
+                        colors = NavigationDrawerItemDefaults.colors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                            selectedTextColor = MaterialTheme.colorScheme.primary,
+                            selectedIconColor = MaterialTheme.colorScheme.primary,
+                            unselectedContainerColor = Color.Transparent,
+                        ),
+                        shape = MaterialTheme.shapes.large,
                         icon = { LucideIcon(destination.icon, null, Modifier.size(22.dp)) },
                         selected = page == destination,
                         onClick = { navigate(destination) },
@@ -87,8 +101,8 @@ fun MobieApp(
                     )
                 }
                 Spacer(Modifier.weight(1f))
-                Text("Your conversations stay on this phone.", style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(28.dp))
+                Text("Conversations stay on this phone.", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.navigationBarsPadding().padding(28.dp))
             }
         },
     ) {
@@ -154,27 +168,32 @@ fun MobieApp(
 
 @Composable
 internal fun PageHeader(title: String, onMenu: () -> Unit) {
-    Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = onMenu) { LucideIcon(LucideR.drawable.lucide_ic_menu, "Open navigation", Modifier.size(24.dp)) }
-        Text(title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f).padding(horizontal = 12.dp))
+    Column(Modifier.fillMaxWidth().statusBarsPadding()) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onMenu, modifier = Modifier.size(48.dp)) { LucideIcon(LucideR.drawable.lucide_ic_menu, "Open navigation", Modifier.size(24.dp)) }
+            Text(title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
+        }
+        Hairline()
     }
 }
 
 @Composable
 internal fun RecentsScreen(chats: List<RecentChat>, onOpen: (RecentChat) -> Unit) {
     LazyColumn(Modifier.fillMaxSize().navigationBarsPadding(), contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Text("Conversations, kept close.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        item { Text("Saved on this phone, per model.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         if (chats.isEmpty()) item {
             Column(Modifier.padding(vertical = 48.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                MobieMark(height = 32.dp)
+                Spacer(Modifier.height(8.dp))
                 Text("No chats yet", style = MaterialTheme.typography.headlineMedium)
                 Text("Start a conversation in Chat. You can come back to it here.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         items(chats, key = { "${it.modelId}:${it.session.id}" }) { chat ->
-            Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainer) {
+            Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainer, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
                 Column(Modifier.fillMaxWidth().clickable { onOpen(chat) }.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(chat.session.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text("${chat.modelTitle} · ${historyTime(chat.session.updatedAt)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${chat.modelTitle} · ${historyTime(chat.session.updatedAt)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
