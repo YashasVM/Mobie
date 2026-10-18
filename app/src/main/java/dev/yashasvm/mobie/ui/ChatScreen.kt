@@ -320,12 +320,13 @@ internal fun ChatScreen(
                     model = model,
                     imageInputReady = state.imageInputReady,
                     ready = ready,
+                    onSuggest = { prompt = it; inputFocus.requestFocus() },
                 )
                 else -> LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize().nestedScroll(followConnection),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(24.dp),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(20.dp),
                 ) {
                     itemsIndexed(
                         state.messages,
@@ -466,14 +467,18 @@ private fun ChatHeader(
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     Row(
-        Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = 60.dp).padding(horizontal = 8.dp),
+        Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = 56.dp).padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
             LucideIcon(LucideR.drawable.lucide_ic_menu, "Open navigation", Modifier.size(24.dp))
         }
-        Text("Mobie", style = MaterialTheme.typography.titleLarge.copy(fontFamily = FontFamily.Serif),
-            modifier = Modifier.weight(1f).padding(start = 8.dp).semantics { heading() })
+        Row(Modifier.weight(1f).padding(start = 6.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            MobieMark(height = 18.dp)
+            Text("mobie", style = MaterialTheme.typography.titleLarge.copy(letterSpacing = (-0.4).sp),
+                modifier = Modifier.semantics { heading() })
+        }
         IconButton(onClick = onNewChat, modifier = Modifier.size(48.dp)) {
             LucideIcon(LucideR.drawable.lucide_ic_message_square_plus, "Start a new chat", Modifier.size(22.dp))
         }
@@ -651,27 +656,52 @@ private fun ErrorPanel(message: String, onBack: () -> Unit, onLoadAnyway: (() ->
     }
 }
 
+private val StarterPrompts = listOf(
+    "Explain something simply",
+    "Help me write a message",
+    "Brainstorm ideas with me",
+    "Summarize some text",
+)
+
 @Composable
-private fun EmptyChat(model: AiModel?, imageInputReady: Boolean, ready: Boolean) {
+private fun EmptyChat(model: AiModel?, imageInputReady: Boolean, ready: Boolean, onSuggest: (String) -> Unit) {
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 32.dp, vertical = 24.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 28.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
+        horizontalAlignment = Alignment.Start,
     ) {
-        LucideIcon(LucideR.drawable.lucide_ic_sparkles, null, Modifier.size(32.dp), tint = MaterialTheme.colorScheme.tertiary)
-        Spacer(Modifier.height(24.dp))
+        MobieMark(height = 40.dp)
+        Spacer(Modifier.height(28.dp))
         Text("What can I help with?",
-            style = MaterialTheme.typography.headlineLarge.copy(fontFamily = FontFamily.Serif, fontWeight = FontWeight.Normal),
-            textAlign = TextAlign.Center, modifier = Modifier.semantics { heading() })
-        Spacer(Modifier.height(14.dp))
-        Text("Your conversations stay on this phone.", style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+            style = MaterialTheme.typography.headlineLarge,
+            modifier = Modifier.semantics { heading() })
+        Spacer(Modifier.height(12.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatusDot(Mobie.signals.ready, size = 7.dp)
+            Text("Your conversations stay on this phone.", style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         if (ready && model?.supportsVision == true) {
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(12.dp))
             Text(if (imageInputReady) "Chat about text or an attached photo on this phone. Image generation isn't available."
                 else "This phone loaded text chat only. Photo input is unavailable for this session.",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center)
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Spacer(Modifier.height(32.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            StarterPrompts.forEach { suggestion ->
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(MaterialTheme.shapes.large)
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.large)
+                        .clickable(role = Role.Button, onClick = { onSuggest(suggestion) })
+                        .padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text("›", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                    Text(suggestion, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
         }
     }
 }
@@ -693,17 +723,17 @@ private fun UserMessage(message: ChatMessage, modifier: Modifier = Modifier) {
                     message.text,
                     modifier = Modifier
                         .clip(UserBubbleShape)
-                        .background(MaterialTheme.colorScheme.surfaceContainerHigh, UserBubbleShape)
+                        .background(MaterialTheme.colorScheme.primaryContainer, UserBubbleShape)
                         .padding(horizontal = 16.dp, vertical = 10.dp),
                     style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
             }
         }
     }
 }
 
-private val UserBubbleShape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 6.dp)
+private val UserBubbleShape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp)
 
 /** A file the user attached: file icon, name, size, and a note when the text was cut to fit. */
 @Composable
@@ -769,7 +799,13 @@ private fun AttachedImage(path: String) {
 @Composable
 private fun AssistantMessage(message: ChatMessage, streaming: Boolean, modifier: Modifier = Modifier) {
     val waitingForAnswer = streaming && message.text.isBlank()
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    val rail = if (streaming) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+    Column(
+        modifier.fillMaxWidth()
+            .drawBehind { drawRect(rail, size = androidx.compose.ui.geometry.Size(2.dp.toPx(), size.height)) }
+            .padding(start = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
         if (message.interrupted) Tag("Interrupted", color = Mobie.signals.caution)
         if (message.thinking.isNotBlank()) {
             ThinkingPanel(message.thinking, active = waitingForAnswer)
@@ -1200,8 +1236,9 @@ private fun CodeBlock(block: MdBlock.Code) {
     Column(
         Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceContainer, RectangleShape)
-            .border(1.dp, Mobie.signals.hairline, RectangleShape),
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .border(1.dp, Mobie.signals.hairline, RoundedCornerShape(12.dp)),
     ) {
         Row(
             Modifier
@@ -1219,15 +1256,20 @@ private fun CodeBlock(block: MdBlock.Code) {
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            TermButton(
+            Text(
                 if (copied) "copied" else "copy",
-                onClick = {
-                    scope.launch {
-                        clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Code", block.code)))
-                        copied = true
+                style = MaterialTheme.typography.labelMedium,
+                color = if (copied) Mobie.signals.ready else MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .heightIn(min = 44.dp)
+                    .clickable(role = Role.Button) {
+                        scope.launch {
+                            clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Code", block.code)))
+                            copied = true
+                        }
                     }
-                },
-                style = TermButtonStyle.Ghost,
+                    .padding(horizontal = 12.dp)
+                    .wrapContentHeight(Alignment.CenterVertically),
             )
         }
         Hairline()
@@ -1297,7 +1339,7 @@ private fun ComposerDock(
         RuntimeState.ERROR -> "Message Mobie…"
         RuntimeState.IDLE -> "Message Mobie…"
     }
-    val fieldShape = RoundedCornerShape(28.dp)
+    val fieldShape = RoundedCornerShape(24.dp)
     Column(
         Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)
             .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime)),
@@ -1305,7 +1347,7 @@ private fun ComposerDock(
         Column(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)
                 .clip(fieldShape).background(MaterialTheme.colorScheme.surfaceContainer)
-                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, fieldShape).padding(12.dp),
+                .border(1.dp, if (prompt.isNotEmpty() || generating) MaterialTheme.colorScheme.primary.copy(alpha = .55f) else MaterialTheme.colorScheme.outlineVariant, fieldShape).padding(10.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             AnimatedVisibility(
@@ -1391,7 +1433,7 @@ private fun ComposerDock(
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary), maxLines = 6,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { onSubmit() }),
-                modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = 8.dp, vertical = 8.dp)
+                modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp).padding(horizontal = 8.dp, vertical = 6.dp)
                     .focusRequester(focusRequester).testTag("chat_input"),
                 decorationBox = { inner -> Box {
                     if (prompt.isEmpty()) Text(placeholder, style = MaterialTheme.typography.bodyLarge,
@@ -1411,7 +1453,8 @@ private fun ComposerDock(
                     .clickable(role = Role.Button, onClickLabel = "Switch model", onClick = onSwitchModel)
                     .padding(horizontal = 14.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(modelTitle, style = MaterialTheme.typography.labelLarge, maxLines = 1,
+                    StatusDot(if (ready) Mobie.signals.ready else MaterialTheme.colorScheme.outline, pulsing = runtimeState == RuntimeState.LOADING, size = 7.dp)
+                    Text(modelTitle, style = MaterialTheme.typography.labelMedium, maxLines = 1,
                         overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                     LucideIcon(LucideR.drawable.lucide_ic_chevron_down, null, Modifier.size(14.dp))
                 }
