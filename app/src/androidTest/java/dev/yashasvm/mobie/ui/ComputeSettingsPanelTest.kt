@@ -362,7 +362,7 @@ class ComputeSettingsPanelTest {
         composeRule.onNode(hasText("Uses GPU · needs ~3.0 GB RAM") and hasAnyAncestor(hasTestTag("auto_admission")), useUnmergedTree = true)
             .assertIsDisplayed()
         composeRule.onNodeWithTag("ram_CPU", useUnmergedTree = true).assertTextEquals("needs ~1.0 GB RAM · Runs here")
-        composeRule.onNodeWithTag("ram_GPU", useUnmergedTree = true).assertTextEquals("needs ~3.0 GB RAM · Free memory first")
+        composeRule.onNodeWithTag("ram_GPU", useUnmergedTree = true).assertTextEquals("needs ~3.0 GB RAM · Tight on memory")
         // The whole row is the touch target, not just the option name.
         composeRule.onNodeWithTag("ram_CPU", useUnmergedTree = true).performClick()
         composeRule.onNodeWithTag("backend_CPU").assertIsSelected()

@@ -57,7 +57,7 @@ class ComputeSpeedPresentationTest {
 
     @Test fun `backend RAM labels name the size and status, and stay silent for unknown size`() {
         val gib = 1024L * 1024L * 1024L
-        assertEquals("needs ~3.0 GB RAM · Free memory first", backendRamLabel(result(Compatibility.WARNING, 3 * gib)))
+        assertEquals("needs ~3.0 GB RAM · Tight on memory", backendRamLabel(result(Compatibility.WARNING, 3 * gib)))
         assertEquals(null, backendRamLabel(result(Compatibility.WARNING, 0)))
         assertEquals("Uses GPU · needs ~3.0 GB RAM",
             autoPickLabel(BackendAdmission(ComputeBackend.GPU, result(Compatibility.COMPATIBLE, 3 * gib))))

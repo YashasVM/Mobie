@@ -127,7 +127,7 @@ internal fun ModelScreen(
     val scope = rememberCoroutineScope()
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        ModelTopBar(path = model.id, runtime = artifact.runtimeLabel, onBack = onBack)
+        ModelTopBar(path = model.title.ifBlank { model.id }, runtime = artifact.runtimeLabel, onBack = onBack)
         LazyColumn(
             modifier = Modifier.weight(1f).fillMaxWidth(),
             state = listState,
@@ -194,10 +194,10 @@ internal fun ModelScreen(
     if (confirmWarning) {
         AlertDialog(
             onDismissRequest = { confirmWarning = false },
-            title = { Text("Free memory before running") },
-            text = { Text(state.compatibility?.reason.orEmpty()) },
+            title = { Text("Download this model?") },
+            text = { Text(state.compatibility?.reason.orEmpty() + " You can free memory later, before you start chatting.") },
             confirmButton = {
-                TextButton(onClick = { confirmWarning = false; onDownload(true) }) { Text("Download anyway") }
+                TextButton(onClick = { confirmWarning = false; onDownload(true) }) { Text("Download") }
             },
             dismissButton = { TextButton(onClick = { confirmWarning = false }) { Text("Cancel") } },
         )
@@ -233,8 +233,7 @@ private fun ModelTopBar(path: String, runtime: String, onBack: () -> Unit) {
             }
             Text(
                 buildAnnotatedString {
-                    withStyle(SpanStyle(color = dim)) { append("model/") }
-                    withStyle(SpanStyle(color = ink)) { append(middleEllipsis(path, 36)) }
+                    withStyle(SpanStyle(color = ink)) { append(middleEllipsis(path, 30)) }
                 },
                 style = Mobie.numeric.small,
                 maxLines = 1,
@@ -278,16 +277,13 @@ private fun ModelIdentity(model: AiModel, artifact: ModelArtifact, modifier: Mod
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Tag("Type: ${model.type.displayLabel()}")
+            Tag(model.type.displayLabel())
             Tag(
                 if (model.gated) "Gated" else "Public",
                 icon = if (model.gated) LucideR.drawable.lucide_ic_lock else LucideR.drawable.lucide_ic_globe,
                 color = if (model.gated) Mobie.signals.caution else null,
             )
-            Tag(
-                if (model.supportsVision) "Vision" else "Text",
-                icon = if (model.supportsVision) LucideR.drawable.lucide_ic_eye else LucideR.drawable.lucide_ic_type,
-            )
+            if (model.supportsVision) Tag("Photos", icon = LucideR.drawable.lucide_ic_eye)
             artifact.quantization?.let { Tag(it) }
             model.license?.let { Tag("License: $it") }
         }
@@ -356,8 +352,8 @@ private fun MemoryPanel(
     val segments = if (hasBreakdown) {
         listOf(
             MemorySegment("Model weights", weights, weightsColor),
-            MemorySegment("KV cache", kv, kvColor),
-            MemorySegment("Runtime", overhead, overheadColor),
+            MemorySegment("Chat memory", kv, kvColor),
+            MemorySegment("App overhead", overhead, overheadColor),
         )
     } else {
         listOf(MemorySegment("Estimated peak", peak, weightsColor))
@@ -390,7 +386,7 @@ private fun MemoryPanel(
                     )
                 }
                 KvRow(
-                    "Free now",
+                    "Free right now",
                     formatBytes(available),
                     swatch = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.appear(delayMillis = 320 + segments.size * 50, offsetDp = 6f),
@@ -403,7 +399,7 @@ private fun MemoryPanel(
                     "Context window",
                     result?.contextWindowTokens?.takeIf { it > 0 }?.let { "${formatTokens(it)} tokens" } ?: "Unknown",
                 )
-                KvRow("File-backed weights", formatBytes(result?.modelWeightsBytes ?: 0L))
+                KvRow("Model file", formatBytes(result?.modelWeightsBytes ?: 0L))
             }
             Text(
                 "Needs about ${formatBytes(peak)} at peak. This phone has ${formatBytes(total)} in total, " +
@@ -807,7 +803,7 @@ private fun ActionDock(
     // While a download runs, its progress line and Cancel say everything; a disabled button would not.
     val showPrimary = !downloading
     val primary = when {
-        downloaded -> PrimaryAction(LucideR.drawable.lucide_ic_play, "Run locally")
+        downloaded -> PrimaryAction(LucideR.drawable.lucide_ic_play, "Start chat")
         downloading -> PrimaryAction(LucideR.drawable.lucide_ic_download, "Downloading…")
         gatedWithoutToken -> PrimaryAction(LucideR.drawable.lucide_ic_lock, "Download requires token")
         else -> PrimaryAction(
@@ -905,7 +901,7 @@ private fun RunOnLine(summary: String, onClick: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .heightIn(min = 40.dp)
+            .heightIn(min = 48.dp)
             .clickable(role = Role.Button, onClickLabel = "Change run settings", onClick = onClick)
             .testTag("dock_run_on"),
         verticalAlignment = Alignment.CenterVertically,
@@ -956,6 +952,9 @@ private fun DownloadStatus(download: DownloadProgress) {
     val dim = MaterialTheme.colorScheme.onSurfaceVariant
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (active && known) ProgressTrack(progress)
+        if (active && error == null) {
+            Text("Safe to leave this screen. The download keeps going and resumes if interrupted.", style = Mobie.numeric.tiny, color = dim)
+        }
         Row(
             Modifier.fillMaxWidth().semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
             verticalAlignment = Alignment.CenterVertically,

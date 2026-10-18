@@ -16,6 +16,7 @@ internal fun hardwareSummary(hardware: HardwareProfile?): String {
     // These are aliases for reported chip IDs, never guesses from a phone's marketing name.
     val chip = when (hardware.socModel?.uppercase(Locale.US)) {
         "SM8650", "SM8650-AC", "SM8650-AB" -> "Snapdragon 8 Gen 3"
+        "RANCHU", "GOLDFISH" -> "Emulated chip"
         else -> hardware.socModel ?: hardware.socManufacturer?.let { "$it chip" } ?: "Chip not reported"
     }
     val gpu = hardware.gpu?.renderer?.replace("(TM)", "", ignoreCase = true)?.trim()

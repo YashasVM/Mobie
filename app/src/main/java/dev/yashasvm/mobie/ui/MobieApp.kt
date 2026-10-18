@@ -254,7 +254,7 @@ private fun ChatDrawer(
             DrawerRow(LucideR.drawable.lucide_ic_plus, "new chat", "drawer_new_chat", onNewChat)
             DrawerRow(LucideR.drawable.lucide_ic_history, "chat history", "drawer_history", onHistory)
             Hairline(Modifier.padding(vertical = 8.dp))
-            DrawerRow(LucideR.drawable.lucide_ic_compass, "models", "drawer_models", onModels)
+            DrawerRow(LucideR.drawable.lucide_ic_compass, "discover models", "drawer_models", onModels)
             DrawerRow(LucideR.drawable.lucide_ic_library, "library", "drawer_library", onLibrary)
             DrawerRow(LucideR.drawable.lucide_ic_settings, "settings", "drawer_settings", onSettings)
         }
@@ -364,9 +364,9 @@ private fun HistorySheet(sessions: List<ChatHistorySession>, onDismiss: () -> Un
             if (visible.isEmpty()) {
                 item(key = "empty") {
                     Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        PromptLine("ls history")
+                        Text("No saved chats yet", style = MaterialTheme.typography.titleSmall)
                         Text(
-                            "Finished conversations with this model will appear here.",
+                            "Chats you finish with this model are saved here, on this phone only.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

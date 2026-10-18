@@ -413,7 +413,7 @@ private fun ChatHeader(
         StatusLine(
             segments = listOf(StatusSegment("mobie"), StatusSegment("chat")),
             selected = 1,
-            trailing = runtimeLabel,
+            trailing = "offline · on this phone",
         )
         Row(
             Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(horizontal = 4.dp),
@@ -483,8 +483,8 @@ private fun RunDetails(
     var expanded by rememberSaveable { mutableStateOf(false) }
     val measured = stats?.tokensPerSecond?.takeIf { it > 0 }
     val decode = measured?.let { String.format(Locale.US, "%.1f tok/s", it) }
-        ?: live.liveSdkChunksPerSecond?.let { String.format(Locale.US, "%.1f chunks/s", it) }
-        ?: "no reply yet"
+        ?: live.liveSdkChunksPerSecond?.let { String.format(Locale.US, "%.1f/s live", it) }
+        ?: "run details"
     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerLow)) {
         Row(
             Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
@@ -555,7 +555,7 @@ private fun ComputeChip(activeCompute: ActiveCompute?, onClick: () -> Unit) {
     val label = activeCompute?.label ?: "Run settings"
     Row(
         Modifier
-            .heightIn(min = 40.dp)
+            .heightIn(min = 48.dp)
             .background(if (pressed) accent else Color.Transparent)
             .border(1.dp, if (pressed) accent else MaterialTheme.colorScheme.outline)
             .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClickLabel = "Open run settings", onClick = onClick)
@@ -671,8 +671,8 @@ private fun IndeterminateTrack(color: Color) {
 private fun ErrorPanel(message: String, onBack: () -> Unit, onLoadAnyway: (() -> Unit)? = null) {
     Box(Modifier.fillMaxSize().padding(20.dp), contentAlignment = Alignment.Center) {
         TuiWindow(
-            title = "engine error",
-            meta = "failed",
+            title = "chat",
+            meta = "not started",
             borderColor = Mobie.signals.blocked.copy(alpha = .5f),
             modifier = Modifier.fillMaxWidth().widthIn(max = 420.dp).appear(),
         ) {
@@ -684,6 +684,13 @@ private fun ErrorPanel(message: String, onBack: () -> Unit, onLoadAnyway: (() ->
             ) {
                 Text("[!] Chat couldn't start", style = Mobie.numeric.small, color = Mobie.signals.blocked)
                 Text(message, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (onLoadAnyway != null) {
+                    Text(
+                        "Close a few other apps, then tap load anyway to try again.",
+                        style = Mobie.numeric.tiny,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             Hairline()
             Row(
@@ -710,7 +717,7 @@ private fun EmptyChat(model: AiModel, imageInputReady: Boolean) {
     ) {
         // A quiet greeting; the message box below is the only call to action.
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            PromptLine("mobie chat --load", Modifier.appear())
+            PromptLine("Ready to chat", Modifier.appear())
             Text(
                 model.title,
                 style = MaterialTheme.typography.headlineSmall,
@@ -719,7 +726,7 @@ private fun EmptyChat(model: AiModel, imageInputReady: Boolean) {
                 modifier = Modifier.padding(start = 20.dp).appear(delayMillis = 60),
             )
             Column(Modifier.padding(start = 20.dp).appear(delayMillis = 120), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                CheckLine("Model in memory", "✓", Mobie.signals.ready)
+                CheckLine("Model loaded. Type a message below to begin.", "✓", Mobie.signals.ready)
                 CheckLine(
                     if (model.supportsVision && imageInputReady) {
                         "Chat about text or an attached photo on this phone. Image generation isn't available."

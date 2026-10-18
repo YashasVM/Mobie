@@ -83,7 +83,7 @@ class ModelScreensTest {
             }
         }
 
-        composeRule.onNodeWithText("Type: Text generation").assertIsDisplayed()
+        composeRule.onNodeWithText("Text generation").assertIsDisplayed()
         composeRule.onNodeWithTag("model_primary_action").assertIsDisplayed().performClick()
         assertTrue(downloadRequested)
     }

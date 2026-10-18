@@ -149,7 +149,11 @@ internal fun CatalogScreen(
                 StatusSegment("${selectedTab + 1}:" + listOf("discover", "library", "settings").getOrElse(selectedTab) { "" }),
             ),
             selected = 0,
-            trailing = deviceName(state.device) ?: "mobie",
+            trailing = when {
+                state.installedModels.isEmpty() -> "no model yet"
+                state.installedModels.size == 1 -> "1 model ready"
+                else -> "${state.installedModels.size} models ready"
+            },
             modifier = Modifier.statusBarsPadding(),
         )
         AnimatedContent(
@@ -244,6 +248,11 @@ private fun LazyListScope.discoverTab(
             modifier = Modifier.entrance(tracker, "header", 0).padding(bottom = GroupGap),
         )
     }
+    if (state.installedModels.isEmpty() && state.query.isBlank()) {
+        item(key = "steps") {
+            GettingStarted(Modifier.entrance(tracker, "steps", 1).padding(bottom = GroupGap))
+        }
+    }
     item(key = "rig") { DeviceRig(state.device, Modifier.entrance(tracker, "rig", 1).padding(bottom = GroupGap)) }
     item(key = "search") {
         Box(Modifier.entrance(tracker, "search", 2).padding(bottom = GroupGap)) {
@@ -258,6 +267,32 @@ private fun LazyListScope.discoverTab(
             action = if (searching) ("Clear" to onFeatured) else null,
             modifier = Modifier.entrance(tracker, "section", 3).padding(bottom = 6.dp),
         )
+    }
+    if (!state.loading && state.catalogError == null && state.models.isNotEmpty()) {
+        item(key = "hint") {
+            Column(
+                Modifier.padding(horizontal = 12.dp).padding(bottom = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    "Tap a model for details and download.",
+                    style = Mobie.numeric.tiny,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    listOf(
+                        Triple("✓", "fits", Compatibility.COMPATIBLE),
+                        Triple("!", "tight on memory", Compatibility.WARNING),
+                        Triple("x", "too big", Compatibility.INCOMPATIBLE),
+                    ).forEach { (glyph, label, status) ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(glyph, style = Mobie.numeric.tiny, color = status.signalColor())
+                            Text(label, style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        }
     }
     when {
         state.loading -> item(key = "loading") { SkeletonList() }
@@ -302,12 +337,31 @@ private fun LazyListScope.discoverTab(
     }
 }
 
+/** Three-line path for a first-time user: pick, download, chat. Hidden once a model is installed. */
+@Composable
+private fun GettingStarted(modifier: Modifier = Modifier) {
+    TuiWindow(title = "start here", modifier = modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(
+                "1" to "Pick a model below",
+                "2" to "Tap download (needs Wi-Fi once)",
+                "3" to "Start chatting, offline",
+            ).forEach { (n, text) ->
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("[$n]", style = Mobie.numeric.small, color = MaterialTheme.colorScheme.primary)
+                    Text(text, style = Mobie.numeric.small, color = MaterialTheme.colorScheme.onSurface)
+                }
+            }
+        }
+    }
+}
+
 /** Device facts as a terminal window: a memory meter over a key/value list. */
 @Composable
 private fun DeviceRig(device: DeviceProfile?, modifier: Modifier = Modifier) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     TuiWindow(
-        title = "device — ${deviceName(device) ?: "this phone"}",
+        title = "this phone — ${deviceName(device) ?: "reading…"}",
         meta = if (device == null) "reading…" else chipName(device),
         modifier = modifier.fillMaxWidth().animateContentSize(tween(MotionMedium, easing = EmphasizedEase)),
     ) {
@@ -328,17 +382,17 @@ private fun DeviceRig(device: DeviceProfile?, modifier: Modifier = Modifier) {
             // Two columns keep the panel short; the chip already sits in the title bar.
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    KeyValueRow("ram", bytesOrDash(device?.totalRamBytes), Modifier.weight(1f))
+                    KeyValueRow("memory", bytesOrDash(device?.totalRamBytes), Modifier.weight(1f))
                     KeyValueRow(
-                        "avail",
+                        "free",
                         bytesOrDash(device?.availableRamBytes),
                         Modifier.weight(1f),
                         valueColor = if (device?.isLowMemory == true) Mobie.signals.caution else MaterialTheme.colorScheme.onSurface,
                     )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    KeyValueRow("disk", bytesOrDash(device?.availableStorageBytes), Modifier.weight(1f))
-                    KeyValueRow("abi", device?.supportedAbis?.firstOrNull() ?: "—", Modifier.weight(1f))
+                    KeyValueRow("storage", bytesOrDash(device?.availableStorageBytes), Modifier.weight(1f))
+                    KeyValueRow("cpu", device?.supportedAbis?.firstOrNull() ?: "—", Modifier.weight(1f))
                 }
             }
         }
@@ -357,7 +411,7 @@ private fun KeyValueRow(
             key,
             style = Mobie.numeric.small,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(56.dp),
+            modifier = Modifier.width(72.dp),
         )
         Text(
             value,
@@ -520,7 +574,7 @@ private fun specLine(quantization: String?, estimatedRamBytes: Long, contextToke
         quantization,
         // RAM is spelled out under the meter below, so the spec line carries only file facts.
         "~${formatBytes(estimatedRamBytes)} RAM".takeIf { estimatedRamBytes > 0 && !ramShownBelow },
-        "${formatTokens(contextTokens)} ctx".takeIf { contextTokens > 0 },
+        "${formatTokens(contextTokens)} context".takeIf { contextTokens > 0 },
     ).joinToString(" · ")
 
 private fun statusGlyph(status: Compatibility?): String = when (status) {
@@ -698,7 +752,7 @@ private fun InstalledRow(
                     tint = tone.dim,
                 )
             }
-            TermButton("open", onClick = onOpen, style = TermButtonStyle.Ghost)
+            TermButton("chat", onClick = onOpen, style = TermButtonStyle.Ghost)
         }
     }
 }
@@ -741,7 +795,7 @@ private fun LazyListScope.settingsTab(
                     Column(Modifier.weight(1f)) {
                         Text("Dark mode", style = MaterialTheme.typography.titleSmall)
                         Text(
-                            if (darkTheme) "On" else "Off",
+                            if (darkTheme) "On · tap to switch to light" else "Off · tap to switch to dark",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
