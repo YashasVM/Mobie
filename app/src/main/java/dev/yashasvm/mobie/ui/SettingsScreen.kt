@@ -33,6 +33,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.composables.icons.lucide.R as LucideR
 
 /** Appearance and access settings. The token stays in memory only until saved or dismissed. */
 @Composable
@@ -50,15 +51,9 @@ internal fun SettingsScreen(
             SettingsCard("Appearance") {
                 Text("Color mode", style = MaterialTheme.typography.bodyLarge)
                 Text("Choose the look that's comfortable for you.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    FilterChip(selected = !darkTheme, onClick = { onDarkThemeChange(false) }, colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                            selectedLabelColor = MaterialTheme.colorScheme.primary,
-                        ), border = FilterChipDefaults.filterChipBorder(enabled = true, selected = !darkTheme, borderColor = MaterialTheme.colorScheme.outlineVariant, selectedBorderColor = MaterialTheme.colorScheme.primary), label = { Text("Light") }, modifier = Modifier.testTag("theme_light"))
-                    FilterChip(selected = darkTheme, onClick = { onDarkThemeChange(true) }, colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                            selectedLabelColor = MaterialTheme.colorScheme.primary,
-                        ), border = FilterChipDefaults.filterChipBorder(enabled = true, selected = darkTheme, borderColor = MaterialTheme.colorScheme.outlineVariant, selectedBorderColor = MaterialTheme.colorScheme.primary), label = { Text("Dark") }, modifier = Modifier.testTag("theme_dark"))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ChoiceChip("Light", selected = !darkTheme, onClick = { onDarkThemeChange(false) }, modifier = Modifier.weight(1f).testTag("theme_light"))
+                    ChoiceChip("Dark", selected = darkTheme, onClick = { onDarkThemeChange(true) }, modifier = Modifier.weight(1f).testTag("theme_dark"))
                 }
             }
         }
@@ -66,13 +61,13 @@ internal fun SettingsScreen(
             SettingsCard("Hugging Face") {
                 Text(if (state.tokenConfigured) "Token saved securely" else "No token added", style = MaterialTheme.typography.bodyLarge)
                 Text("Public models don't need an account. Add a token for models you've been granted access to.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = { draft = ""; editingToken = true }) { Text(if (state.tokenConfigured) "Change token" else "Add token") }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TermButton(if (state.tokenConfigured) "Change token" else "Add token", onClick = { draft = ""; editingToken = true }, modifier = Modifier.weight(1f))
                     if (state.tokenConfigured) {
-                        TextButton(onClick = { onSaveToken("") }) { Text("Remove token") }
+                        TermButton("Remove token", onClick = { onSaveToken("") }, modifier = Modifier.weight(1f), style = TermButtonStyle.Danger)
                     }
                 }
-                TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://huggingface.co/settings/tokens"))) }) { Text("Manage Hugging Face tokens") }
+                TermButton("Manage tokens on Hugging Face", onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://huggingface.co/settings/tokens"))) }, modifier = Modifier.fillMaxWidth(), style = TermButtonStyle.Ghost, icon = LucideR.drawable.lucide_ic_arrow_right)
             }
         }
         item {
@@ -115,8 +110,7 @@ internal fun SettingsScreen(
 @Composable
 private fun SettingsCard(title: String, content: @Composable () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(title.lowercase(), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(horizontal = 4.dp))
+        SectionLabel(title, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(horizontal = 2.dp))
         Panel(Modifier.fillMaxWidth()) {
             Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 content()

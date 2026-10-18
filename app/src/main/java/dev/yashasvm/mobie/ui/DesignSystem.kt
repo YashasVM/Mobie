@@ -62,10 +62,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
@@ -94,8 +97,8 @@ import kotlinx.coroutines.delay
 // panels, telemetry, and status colors read as one system.
 
 // Grouped content uses rounded cards; chips and badges are fully rounded pills.
-internal val PanelShape: Shape = RoundedCornerShape(16.dp)
-internal val PillShape: Shape = RoundedCornerShape(50)
+internal val PanelShape: Shape = RectangleShape
+internal val PillShape: Shape = RectangleShape
 
 /** Raised surface with a 1dp hairline border. The base container for every grouped block. */
 @Composable
@@ -104,6 +107,7 @@ internal fun Panel(
     shape: Shape = PanelShape,
     color: Color = MaterialTheme.colorScheme.surfaceContainer,
     borderColor: Color = Mobie.signals.hairline,
+    accent: Color? = null,
     onClick: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
@@ -114,12 +118,20 @@ internal fun Panel(
             .clip(shape)
             .background(color, shape)
             .border(1.dp, borderColor, shape)
+            .then(if (accent != null) Modifier.drawBehind { drawRect(accent, size = Size(3.dp.toPx(), size.height)) } else Modifier)
             .then(if (onClick != null) Modifier.clickable(interactionSource = interaction, indication = ripple(), onClick = onClick) else Modifier),
     ) {
         CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
             content()
         }
     }
+}
+
+/** Fades content into the background beneath a header so scrolling never meets a hard edge. */
+@Composable
+internal fun TopScrim(modifier: Modifier = Modifier, height: Dp = 20.dp) {
+    val bg = MaterialTheme.colorScheme.background
+    Box(modifier.fillMaxWidth().height(height).background(Brush.verticalGradient(listOf(bg, bg.copy(alpha = 0f)))))
 }
 
 /** Plain section title used above grouped information. */
@@ -135,6 +147,7 @@ internal fun SectionLabel(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        Box(Modifier.size(6.dp, 6.dp).background(MaterialTheme.colorScheme.primary))
         Text(
             text,
             style = MaterialTheme.typography.labelMedium,
@@ -202,14 +215,14 @@ internal fun Hairline(modifier: Modifier = Modifier) {
 /** The Mobie mark: an amber block, the same glyph as the site favicon. */
 @Composable
 internal fun MobieMark(modifier: Modifier = Modifier, height: Dp = 20.dp) {
-    Box(modifier.size(height * .56f, height).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(height * .08f)))
+    Box(modifier.size(height * .56f, height).background(MaterialTheme.colorScheme.primary, RectangleShape))
 }
 
 /** Small circular status indicator, optionally pulsing during live work. */
 @Composable
 internal fun StatusDot(color: Color, modifier: Modifier = Modifier, pulsing: Boolean = false, size: Dp = 7.dp) {
     if (!pulsing) {
-        Box(modifier.size(size).background(color, CircleShape))
+        Box(modifier.size(size).background(color, RectangleShape))
         return
     }
     val transition = rememberInfiniteTransition(label = "status blink")
@@ -220,7 +233,7 @@ internal fun StatusDot(color: Color, modifier: Modifier = Modifier, pulsing: Boo
         animationSpec = infiniteRepeatable(tween(530, easing = StepEasing), RepeatMode.Reverse),
         label = "status blink alpha",
     )
-    Box(modifier.size(size).graphicsLayer { this.alpha = alpha.value }.background(color, CircleShape))
+    Box(modifier.size(size).graphicsLayer { this.alpha = alpha.value }.background(color, RectangleShape))
 }
 
 /** A block cursor that blinks at terminal cadence. Place it after streaming or prompt text. */
@@ -238,7 +251,7 @@ internal fun BlinkingCursor(
         animationSpec = infiniteRepeatable(tween(530, easing = StepEasing), RepeatMode.Reverse),
         label = "cursor alpha",
     )
-    Box(modifier.size(width, height).graphicsLayer { this.alpha = alpha.value }.background(color, RoundedCornerShape(1.dp)))
+    Box(modifier.size(width, height).graphicsLayer { this.alpha = alpha.value }.background(color, RectangleShape))
 }
 
 /** Jumps between start and end values, like a terminal cursor, instead of fading. */
@@ -393,15 +406,14 @@ internal fun MemoryBar(
             .semantics { contentDescription = description },
     ) {
         // A rounded track with each segment drawn in order from the left, sized against capacity.
-        val radius = CornerRadius(size.height / 2)
-        drawRoundRect(track, cornerRadius = radius)
+        drawRect(track)
         if (capacityBytes <= 0) return@Canvas
         val total = capacityBytes.toFloat()
         var x = 0f
         for (segment in segments.filter { it.bytes > 0 }) {
             val width = (segment.bytes / total * size.width * reveal.value).coerceAtMost(size.width - x)
             if (width <= 0f) continue
-            drawRoundRect(segment.color, topLeft = Offset(x, 0f), size = Size(width, size.height), cornerRadius = radius)
+            drawRect(segment.color, topLeft = Offset(x, 0f), size = Size(width, size.height))
             x += width
         }
         markerBytes?.takeIf { it in 1..capacityBytes }?.let { marker ->
@@ -422,9 +434,8 @@ internal fun ProgressTrack(
     val track = Mobie.signals.track
     val animated by animateFloatAsState(progress.coerceIn(0f, 1f), tween(MotionMedium, easing = EmphasizedEase), label = "progress")
     Canvas(modifier.fillMaxWidth().height(height)) {
-        val radius = CornerRadius(size.height / 2)
-        drawRoundRect(track, cornerRadius = radius)
-        if (animated > 0f) drawRoundRect(color, size = Size(size.width * animated, size.height), cornerRadius = radius)
+        drawRect(track)
+        if (animated > 0f) drawRect(color, size = Size(size.width * animated, size.height))
     }
 }
 
@@ -584,7 +595,7 @@ internal fun CheckLine(text: String, mark: String, color: Color, modifier: Modif
         Box(
             Modifier
                 .size(22.dp)
-                .clip(RoundedCornerShape(7.dp))
+                .clip(RectangleShape)
                 .background(color.copy(alpha = .16f)),
             contentAlignment = Alignment.Center,
         ) {

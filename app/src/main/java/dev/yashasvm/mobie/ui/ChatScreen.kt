@@ -351,11 +351,12 @@ internal fun ChatScreen(
                     item(key = "end", contentType = "end") { Spacer(Modifier.height(12.dp)) }
                 }
             }
+            if (state.messages.isNotEmpty()) TopScrim(Modifier.align(Alignment.TopCenter), 16.dp)
             // Appears only after the user scrolls away from the stream; tapping returns to the latest reply.
             if (!followLatest && state.messages.isNotEmpty()) {
                 Panel(
                     Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp).size(48.dp),
-                    shape = CircleShape,
+                    shape = RectangleShape,
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     onClick = {
                         followLatest = true
@@ -670,7 +671,7 @@ private fun EmptyChat(model: AiModel?, imageInputReady: Boolean, ready: Boolean,
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.Start,
     ) {
-        MobieMark(height = 40.dp)
+        MobieMark(height = 30.dp)
         Spacer(Modifier.height(28.dp))
         Text("What can I help with?",
             style = MaterialTheme.typography.headlineLarge,
@@ -688,18 +689,19 @@ private fun EmptyChat(model: AiModel?, imageInputReady: Boolean, ready: Boolean,
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Spacer(Modifier.height(32.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            StarterPrompts.forEach { suggestion ->
+        Column(Modifier.fillMaxWidth().border(1.dp, Mobie.signals.hairline)) {
+            StarterPrompts.forEachIndexed { index, suggestion ->
+                if (index > 0) Hairline()
                 Row(
-                    Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(MaterialTheme.shapes.large)
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.large)
+                    Modifier.fillMaxWidth().heightIn(min = 56.dp)
                         .clickable(role = Role.Button, onClick = { onSuggest(suggestion) })
                         .padding(horizontal = 16.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    Text("›", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                    Text(suggestion, style = MaterialTheme.typography.bodyMedium)
+                    Text("%02d".format(index + 1), style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.primary)
+                    Text(suggestion, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    LucideIcon(LucideR.drawable.lucide_ic_arrow_right, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -712,6 +714,7 @@ private fun EmptyChat(model: AiModel?, imageInputReady: Boolean, ready: Boolean,
 /** A prompt the user sent: right-aligned bubble on a raised surface, with any attachments above it. */
 @Composable
 private fun UserMessage(message: ChatMessage, modifier: Modifier = Modifier) {
+    val amber = MaterialTheme.colorScheme.primary
     Column(modifier.fillMaxWidth(), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         message.imagePath?.let { AttachedImage(it) }
         message.attachments.forEach { attachment ->
@@ -722,18 +725,19 @@ private fun UserMessage(message: ChatMessage, modifier: Modifier = Modifier) {
                 Text(
                     message.text,
                     modifier = Modifier
-                        .clip(UserBubbleShape)
-                        .background(MaterialTheme.colorScheme.primaryContainer, UserBubbleShape)
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh, UserBubbleShape)
+                        .border(1.dp, Mobie.signals.hairline, UserBubbleShape)
+                        .drawBehind { drawRect(amber, topLeft = androidx.compose.ui.geometry.Offset(size.width - 3.dp.toPx(), 0f), size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height)) }
+                        .padding(start = 16.dp, end = 19.dp, top = 12.dp, bottom = 12.dp),
                     style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
             }
         }
     }
 }
 
-private val UserBubbleShape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp)
+private val UserBubbleShape = RectangleShape
 
 /** A file the user attached: file icon, name, size, and a note when the text was cut to fit. */
 @Composable
@@ -784,8 +788,8 @@ private fun AttachedImage(path: String) {
             contentScale = ContentScale.Crop,
             modifier = Modifier
                 .size(112.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .border(1.dp, Mobie.signals.hairline, RoundedCornerShape(14.dp)),
+                .clip(RectangleShape)
+                .border(1.dp, Mobie.signals.hairline, RectangleShape),
         )
     } else {
         Tag("Image attached", icon = LucideR.drawable.lucide_ic_image)
@@ -1236,9 +1240,9 @@ private fun CodeBlock(block: MdBlock.Code) {
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RectangleShape)
             .background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .border(1.dp, Mobie.signals.hairline, RoundedCornerShape(12.dp)),
+            .border(1.dp, Mobie.signals.hairline, RectangleShape),
     ) {
         Row(
             Modifier
@@ -1339,7 +1343,7 @@ private fun ComposerDock(
         RuntimeState.ERROR -> "Message Mobie…"
         RuntimeState.IDLE -> "Message Mobie…"
     }
-    val fieldShape = RoundedCornerShape(24.dp)
+    val fieldShape = RectangleShape
     Column(
         Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)
             .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime)),
@@ -1347,8 +1351,8 @@ private fun ComposerDock(
         Column(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)
                 .clip(fieldShape).background(MaterialTheme.colorScheme.surfaceContainer)
-                .border(1.dp, if (prompt.isNotEmpty() || generating) MaterialTheme.colorScheme.primary.copy(alpha = .55f) else MaterialTheme.colorScheme.outlineVariant, fieldShape).padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                .border(1.dp, if (prompt.isNotEmpty() || generating) MaterialTheme.colorScheme.primary.copy(alpha = .55f) else MaterialTheme.colorScheme.outlineVariant, fieldShape).padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             AnimatedVisibility(
                 visible = imageCopying,
@@ -1433,7 +1437,7 @@ private fun ComposerDock(
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary), maxLines = 6,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { onSubmit() }),
-                modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp).padding(horizontal = 8.dp, vertical = 6.dp)
+                modifier = Modifier.fillMaxWidth().heightIn(min = 28.dp).padding(horizontal = 6.dp, vertical = 4.dp)
                     .focusRequester(focusRequester).testTag("chat_input"),
                 decorationBox = { inner -> Box {
                     if (prompt.isEmpty()) Text(placeholder, style = MaterialTheme.typography.bodyLarge,
@@ -1449,7 +1453,7 @@ private fun ComposerDock(
                     LucideIcon(LucideR.drawable.lucide_ic_image, "Attach image", Modifier.size(20.dp))
                 }
                 Row(Modifier.weight(1f).heightIn(min = 48.dp).clip(PillShape)
-                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .border(1.dp, Mobie.signals.hairline)
                     .clickable(role = Role.Button, onClickLabel = "Switch model", onClick = onSwitchModel)
                     .padding(horizontal = 14.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1536,7 +1540,7 @@ private fun SendStopButton(generating: Boolean, canSubmit: Boolean, onSubmit: ()
                 scaleY = scale
             }
             .pressScale(interaction, pressedScale = .9f),
-        shape = CircleShape,
+        shape = RectangleShape,
         colors = IconButtonDefaults.filledIconButtonColors(
             containerColor = container,
             contentColor = content,

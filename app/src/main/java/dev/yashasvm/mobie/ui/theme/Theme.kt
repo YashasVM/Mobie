@@ -181,12 +181,13 @@ private val MobieNumeric = MobieNumericType(
 )
 
 // Softer than the site's square corners so touch targets feel native, but tighter than before.
+// Sharp by design: square corners everywhere, with a 2dp softening only on tiny chips.
 private val MobieShapes = Shapes(
-    extraSmall = RoundedCornerShape(6.dp),
-    small = RoundedCornerShape(8.dp),
-    medium = RoundedCornerShape(12.dp),
-    large = RoundedCornerShape(16.dp),
-    extraLarge = RoundedCornerShape(24.dp),
+    extraSmall = RoundedCornerShape(2.dp),
+    small = RoundedCornerShape(0.dp),
+    medium = RoundedCornerShape(0.dp),
+    large = RoundedCornerShape(0.dp),
+    extraLarge = RoundedCornerShape(0.dp),
 )
 
 private val LocalMobieSignals = staticCompositionLocalOf { DarkSignals }

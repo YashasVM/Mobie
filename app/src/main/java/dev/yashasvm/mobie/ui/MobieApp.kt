@@ -19,6 +19,8 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
@@ -78,26 +80,31 @@ fun MobieApp(
     ModalNavigationDrawer(
         drawerState = drawer,
         drawerContent = {
-            ModalDrawerSheet(drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerLow, drawerShape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp)) {
+            ModalDrawerSheet(drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerLow, drawerShape = RectangleShape) {
                 Row(Modifier.statusBarsPadding().padding(start = 28.dp, top = 28.dp, bottom = 20.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     MobieMark(height = 26.dp)
                     Text("mobie", style = MaterialTheme.typography.headlineMedium)
                 }
+                Hairline()
+                Spacer(Modifier.height(8.dp))
                 AppPage.entries.forEachIndexed { index, destination ->
+                    val accent = MaterialTheme.colorScheme.primary
                     NavigationDrawerItem(
                         label = { Text("$index:${destination.title.lowercase()}", style = MaterialTheme.typography.labelLarge) },
                         colors = NavigationDrawerItemDefaults.colors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                            selectedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                             selectedTextColor = MaterialTheme.colorScheme.primary,
                             selectedIconColor = MaterialTheme.colorScheme.primary,
                             unselectedContainerColor = Color.Transparent,
                         ),
-                        shape = MaterialTheme.shapes.large,
+                        shape = RectangleShape,
                         icon = { LucideIcon(destination.icon, null, Modifier.size(22.dp)) },
                         selected = page == destination,
                         onClick = { navigate(destination) },
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).testTag("nav_${destination.name.lowercase()}"),
+                        modifier = Modifier.padding(vertical = 2.dp).height(56.dp)
+                            .drawWithContent { drawContent(); if (page == destination) drawRect(accent, size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height)) }
+                            .testTag("nav_${destination.name.lowercase()}"),
                     )
                 }
                 Spacer(Modifier.weight(1f))
@@ -151,8 +158,9 @@ fun MobieApp(
                             onDeleteInstalled = viewModel::deleteInstalled,
                         ) }
                         page == AppPage.Settings -> SettingsScreen(state, darkTheme, onDarkThemeChange, viewModel::saveToken)
-                        else -> RecentsScreen(state.recentChats) { viewModel.openRecent(it); page = AppPage.Chat }
+                        else -> RecentsScreen(state.recentChats, onStartChat = { navigate(AppPage.Chat) }) { viewModel.openRecent(it); page = AppPage.Chat }
                     }
+                    if (page != AppPage.Chat && !showModelDetail) TopScrim(Modifier.align(Alignment.TopCenter))
                 }
             }
         }
@@ -178,7 +186,7 @@ internal fun PageHeader(title: String, onMenu: () -> Unit) {
 }
 
 @Composable
-internal fun RecentsScreen(chats: List<RecentChat>, onOpen: (RecentChat) -> Unit) {
+internal fun RecentsScreen(chats: List<RecentChat>, onStartChat: () -> Unit = {}, onOpen: (RecentChat) -> Unit) {
     LazyColumn(Modifier.fillMaxSize().navigationBarsPadding(), contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { Text("Saved on this phone, per model.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         if (chats.isEmpty()) item {
@@ -187,11 +195,13 @@ internal fun RecentsScreen(chats: List<RecentChat>, onOpen: (RecentChat) -> Unit
                 Spacer(Modifier.height(8.dp))
                 Text("No chats yet", style = MaterialTheme.typography.headlineMedium)
                 Text("Start a conversation in Chat. You can come back to it here.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(8.dp))
+                TermButton("Start a chat", onClick = onStartChat, modifier = Modifier.testTag("recents_start_chat"))
             }
         }
         items(chats, key = { "${it.modelId}:${it.session.id}" }) { chat ->
-            Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainer, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
-                Column(Modifier.fillMaxWidth().clickable { onOpen(chat) }.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Panel(Modifier.fillMaxWidth(), onClick = { onOpen(chat) }) {
+                Column(Modifier.fillMaxWidth().heightIn(min = 72.dp).padding(horizontal = 18.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(chat.session.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text("${chat.modelTitle} · ${historyTime(chat.session.updatedAt)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }

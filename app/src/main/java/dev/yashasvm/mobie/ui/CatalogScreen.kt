@@ -33,6 +33,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
@@ -114,7 +115,7 @@ internal fun CatalogScreen(
                             }
                         },
                         modifier = Modifier.fillMaxWidth().testTag("model_search"),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RectangleShape,
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         keyboardActions = KeyboardActions(onSearch = { onSearch() }),
@@ -175,11 +176,11 @@ private fun CatalogModelCard(
     onDelete: (() -> Unit)? = null,
 ) {
     val artifact = model.bestArtifact
-    Panel(Modifier.fillMaxWidth(), onClick = onClick) {
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Panel(Modifier.fillMaxWidth(), accent = compatibility?.status?.let { it.signalColor() }, onClick = onClick) {
+        Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 16.dp, top = 16.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(model.title, style = MaterialTheme.typography.titleMedium)
+                    Text(model.title, style = MaterialTheme.typography.titleLarge)
                     Text(model.author, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 if (installed) Tag("Installed", color = Mobie.signals.ready)
@@ -187,13 +188,15 @@ private fun CatalogModelCard(
                     IconButton(onClick = onDelete, modifier = Modifier.size(48.dp).padding(start = 4.dp)) { LucideIcon(LucideR.drawable.lucide_ic_trash_2, "Delete ${model.title}", Modifier.size(20.dp)) }
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+            Text(
                 listOfNotNull(
                     artifact?.sizeBytes?.takeIf { it > 0 }?.let(::formatBytes) ?: "Size unknown",
                     artifact?.quantization,
                     artifact?.runtimeLabel,
-                ).forEach { Tag(it) }
-            }
+                ).joinToString("  /  "),
+                style = Mobie.numeric.small,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
             compatibility?.let { fit ->
                 val label = when (fit.status) {
                     Compatibility.COMPATIBLE -> "Fits device estimates"
@@ -230,7 +233,7 @@ private fun ModelNotice(title: String, body: String, action: String, onAction: (
         Column(Modifier.fillMaxWidth().padding(20.dp).semantics { liveRegion = LiveRegionMode.Polite }, verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            TextButton(onClick = onAction) { Text(action) }
+            TermButton(action, onClick = onAction, style = TermButtonStyle.Ghost)
         }
     }
 }

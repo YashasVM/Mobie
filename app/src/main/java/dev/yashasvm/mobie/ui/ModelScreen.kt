@@ -48,6 +48,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -233,6 +234,7 @@ private fun ChecklistPanel(model: AiModel, artifact: ModelArtifact, state: Mobie
 /** Keeps the model detail screen connected to the model library. */
 @Composable
 private fun ModelTopBar(onBack: () -> Unit) {
+    Column {
     Row(
         Modifier.fillMaxWidth().statusBarsPadding().padding(start = 4.dp, end = 20.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -241,6 +243,8 @@ private fun ModelTopBar(onBack: () -> Unit) {
             LucideIcon(LucideR.drawable.lucide_ic_arrow_left, "Back", Modifier.size(22.dp))
         }
         Text("Model details", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
+    }
+    Hairline()
     }
 }
 
@@ -282,8 +286,6 @@ private fun ModelIdentity(model: AiModel, artifact: ModelArtifact, modifier: Mod
                 if (model.supportsVision) "Vision" else "Text",
                 icon = if (model.supportsVision) LucideR.drawable.lucide_ic_eye else LucideR.drawable.lucide_ic_type,
             )
-            artifact.quantization?.let { Tag(it) }
-            model.license?.let { Tag("License: $it") }
         }
     }
 }
@@ -300,7 +302,7 @@ private fun VerdictPanel(result: CompatibilityResult?, modifier: Modifier = Modi
         Compatibility.INCOMPATIBLE, Compatibility.CONVERSION_REQUIRED -> "✕"
         null -> "…"
     }
-    val shape = RoundedCornerShape(24.dp)
+    val shape = RectangleShape
     Column(
         modifier
             .fillMaxWidth()
@@ -312,7 +314,7 @@ private fun VerdictPanel(result: CompatibilityResult?, modifier: Modifier = Modi
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(
-                Modifier.size(32.dp).clip(CircleShape).background(color.copy(alpha = .18f)),
+                Modifier.size(32.dp).clip(RectangleShape).background(color.copy(alpha = .18f)),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(mark, style = Mobie.numeric.medium, color = color)
@@ -437,6 +439,7 @@ private fun KvRow(
     swatch: Color? = null,
     valueColor: Color? = null,
     stacked: Boolean = false,
+    reserveSwatch: Boolean = true,
 ) {
     val dim = MaterialTheme.colorScheme.onSurfaceVariant
     val ink = valueColor ?: MaterialTheme.colorScheme.onSurface
@@ -449,7 +452,7 @@ private fun KvRow(
         Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.weight(.42f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 // The swatch column is always reserved so keys line up whether or not they have one.
-                Box(Modifier.size(8.dp).clip(CircleShape).background(swatch ?: Color.Transparent))
+                if (swatch != null || reserveSwatch) Box(Modifier.size(8.dp).background(swatch ?: Color.Transparent))
                 Text(key, style = MaterialTheme.typography.bodyMedium, color = dim, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             Text(
@@ -484,12 +487,13 @@ private fun StoragePanel(
     TuiWindow("Storage", modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                KvRow("Needs", formatBytes(needed))
-                KvRow("Free", formatBytes(free))
+                KvRow("Needs", formatBytes(needed), reserveSwatch = false)
+                KvRow("Free", formatBytes(free), reserveSwatch = false)
                 KvRow(
                     "After",
                     if (after < 0) "Short by ${formatBytes(-after)}" else formatBytes(after),
                     valueColor = if (after < 0) Mobie.signals.blocked else null,
+                    reserveSwatch = false,
                 )
             }
             ProgressTrack(
@@ -503,10 +507,7 @@ private fun StoragePanel(
 @Composable
 private fun ArtifactPanel(artifact: ModelArtifact, model: AiModel, modifier: Modifier = Modifier) {
     val rows = buildList {
-        add(SpecLine("Runtime", artifact.runtimeLabel))
         add(SpecLine("File", middleEllipsis(artifact.fileName.substringAfterLast('/'))))
-        add(SpecLine("Download size", formatBytes(artifact.sizeBytes)))
-        add(SpecLine("Quantization", artifact.quantization ?: "Publisher default"))
         add(
             if (artifact.sha256.isNullOrBlank()) {
                 SpecLine("Integrity", "Size check only")
@@ -515,10 +516,8 @@ private fun ArtifactPanel(artifact: ModelArtifact, model: AiModel, modifier: Mod
             },
         )
         add(SpecLine("Input", if (model.supportsVision) "Vision" else "Text only"))
-        add(SpecLine("License", model.license ?: "Check model card"))
-        add(SpecLine("Access", if (model.gated) "Hugging Face approval required" else "Public"))
     }
-    TuiWindow("Files and details", modifier.fillMaxWidth()) {
+    TuiWindow("File and integrity", modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             rows.forEach { line ->
                 KvRow(
@@ -526,6 +525,7 @@ private fun ArtifactPanel(artifact: ModelArtifact, model: AiModel, modifier: Mod
                     line.value,
                     valueColor = if (line.highlight) Mobie.signals.ready else null,
                     stacked = line.value.length > 24,
+                    reserveSwatch = false,
                 )
             }
         }
@@ -705,7 +705,7 @@ private fun ActionDock(
 @Composable
 private fun AccessNotice() {
     val caution = Mobie.signals.caution
-    val shape = RoundedCornerShape(24.dp)
+    val shape = RectangleShape
     Row(
         Modifier
             .fillMaxWidth()

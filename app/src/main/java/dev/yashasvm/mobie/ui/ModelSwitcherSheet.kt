@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -23,7 +24,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -45,8 +49,11 @@ internal fun ModelSwitcherSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        shape = RectangleShape,
         tonalElevation = 0.dp,
+        dragHandle = {
+            Box(Modifier.padding(top = 10.dp, bottom = 6.dp).size(36.dp, 3.dp).background(MaterialTheme.colorScheme.outline))
+        },
     ) {
         LazyColumn(
             Modifier.fillMaxWidth().navigationBarsPadding(),
@@ -54,16 +61,15 @@ internal fun ModelSwitcherSheet(
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             item {
-                Text("Switch model", style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 16.dp))
-            }
-            if (installed.isEmpty()) item {
-                Text("Download a model to chat on this phone.", style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 20.dp))
+                Column(Modifier.padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Switch model", style = MaterialTheme.typography.titleLarge)
+                    if (installed.isEmpty()) Text("Download a model to chat on this phone.", style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
             items(installed, key = { it.model.id }) { entry ->
                 val active = entry.model.id == activeId
+                val accent = MaterialTheme.colorScheme.primary
                 val artifact = entry.model.bestArtifact
                 val specs = listOfNotNull(
                     artifact?.sizeBytes?.takeIf { it > 0 }?.let(::formatBytes),
@@ -71,9 +77,10 @@ internal fun ModelSwitcherSheet(
                     artifact?.runtimeLabel,
                 ).joinToString(" · ")
                 Row(
-                    Modifier.fillMaxWidth().heightIn(min = 80.dp).clip(RoundedCornerShape(16.dp))
+                    Modifier.fillMaxWidth().heightIn(min = 80.dp).clip(RectangleShape)
                         .background(if (active) MaterialTheme.colorScheme.primaryContainer.copy(alpha = .45f) else MaterialTheme.colorScheme.surfaceContainer)
-                        .border(1.dp, if (active) MaterialTheme.colorScheme.primary.copy(alpha = .6f) else MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+                        .border(1.dp, if (active) MaterialTheme.colorScheme.primary.copy(alpha = .6f) else MaterialTheme.colorScheme.outlineVariant, RectangleShape)
+                        .drawBehind { if (active) drawRect(accent, size = Size(3.dp.toPx(), size.height)) }
                         .semantics { selected = active }
                         .clickable(role = Role.Button, onClickLabel = "Select ${entry.model.title}", onClick = { onPick(entry) })
                         .padding(18.dp),
@@ -91,8 +98,8 @@ internal fun ModelSwitcherSheet(
                 }
             }
             item {
-                Row(Modifier.fillMaxWidth().padding(top = 12.dp).clip(RoundedCornerShape(16.dp))
-                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp)).heightIn(min = 64.dp)
+                Row(Modifier.fillMaxWidth().padding(top = 12.dp).clip(RectangleShape)
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RectangleShape).heightIn(min = 64.dp)
                     .clickable(role = Role.Button, onClick = onGetMore).padding(horizontal = 18.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     Text("Get more models", style = MaterialTheme.typography.titleMedium)
