@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -12,7 +13,7 @@ RUNNER = Path(__file__).with_name("run-gpu-benchmark.sh")
 
 
 class RunnerTest(unittest.TestCase):
-    def run_case(self, model_path, revision):
+    def run_case(self, model_path, revision, minimal_path=False):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             log = root / "calls.jsonl"
@@ -26,6 +27,14 @@ if 'instrument' in ' '.join(sys.argv[1:]):
 """)
             adb.chmod(0o755)
             environment = dict(os.environ, ADB=str(adb), FAKE_ADB_LOG=str(log), BUILD_REVISION=revision)
+            if minimal_path:
+                binaries = root / "bin"
+                binaries.mkdir()
+                for name in ("bash", "python3", "mkdir", "tee", "grep"):
+                    resolved = shutil.which(name)
+                    self.assertIsNotNone(resolved, f"Required host tool missing: {name}")
+                    (binaries / name).symlink_to(resolved)
+                environment["PATH"] = str(binaries)
             # Do not inherit a caller's experiment overrides into these boundary tests.
             for key in ("CPU_THREADS", "MIN_DECODE_TOKENS", "CONTEXT_TOKENS", "SPECULATIVE_DECODING",
                         "THINKING_BUDGET", "OUTPUT_TOKENS", "PROMPT_FIXTURE", "SUSTAINED_SECONDS"):
@@ -51,6 +60,9 @@ if 'instrument' in ' '.join(sys.argv[1:]):
 
     def test_plain_model_path(self):
         self.run_case("models/model.litertlm", "abc123")
+
+    def test_runs_without_ripgrep(self):
+        self.run_case("models/model.litertlm", "abc123", minimal_path=True)
 
     def test_spaces_quotes_and_shell_metacharacters_remain_literal(self):
         self.run_case("models/owner's model; $(echo unexpected).litertlm", "revision with spaces ' ; # literal")

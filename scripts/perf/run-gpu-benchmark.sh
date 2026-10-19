@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs one opt-in production-adapter benchmark on a physical ARM64 phone.
-# Host requirements: Bash, Python 3.8+, ripgrep, and Android platform-tools.
+# Host requirements: Bash, Python 3.8+, standard POSIX utilities, and Android platform-tools.
 # PROMPT_FIXTURE=short-latency (default; latency probe only) or sustained-decode.
 # MIN_DECODE_TOKENS overrides the fixture's minimum native decoded tokens (sustained default 64);
 # it must not exceed OUTPUT_TOKENS, so sustained runs usually also raise OUTPUT_TOKENS.
@@ -51,7 +51,7 @@ remote_command=$(python3 -c 'import shlex, sys; print(shlex.join(sys.argv[1:]))'
 "$adb_bin" "${args[@]}" exec-out run-as dev.yashasvm.mobie cat files/gpu-benchmark.jsonl \
   > "$output_dir/cumulative-results.jsonl"
 "$adb_bin" "${args[@]}" shell dumpsys thermalservice > "$output_dir/thermal-after.txt"
-if ! rg -q 'OK \(1 test\)' "$output_dir/instrumentation.txt"; then
+if ! grep -Fq 'OK (1 test)' "$output_dir/instrumentation.txt"; then
   echo "Benchmark failed; inspect $output_dir/instrumentation.txt and native-logcat.txt" >&2
   exit 1
 fi
