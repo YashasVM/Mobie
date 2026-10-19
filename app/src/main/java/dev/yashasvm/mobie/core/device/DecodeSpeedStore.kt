@@ -31,14 +31,17 @@ class DecodeSpeedStore(context: Context) {
         mutex.withLock { readHistory(identity) }
     }
 
-    /** [settings] are the requested settings the loaded engine ran with, not what Auto happened to pick. */
+    /** [settings] carry applied choices; native statistics supply the resolved backend and counts. */
     suspend fun record(identity: String, stats: InferenceStats, settings: DecodeRunSettings): List<DecodeMeasurement> =
         withContext(Dispatchers.IO) {
             // The requested backend may be Auto or may have changed after load. Only the actual
             // backend reported with these SDK stats identifies what produced this measurement.
             mutex.withLock {
-                stats.compute?.backend?.let { backend ->
-                    history.record(identity, backend, settings, stats.tokensPerSecond, stats.decodeTokenCount)
+                stats.compute?.let { actual ->
+                    history.record(identity, actual.backend, settings.copy(
+                        resolvedCpuThreads = actual.cpuThreads,
+                        resolvedContextTokens = actual.contextTokens,
+                    ), stats.tokensPerSecond, stats.decodeTokenCount)
                 }
                 readHistory(identity)
             }

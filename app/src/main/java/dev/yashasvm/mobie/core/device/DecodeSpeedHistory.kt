@@ -1,7 +1,10 @@
 package dev.yashasvm.mobie.core.device
 
 import dev.yashasvm.mobie.core.model.ModelArtifact
+import dev.yashasvm.mobie.core.runtime.ActivationType
+import dev.yashasvm.mobie.core.runtime.ActiveCompute
 import dev.yashasvm.mobie.core.runtime.ComputeBackend
+import dev.yashasvm.mobie.core.runtime.ComputeOptions
 import java.security.MessageDigest
 import kotlin.math.abs
 
@@ -10,12 +13,32 @@ fun modelPerformanceIdentity(modelId: String, artifact: ModelArtifact): String =
     "$modelId|${artifact.fileName}|${artifact.downloadUrl}|${artifact.sha256.orEmpty()}|${artifact.sizeBytes}"
 
 /**
- * The settings a decode run used. Null means Auto. Thread count only changes CPU speed, so GPU
- * measurements always store null threads.
+ * Requested settings plus the counts reported by the loaded runtime. Null requested counts mean
+ * Auto; null resolved counts mean unknown, not a guess. AUTO activation and null speculation retain
+ * artifact/runtime defaults and must not be equated with an explicit override.
  */
-data class DecodeRunSettings(val cpuThreads: Int?, val contextTokens: Int?) {
+data class DecodeRunSettings(
+    val cpuThreads: Int?,
+    val contextTokens: Int?,
+    val activationType: ActivationType = ActivationType.AUTO,
+    val speculativeDecoding: Boolean? = null,
+    val resolvedCpuThreads: Int? = null,
+    val resolvedContextTokens: Int? = null,
+) {
     internal fun forBackend(backend: ComputeBackend): DecodeRunSettings =
-        if (backend == ComputeBackend.CPU) this else copy(cpuThreads = null)
+        if (backend == ComputeBackend.CPU) this else copy(cpuThreads = null, resolvedCpuThreads = null)
+
+    companion object {
+        /** Does not infer the activation type or drafter state from a backend's usual defaults. */
+        fun fromApplied(options: ComputeOptions, actual: ActiveCompute?): DecodeRunSettings = DecodeRunSettings(
+            cpuThreads = options.cpuThreads,
+            contextTokens = options.contextTokens,
+            activationType = options.activationType,
+            speculativeDecoding = options.speculativeDecoding,
+            resolvedCpuThreads = actual?.cpuThreads,
+            resolvedContextTokens = actual?.contextTokens,
+        ).let { if (actual == null) it else it.forBackend(actual.backend) }
+    }
 }
 
 /** One backend's measured speed at the settings it ran with. */
@@ -23,13 +46,14 @@ data class DecodeMeasurement(val backend: ComputeBackend, val settings: DecodeRu
 
 /**
  * The measurement to show for the current settings. [exactSettings] is false when the closest
- * measurement came from different thread or context settings.
+ * measurement came from different requested or resolved settings.
  */
 data class DecodeMatch(val speed: DecodeSpeed, val exactSettings: Boolean)
 
 /**
- * Exact settings win. Otherwise the nearest same-backend measurement is used: closest thread count
- * first, then closest context size. Auto matches only Auto.
+ * Never compare different activation/speculation modes. Within that mode, prefer exact settings,
+ * then nearby requested thread/context counts, then resolved counts. Unknown Auto resolutions are
+ * not labeled exact matches to known resolutions.
  */
 fun matchDecodeMeasurement(
     measurements: List<DecodeMeasurement>,
@@ -38,11 +62,14 @@ fun matchDecodeMeasurement(
 ): DecodeMatch? {
     val wanted = current.forBackend(backend)
     val nearest = measurements
-        .filter { it.backend == backend }
+        .filter { it.backend == backend && it.settings.activationType == wanted.activationType &&
+            it.settings.speculativeDecoding == wanted.speculativeDecoding }
         .minWithOrNull(
             compareBy<DecodeMeasurement>(
                 { settingDistance(it.settings.cpuThreads, wanted.cpuThreads) },
                 { settingDistance(it.settings.contextTokens, wanted.contextTokens) },
+                { settingDistance(it.settings.resolvedCpuThreads, wanted.resolvedCpuThreads) },
+                { settingDistance(it.settings.resolvedContextTokens, wanted.resolvedContextTokens) },
             ),
         ) ?: return null
     return DecodeMatch(nearest.speed, exactSettings = nearest.settings == wanted)
@@ -64,9 +91,9 @@ internal interface DecodeSpeedKeyValueStore {
 }
 
 /**
- * One bucket per artifact and backend. Each bucket keeps up to four settings groups (thread count
- * and context size), eight runs per group, and at most 64 buckets globally, evicted by last read or
- * write. Schema 2 entries had no settings, so they are removed rather than reused.
+ * One bucket per artifact and backend. Each bucket keeps up to four complete settings groups,
+ * eight runs per group, and at most 64 buckets globally, evicted by last read or write. Older
+ * schemas lack activation/speculation identity and are removed rather than mislabeled.
  */
 internal class DecodeSpeedHistory(
     private val store: DecodeSpeedKeyValueStore,
@@ -140,25 +167,40 @@ internal class DecodeSpeedHistory(
 
     private fun ComputeBackend.isConcrete(): Boolean = this == ComputeBackend.CPU || this == ComputeBackend.GPU
 
-    /** One line per settings group: `threads;context;rate,rate`, where `auto` stands for Auto. */
+    /** Versioned settings followed by numeric rates. No prompt or output text is persisted. */
     private data class Group(val settings: DecodeRunSettings, val samples: List<Double>) {
         fun encode(): String = listOf(
             settings.cpuThreads?.toString() ?: AUTO,
             settings.contextTokens?.toString() ?: AUTO,
+            settings.activationType.name,
+            settings.speculativeDecoding?.toString() ?: AUTO,
+            settings.resolvedCpuThreads?.toString() ?: AUTO,
+            settings.resolvedContextTokens?.toString() ?: AUTO,
             samples.joinToString(","),
         ).joinToString(";")
 
         companion object {
             fun decode(line: String): Group? {
-                val parts = line.split(';', limit = 3)
-                if (parts.size != 3) return null
+                val parts = line.split(';', limit = 7)
+                if (parts.size != 7) return null
                 val threads = setting(parts[0], 1..8) ?: return null
                 val context = setting(parts[1], 1_024..4_096) ?: return null
-                val samples = parts[2].split(',').mapNotNull {
+                val activation = ActivationType.entries.find { it.name == parts[2] } ?: return null
+                val speculative = when (parts[3]) {
+                    AUTO -> null
+                    "true" -> true
+                    "false" -> false
+                    else -> return null
+                }
+                val resolvedThreads = setting(parts[4], 1..8) ?: return null
+                // Fixed-context artifacts can exceed the adjustable 4K UI limit.
+                val resolvedContext = setting(parts[5], 1..Int.MAX_VALUE) ?: return null
+                val samples = parts[6].split(',').mapNotNull {
                     it.toDoubleOrNull()?.takeIf { value -> value.isFinite() && value > 0 }
                 }.takeLast(MAX_SAMPLES)
                 if (samples.isEmpty()) return null
-                return Group(DecodeRunSettings(threads.value, context.value), samples)
+                return Group(DecodeRunSettings(threads.value, context.value, activation, speculative,
+                    resolvedThreads.value, resolvedContext.value), samples)
             }
 
             /** Null when the text is not Auto or a number in range; Auto is a value, not a failure. */
@@ -172,7 +214,7 @@ internal class DecodeSpeedHistory(
     }
 
     internal companion object {
-        const val SCHEMA_VERSION = 3
+        const val SCHEMA_VERSION = 4
         const val MAX_HISTORIES = 64
         const val MAX_GROUPS_PER_BUCKET = 4
         const val MAX_SAMPLES = 8

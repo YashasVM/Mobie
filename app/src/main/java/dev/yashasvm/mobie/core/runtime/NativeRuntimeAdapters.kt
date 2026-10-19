@@ -92,6 +92,8 @@ class LiteRtLmRuntimeAdapter(
     private var contextWindowTokens = DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS
     private var committedHistory: List<RuntimeMessage> = emptyList()
     private var conversationDirty = false
+    /** A failed settings transition must never silently resume the previous conversation. */
+    @Volatile private var conversationReconfigurationFailed = false
     private var nativeConversationHasImage = false
     private var activeSampler = SamplerSettings()
     /** The user's stored sampler, so the first conversation after load does not need a rebuild. */
@@ -153,6 +155,7 @@ class LiteRtLmRuntimeAdapter(
                             committedHistory = restored
                             nativeConversationHasImage = hasRestorableHistoryImage(restored)
                             conversationDirty = false
+                            conversationReconfigurationFailed = false
                             cancelRequested = false
                             val modelFile = File(modelPath)
                             LiteRtCacheState.markReady(
@@ -207,7 +210,9 @@ class LiteRtLmRuntimeAdapter(
 
     /** Everything that can refuse a reload. Runs while the previous engine is still loaded. */
     private fun admitLoad(modelPath: String, vision: Boolean, allowReclaim: Boolean): AdmittedLoad {
-        val options = computeOptions
+        val requested = computeOptions
+        val options = if (requested.thinkingEnabled != null) requested
+            else requested.copy(thinkingEnabled = configuredThinking)
         val capabilities = ModelInfo.from(modelPath).use { info ->
             require(info is ModelInfo.Llm) { "This artifact is not a chat model." }
             ComputeCapabilities(info.maxContextTokens(), info.isDynamicContext(),
@@ -239,6 +244,7 @@ class LiteRtLmRuntimeAdapter(
                 requestCancellation = ::requestCancellationForLifecycleTransition,
             ) {
                 checkNotNull(engine) { "Load a model before resetting the conversation" }
+                check(!conversationReconfigurationFailed) { "Reload the model after a failed settings change." }
                 // Persist the requested chat even if native allocation fails. The next send must
                 // replay this history, rather than resurrecting the previous chat.
                 committedHistory = ConversationHistoryPolicy.select(history, contextWindowTokens)
@@ -246,6 +252,61 @@ class LiteRtLmRuntimeAdapter(
                 cancelRequested = false
             }
         }
+
+    override suspend fun reconfigureConversation(
+        options: ComputeOptions,
+        sampler: SamplerSettings,
+        history: List<RuntimeMessage>,
+    ): Result<Unit> = withContext(Dispatchers.Default) {
+        reconfigureRuntimeConversation(
+            cancellationState = cancellationState,
+            generation = generation,
+            lifecycle = lifecycle,
+            requestCancellation = ::requestCancellationForLifecycleTransition,
+            invalidateConversation = {
+                conversationReconfigurationFailed = true
+            },
+        ) {
+            val activeEngine = checkNotNull(engine) { "Load a model before changing conversation settings." }
+            val capabilities = checkNotNull(selectedCapabilities) { "Reload the model to inspect its capabilities." }
+            val requested = options.forCoreCount(Runtime.getRuntime().availableProcessors())
+            val effective = if (requested.thinkingEnabled != null) requested
+                else requested.copy(thinkingEnabled = configuredThinking)
+            require(RuntimeConversationReconfigurationPolicy.canRetainEngine(activeOptions, effective)) {
+                "These engine settings require a full model reload."
+            }
+            capabilities.validate(effective)
+            val validatedSampler = sampler.validated()
+            ensureGenerationMemoryHeadroom()
+            val restored = ConversationHistoryPolicy.select(history, contextWindowTokens)
+            // Construct with the proposed settings, but publish them only after native creation
+            // succeeds. Closing first avoids overlapping KV caches on memory-constrained devices.
+            val config = conversationConfig(restored, sampler = validatedSampler, options = effective)
+            val restoredHasImage = hasRestorableHistoryImage(restored)
+            replaceRuntimeResourceAfterClosingPrevious(
+                previous = conversation,
+                clearPrevious = {
+                    conversation = null
+                    committedHistory = restored
+                    nativeConversationHasImage = false
+                },
+                createReplacement = { activeEngine.createConversation(config) },
+                installReplacement = { replacement ->
+                    conversation = replacement
+                    activeOptions = effective
+                    computeOptions = requested
+                    activeSampler = validatedSampler
+                    configuredSampler = validatedSampler
+                    committedHistory = restored
+                    nativeConversationHasImage = restoredHasImage
+                    conversationDirty = false
+                    conversationReconfigurationFailed = false
+                    cancelRequested = false
+                },
+                closePrevious = { stale -> stale.close() },
+            )
+        }
+    }
 
     override fun generate(
         prompt: String,
@@ -260,6 +321,10 @@ class LiteRtLmRuntimeAdapter(
                 if (!cancellationState.isGenerationPermitValid(generationPermit) || cancelRequested) {
                     cancelRequested = false
                     throw CancellationException("Generation cancelled by a pending lifecycle transition")
+                }
+                if (conversationReconfigurationFailed) {
+                    emit(InferenceEvent.Error("Reload the model after a failed settings change.", requiresReload = true))
+                    return@withLock
                 }
                 cancellationState.beginGeneration()
                 try {
@@ -680,6 +745,7 @@ class LiteRtLmRuntimeAdapter(
         history: List<RuntimeMessage>,
         restoreHistoryImage: Boolean = true,
         sampler: SamplerSettings = activeSampler,
+        options: ComputeOptions = activeOptions,
     ): ConversationConfig {
         val restoredImageIndex = if (restoreHistoryImage) {
             VisionHistoryPolicy.latestUsableImageIndex(
@@ -705,17 +771,17 @@ class LiteRtLmRuntimeAdapter(
         }
         return ConversationConfig(
             initialMessages = restored,
-            thinkingConfig = (activeOptions.takeIf { it.thinkingEnabled != null } ?: activeOptions.copy(thinkingEnabled = configuredThinking))
-                .thinkingRequest()?.let { ThinkingConfig(enableThinking = it.enabled, thinkingTokenBudget = it.budget) },
+            thinkingConfig = options.thinkingRequest()
+                ?.let { ThinkingConfig(enableThinking = it.enabled, thinkingTokenBudget = it.budget) },
             samplerConfig = SamplerConfig(
                 topK = sampler.topK,
                 topP = sampler.topP,
                 temperature = sampler.temperature,
                 seed = sampler.seed,
             ),
-            maxOutputToken = activeOptions.maxOutputTokens,
-            enableSpeculativeDecoding = activeOptions.speculativeDecoding,
-            prefillPrefaceOnInit = activeOptions.prefillPrefaceOnInit && restored.isNotEmpty(),
+            maxOutputToken = options.maxOutputTokens,
+            enableSpeculativeDecoding = options.speculativeDecoding,
+            prefillPrefaceOnInit = options.prefillPrefaceOnInit && restored.isNotEmpty(),
         )
     }
 
@@ -831,6 +897,7 @@ class LiteRtLmRuntimeAdapter(
         contextWindowTokens = DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS
         committedHistory = emptyList()
         conversationDirty = false
+        conversationReconfigurationFailed = false
         nativeConversationHasImage = false
         cancelRequested = false
         loadedRamEstimateBytes = 0L

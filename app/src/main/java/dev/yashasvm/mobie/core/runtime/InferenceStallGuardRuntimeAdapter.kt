@@ -99,6 +99,39 @@ class InferenceStallGuardRuntimeAdapter(
     override suspend fun resetConversation(history: List<RuntimeMessage>): Result<Unit> =
         if (recoveryRequired) Result.failure(recoveryRequiredError()) else delegate.resetConversation(history)
 
+    override suspend fun reconfigureConversation(
+        options: ComputeOptions,
+        sampler: SamplerSettings,
+        history: List<RuntimeMessage>,
+    ): Result<Unit> {
+        if (recoveryRequired) return Result.failure(recoveryRequiredError())
+        return try {
+            val outcome = requestBoundedCall(lifecycleTimeoutMs) {
+                delegate.reconfigureConversation(options, sampler, history)
+            }
+            if (outcome == null) {
+                recoveryRequired = true
+                Result.failure(IllegalStateException("Changing conversation settings timed out. Unload and reload the model."))
+            } else {
+                outcome.fold(
+                    onSuccess = { result ->
+                        if (result.isFailure) recoveryRequired = true
+                        result
+                    },
+                    onFailure = { error ->
+                        recoveryRequired = true
+                        rethrowNonRecoverableRuntimeFailure(error)
+                        Result.failure(error)
+                    },
+                )
+            }
+        } catch (error: CancellationException) {
+            // A detached native replacement may still be running after its caller stops waiting.
+            recoveryRequired = true
+            throw error
+        }
+    }
+
     override fun generate(
         prompt: String,
         imagePath: String?,

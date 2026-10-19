@@ -2,7 +2,10 @@ package dev.yashasvm.mobie.core.device
 
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
+import dev.yashasvm.mobie.core.runtime.ActivationType
+import dev.yashasvm.mobie.core.runtime.ActiveCompute
 import dev.yashasvm.mobie.core.runtime.ComputeBackend
+import dev.yashasvm.mobie.core.runtime.ComputeOptions
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -78,20 +81,22 @@ class DecodeSpeedHistoryTest {
         val upgraded = DecodeSpeedHistory(store, "device-build-a", "0.19.0")
         assertNull(measured(upgraded, "model", ComputeBackend.CPU))
         upgraded.record("model", ComputeBackend.CPU, auto, 20.0, 32)
-        val newSchema = DecodeSpeedHistory(store, "device-build-a", "0.19.0", schemaVersion = 4)
+        val newSchema = DecodeSpeedHistory(store, "device-build-a", "0.19.0", schemaVersion = 5)
         assertNull(measured(newSchema, "model", ComputeBackend.CPU))
-        assertTrue(values.keys.none { it.startsWith("decode.v3.") })
+        assertTrue(values.keys.none { it.startsWith("decode.v4.") })
         values["decode.legacy-unversioned-hash"] = "30.0"
-        assertNull(measured(DecodeSpeedHistory(store, "device-build-a", "0.19.0", schemaVersion = 4), "model", ComputeBackend.CPU))
+        assertNull(measured(DecodeSpeedHistory(store, "device-build-a", "0.19.0", schemaVersion = 5), "model", ComputeBackend.CPU))
         assertTrue("decode.legacy-unversioned-hash" !in values)
     }
 
-    @Test fun `schema two entries without settings are removed, not reused`() {
-        assertEquals(3, DecodeSpeedHistory.SCHEMA_VERSION)
+    @Test fun `older entries without complete settings are removed, not reused`() {
+        assertEquals(4, DecodeSpeedHistory.SCHEMA_VERSION)
         history.record("model", ComputeBackend.CPU, auto, 7.0, 32)
         values["decode.v2.legacy"] = "1.0;auto;30.0"
+        values["decode.v3.legacy"] = "4;auto;30.0"
         DecodeSpeedHistory(store, "device-build-a", "0.18.0")
         assertTrue(values.keys.none { it.startsWith("decode.v2.") })
+        assertTrue(values.keys.none { it.startsWith("decode.v3.") })
         assertEquals(7.0, measured(DecodeSpeedHistory(store, "device-build-a", "0.18.0"), "model", ComputeBackend.CPU)?.lowTokensPerSecond)
     }
 
@@ -161,7 +166,7 @@ class DecodeSpeedHistoryTest {
         history.record("model", ComputeBackend.CPU, auto, 7.0, 32)
         val key = values.keys.single { it != DecodeSpeedHistory.INDEX_KEY }
         val namespace = key.substringBeforeLast('.') + "."
-        repeat(100) { values[namespace + "orphan-$it"] = "1;auto;9.0" }
+        repeat(100) { values[namespace + "orphan-$it"] = "1;auto;AUTO;auto;auto;auto;9.0" }
         repeat(100) { values["decode.legacy-$it"] = "99.0" }
         values["unrelated"] = "keep"
         val recreated = DecodeSpeedHistory(store, "device-build-a", "0.18.0")
@@ -183,5 +188,84 @@ class DecodeSpeedHistoryTest {
             assertNotEquals(original, modelPerformanceIdentity("repo/model", changed))
         }
         assertNotEquals(original, modelPerformanceIdentity("repo/other", artifact))
+    }
+
+    @Test fun `activation and speculative modes keep separate persisted groups`() {
+        val modes = listOf(
+            auto,
+            auto.copy(activationType = ActivationType.FP16),
+            auto.copy(activationType = ActivationType.FP16, speculativeDecoding = true),
+            auto.copy(activationType = ActivationType.FP16, speculativeDecoding = false),
+        )
+        modes.forEachIndexed { index, settings ->
+            history.record("model", ComputeBackend.GPU, settings, 10.0 + index, 32)
+        }
+        val recreated = DecodeSpeedHistory(store, "device-build-a", "0.18.0")
+        modes.forEachIndexed { index, settings ->
+            val stored = recreated.read("model", ComputeBackend.GPU)
+            val match = matchDecodeMeasurement(stored, ComputeBackend.GPU, settings)
+            assertEquals(10.0 + index, match?.speed?.lowTokensPerSecond)
+            assertTrue(match?.exactSettings ?: false)
+            assertEquals(1, match?.speed?.sampleCount)
+        }
+        assertNull(matchDecodeMeasurement(recreated.read("model", ComputeBackend.GPU), ComputeBackend.GPU,
+            auto.copy(activationType = ActivationType.FP32)))
+    }
+
+    @Test fun `matching never substitutes another activation or speculative mode`() {
+        val settings = auto.copy(activationType = ActivationType.FP16, speculativeDecoding = true)
+        history.record("model", ComputeBackend.CPU, settings, 20.0, 32)
+        val runs = history.read("model", ComputeBackend.CPU)
+        assertNull(matchDecodeMeasurement(runs, ComputeBackend.CPU, settings.copy(activationType = ActivationType.AUTO)))
+        assertNull(matchDecodeMeasurement(runs, ComputeBackend.CPU, settings.copy(activationType = ActivationType.FP32)))
+        assertNull(matchDecodeMeasurement(runs, ComputeBackend.CPU, settings.copy(speculativeDecoding = false)))
+        assertNull(matchDecodeMeasurement(runs, ComputeBackend.CPU, settings.copy(speculativeDecoding = null)))
+    }
+
+    @Test fun `actual auto resolutions remain separate and unknown resolutions are approximate`() {
+        val first = auto.copy(resolvedCpuThreads = 2, resolvedContextTokens = 2_048)
+        val second = auto.copy(resolvedCpuThreads = 4, resolvedContextTokens = 4_096)
+        history.record("model", ComputeBackend.CPU, first, 12.0, 32)
+        history.record("model", ComputeBackend.CPU, second, 18.0, 32)
+        val recreated = DecodeSpeedHistory(store, "device-build-a", "0.18.0")
+        val runs = recreated.read("model", ComputeBackend.CPU)
+        assertEquals(2, runs.size)
+        assertEquals(18.0, matchDecodeMeasurement(runs, ComputeBackend.CPU, second)?.speed?.lowTokensPerSecond)
+        assertTrue(matchDecodeMeasurement(runs, ComputeBackend.CPU, second)?.exactSettings ?: false)
+        assertFalse(matchDecodeMeasurement(runs, ComputeBackend.CPU, auto)?.exactSettings ?: true)
+    }
+
+    @Test fun `applied settings capture actual counts without guessing default activation or speculation`() {
+        val actual = ActiveCompute(ComputeBackend.CPU, cpuThreads = 3, contextTokens = 3_072)
+        val captured = DecodeRunSettings.fromApplied(ComputeOptions(), actual)
+        assertEquals(auto.copy(resolvedCpuThreads = 3, resolvedContextTokens = 3_072), captured)
+        assertEquals(auto, DecodeRunSettings.fromApplied(ComputeOptions(), null))
+        val gpu = DecodeRunSettings.fromApplied(
+            ComputeOptions(cpuThreads = 8, activationType = ActivationType.FP32, speculativeDecoding = false),
+            ActiveCompute(ComputeBackend.GPU, cpuThreads = 8, contextTokens = 8_192),
+        )
+        assertNull(gpu.cpuThreads)
+        assertNull(gpu.resolvedCpuThreads)
+        assertEquals(8_192, gpu.resolvedContextTokens)
+        assertEquals(ActivationType.FP32, gpu.activationType)
+        assertEquals(false, gpu.speculativeDecoding)
+        history.record("fixed-context", ComputeBackend.GPU, gpu, 20.0, 32)
+        assertEquals(gpu, DecodeSpeedHistory(store, "device-build-a", "0.18.0")
+            .read("fixed-context", ComputeBackend.GPU).single().settings)
+    }
+
+    @Test fun `malformed activation speculation and resolved settings are rejected`() {
+        history.record("model", ComputeBackend.CPU, auto, 10.0, 32)
+        val key = values.keys.single { it != DecodeSpeedHistory.INDEX_KEY }
+        for (bad in listOf(
+            "auto;auto;unknown;auto;auto;auto;10.0",
+            "auto;auto;AUTO;maybe;auto;auto;10.0",
+            "auto;auto;AUTO;auto;99;auto;10.0",
+            "auto;auto;AUTO;auto;auto;0;10.0",
+            "auto;auto;AUTO;auto;auto;auto;NaN,-2",
+        )) {
+            values[key] = bad
+            assertTrue(history.read("model", ComputeBackend.CPU).isEmpty())
+        }
     }
 }

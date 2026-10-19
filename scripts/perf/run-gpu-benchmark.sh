@@ -19,6 +19,16 @@ instrument_args=(-w -r -e class dev.yashasvm.mobie.LiteRtGpuBenchmarkTest
 instrument_args+=(-e outputTokens "${OUTPUT_TOKENS:-64}")
 instrument_args+=(-e thinkingOff "${THINKING_OFF:-false}" -e sustainedSeconds "${SUSTAINED_SECONDS:-0}" -e coolStart "${COOL_START:-false}")
 instrument_args+=(-e holdSeconds "${HOLD_SECONDS:-0}")
+# Preserve explicit experiment settings in the instrumentation output. Arrays avoid shell
+# interpretation of caller-provided revision/model strings.
+instrument_args+=(-e activationType "${ACTIVATION_TYPE:-AUTO}")
+instrument_args+=(-e galleryEquivalent "${GALLERY_SAMPLER:-false}")
+instrument_args+=(-e cacheState "${CACHE_STATE:-uncontrolled}")
+if [[ -n "${CONTEXT_TOKENS:-}" ]]; then instrument_args+=(-e contextTokens "$CONTEXT_TOKENS"); fi
+if [[ -n "${SPECULATIVE_DECODING:-}" ]]; then instrument_args+=(-e speculativeDecoding "$SPECULATIVE_DECODING"); fi
+if [[ -n "${THINKING_BUDGET:-}" ]]; then instrument_args+=(-e thinkingBudget "$THINKING_BUDGET"); fi
+if [[ -n "${BUILD_REVISION:-}" ]]; then instrument_args+=(-e buildRevision "$BUILD_REVISION"); fi
+
 if [[ -n "$cpu_threads" ]]; then
   instrument_args+=(-e cpuThreads "$cpu_threads")
 fi

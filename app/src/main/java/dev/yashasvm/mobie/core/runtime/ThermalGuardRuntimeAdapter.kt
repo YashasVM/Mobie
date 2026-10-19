@@ -36,6 +36,12 @@ internal class ThermalGuardRuntimeAdapter(
     override suspend fun resetConversation(history: List<RuntimeMessage>): Result<Unit> =
         delegate.resetConversation(history)
 
+    override suspend fun reconfigureConversation(
+        options: ComputeOptions,
+        sampler: SamplerSettings,
+        history: List<RuntimeMessage>,
+    ): Result<Unit> = delegate.reconfigureConversation(options, sampler, history)
+
     override fun generate(
         prompt: String,
         imagePath: String?,
