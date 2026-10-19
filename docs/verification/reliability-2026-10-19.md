@@ -8,6 +8,8 @@ Local branch: `fix/download-cancellation-release-jni`.
 1. Cancel a stalled model download promptly even after response headers arrived. The old cancellable header wait detached cancellation from a blocking body read, leaving the socket active until its read timeout. `useDownloadResponse` keeps a cancellation watcher attached for the entire response lifetime and closes it on every exit. The worker uses this helper without changing download/resume policy.
 2. Preserve LiteRT-LM JNI classes and callbacks in minified release APKs. The pinned 0.16.1 AAR supplies no consumer ProGuard rules. Its baseline release mapping removes required JNI classes and callback names. Backported only the isolated package keep rule and mapping verifier from existing PR #36, not that branch's UI/runtime upgrade. CI now builds release and validates the mapping; six Python fixture tests exercise the verifier.
 
+3. Preserve saved conversations when opening empty chats. Adapted the non-UI retention invariant from PR #37: keep 20 nonempty conversations plus at most one empty draft, in both session creation and writes. Four JVM cases cover repeated drafts, empty writes, first-message eviction, and ordering; an Android persistence regression covers store recreation and activation. No chat content is migrated or sent elsewhere.
+
 No UI edits, runtime/dependency upgrade, network destination, permission, or credential handling change. Inference remains on-device. Unsupported model gating is unchanged. PRs #18, #36, and #37 were not merged or adopted.
 
 ## Verification
@@ -23,8 +25,8 @@ python3 scripts/test_verify_litert_release.py
 git diff --check
 ```
 
-- Aggregate build passed; 363 JVM tests, zero failures/errors/skips.
-- Lint: zero errors, 25 warnings on the final combined run (initial reliability run reported 16; repeated dependency-version warnings vary).
+- Aggregate build passed; 367 JVM tests, zero failures/errors/skips.
+- Lint: zero errors, 30 warnings on the retention follow-up run (earlier runs reported 16 and 25; repeated dependency-version warnings vary). Existing obsolete Compose lint checks are skipped by the toolchain, so this is not full Compose rule coverage.
 - Debug APK and unsigned release APK built.
 - Release mapping: 74 LiteRT-LM classes and all four JNI callback names preserved.
 - Verifier fixtures: six passed.

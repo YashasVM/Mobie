@@ -51,6 +51,42 @@ class LocalPersistenceTest {
     }
 
     @Test
+    fun emptyChatsPreserveSavedConversationsAcrossRecreation() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val modelId = "test/empty-session-retention"
+        val store = ChatHistoryStore(context)
+        store.clear(modelId)
+        try {
+            val oldest = store.startNewSession(modelId)
+            store.write(modelId, listOf(HistoryMessage(true, "Keep this conversation")))
+            repeat(19) { index ->
+                store.startNewSession(modelId)
+                store.write(modelId, listOf(HistoryMessage(true, "Saved conversation $index")))
+            }
+            repeat(30) { store.startNewSession(modelId) }
+            val draftId = checkNotNull(store.currentSessionId(modelId))
+            store.write(modelId, emptyList())
+
+            val recreated = ChatHistoryStore(context)
+            assertEquals(21, recreated.sessions(modelId).size)
+            assertEquals(20, recreated.sessions(modelId).count { it.messages.isNotEmpty() })
+            assertEquals(draftId, recreated.currentSessionId(modelId))
+            recreated.activate(modelId, oldest)
+            assertEquals("Keep this conversation", recreated.read(modelId).single().text)
+
+            recreated.activate(modelId, draftId)
+            recreated.write(modelId, listOf(HistoryMessage(true, "First real message")))
+            val afterFirstMessage = ChatHistoryStore(context)
+            assertEquals(20, afterFirstMessage.sessions(modelId).size)
+            assertEquals(draftId, afterFirstMessage.currentSessionId(modelId))
+            assertEquals("First real message", afterFirstMessage.read(modelId).single().text)
+            assertFalse(afterFirstMessage.sessions(modelId).any { it.id == oldest })
+        } finally {
+            store.clear(modelId)
+        }
+    }
+
+    @Test
     fun repeatedHistoryWritesPreserveInactiveSessionsAndSurviveRecreation() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val modelId = "test/cached-session-writes"
