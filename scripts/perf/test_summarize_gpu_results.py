@@ -166,5 +166,31 @@ class SummaryTest(unittest.TestCase):
         self.args.fixture = "sustained-decode"
         self.assertEqual(module.summarize(records, self.args)["decode_tps"]["median"], 12)
 
+    def test_requested_run_with_no_rows_cannot_resurrect_previous_success(self):
+        records = [self.sustained_row(0, [self.sample(12, 100)], run_id="old", expected_repetitions=1)]
+        self.args.run_id = "new-that-crashed"
+        with self.assertRaisesRegex(ValueError, "No matching invocation"):
+            module.summarize(records, self.args)
+
+    def test_missing_repetition_rejects_partial_invocation(self):
+        records = [self.sustained_row(0, [self.sample(12, 100)], run_id="new", expected_repetitions=2)]
+        self.args.run_id = "new"
+        with self.assertRaisesRegex(ValueError, "incomplete"):
+            module.summarize(records, self.args)
+
+    def test_exact_completed_run_is_selected(self):
+        records = [self.sustained_row(0, [self.sample(30, 100)], run_id="old", expected_repetitions=1),
+                   self.sustained_row(0, [self.sample(12, 100)], run_id="new", expected_repetitions=1)]
+        self.args.run_id = "new"
+        result = module.summarize(records, self.args)
+        self.assertEqual(result["decode_tps"]["median"], 12)
+        self.assertEqual(result["run_id"], "new")
+        self.assertTrue(result["requested_run_id_matched"])
+
+    def test_unpinned_summary_warns_about_invisible_newer_crash(self):
+        result = module.summarize([self.run_record(0), self.run_record(1)], self.args)
+        self.assertFalse(result["requested_run_id_matched"])
+        self.assertIn("Without --run-id", result["note"])
+
 if __name__ == '__main__':
     unittest.main()

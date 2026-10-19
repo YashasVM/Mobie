@@ -16,10 +16,13 @@ cpu_threads=${5:-}
 repetitions=${6:-4}
 adb_bin=${ADB:-${ANDROID_HOME:-$HOME/Android/Sdk}/platform-tools/adb}
 mkdir -p "$output_dir"
+run_id=$(python3 -c 'import uuid; print(uuid.uuid4())')
+printf '%s\n' "$run_id" > "$output_dir/run-id.txt"
 args=(-s "$serial")
 instrument_args=(-w -r -e class dev.yashasvm.mobie.LiteRtGpuBenchmarkTest
   -e gpuBenchmark true -e modelPath "$model_path" -e backend "$backend" -e repetitions "$repetitions")
 instrument_args+=(-e outputTokens "${OUTPUT_TOKENS:-64}")
+instrument_args+=(-e benchmarkRunId "$run_id")
 instrument_args+=(-e thinkingOff "${THINKING_OFF:-false}" -e sustainedSeconds "${SUSTAINED_SECONDS:-0}" -e coolStart "${COOL_START:-false}")
 instrument_args+=(-e holdSeconds "${HOLD_SECONDS:-0}")
 # Preserve explicit experiment settings in the instrumentation output. Arrays avoid shell

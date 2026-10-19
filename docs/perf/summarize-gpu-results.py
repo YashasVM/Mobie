@@ -33,7 +33,7 @@ IDENTITY_FIELDS = ("artifact_sha256", "device", "android", "runtime_version", "r
                    "min_native_decode_tokens", "device_fingerprint", "app_version_code", "build_type",
                    "app_apk_sha256", "test_apk_sha256", "split_apks", "seed", "quantization",
                    "thinking_enabled_request", "thinking_budget", "prefill_preface_on_init", "benchmark_protocol",
-                   "gallery_equivalent", "persistent_cache_state")
+                   "gallery_equivalent", "persistent_cache_state", "run_id", "expected_repetitions")
 
 
 def fixture_of(record):
@@ -65,6 +65,9 @@ def _dispersion(values):
 
 def summarize(records, args):
     fixture = getattr(args, "fixture", None)
+    run_id = getattr(args, "run_id", None)
+    if run_id is not None:
+        records = [r for r in records if r.get("run_id") == run_id]
     records = [r for r in records if r.get("runtime_version") == args.runtime
                and (args.backend is None or r.get("requested_backend", r.get("active_backend")) == args.backend)
                and (args.context is None or r.get("requested_context_tokens", r.get("context_tokens")) == args.context)
@@ -76,6 +79,12 @@ def summarize(records, args):
     if not starts:
         raise ValueError("No matching invocation with iteration-zero warm-up was found.")
     records = records[starts[-1]:]
+    expected = records[0].get("expected_repetitions")
+    if expected is not None:
+        if isinstance(expected, bool) or not isinstance(expected, int) or not 1 <= expected <= 20:
+            raise ValueError("Invalid expected_repetitions in invocation.")
+        if [r.get("iteration") for r in records] != list(range(expected)):
+            raise ValueError("Invocation is incomplete or has nonconsecutive repetitions.")
     generations = [g for r in records for g in [r, r.get("warmup") or {}, *(r.get("samples") or [])]]
     if any(g.get("error") or g.get("generation_error") for g in generations):
         raise ValueError("Latest matching invocation contains a failure; refusing a success-only summary.")
@@ -87,14 +96,19 @@ def summarize(records, args):
         raise ValueError("Latest invocation mixes prompt_fixture; compare separate homogeneous runs.")
     fixture = fixtures.pop()
     if fixture == SUSTAINED_FIXTURE:
-        return _summarize_sustained(records)
-    if fixture != SHORT_FIXTURE:
+        result = _summarize_sustained(records)
+    elif fixture == SHORT_FIXTURE:
+        if any((r.get("sustained_seconds") or 0) > 0 for r in records):
+            raise ValueError("Short-latency rows with sustained samples cannot establish sustained throughput; "
+                             "rerun with the sustained-decode fixture.")
+        result = _summarize_latency_probe(records)
+    else:
         raise ValueError(f"Unknown prompt fixture {fixture!r}; refusing to guess its workload.")
-    if any((r.get("sustained_seconds") or 0) > 0 for r in records):
-        # The old summary reported these rows' top-level warm-up generation; that is not sustained evidence.
-        raise ValueError("Short-latency rows with sustained samples cannot establish sustained throughput; "
-                         "rerun with the sustained-decode fixture.")
-    return _summarize_latency_probe(records)
+    result["run_id"] = records[0].get("run_id")
+    result["requested_run_id_matched"] = run_id is not None
+    if run_id is None:
+        result["note"] += " Without --run-id, cumulative results cannot exclude a newer invocation that died before its first row."
+    return result
 
 
 def _summarize_latency_probe(records):
@@ -208,6 +222,7 @@ def main():
     parser.add_argument("--gallery", action="store_true", help="Select Gallery-style sampler runs; does not execute Gallery")
     parser.add_argument("--fixture", choices=(SHORT_FIXTURE, SUSTAINED_FIXTURE),
                         help="Select one prompt fixture; rows without a fixture are the legacy short prompt")
+    parser.add_argument("--run-id", help="Require the exact run ID saved by the runner before instrumentation starts")
     args = parser.parse_args()
     records = [json.loads(line) for line in args.path.read_text().splitlines() if line.strip()]
     try:
