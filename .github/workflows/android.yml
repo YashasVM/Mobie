@@ -103,10 +103,12 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -memory 4096
           disable-animations: true
           script: |
-            ./gradlew --no-daemon connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=dev.yashasvm.mobie.LiteRtEndToEndTest,dev.yashasvm.mobie.LiteRtCpuThreadBenchmarkTest,dev.yashasvm.mobie.LiteRtConversationReconfigurationTest -Pandroid.testInstrumentationRunnerArguments.litertE2E=true
+            ./gradlew --no-daemon connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=dev.yashasvm.mobie.LiteRtEndToEndTest,dev.yashasvm.mobie.LiteRtCpuThreadBenchmarkTest,dev.yashasvm.mobie.LiteRtConversationReconfigurationTest,dev.yashasvm.mobie.LiteRtConversationReconfigureBenchmarkTest -Pandroid.testInstrumentationRunnerArguments.litertE2E=true -Pandroid.testInstrumentationRunnerArguments.litertReconfigureBenchmark=true -Pandroid.testInstrumentationRunnerArguments.buildRevision=${{ github.event.pull_request.head.sha || github.sha }}
             adb pull /sdcard/mobie-qwen-e2e.png mobie-qwen-e2e.png || echo "::warning::Runtime passed without screenshot evidence"
             adb pull /sdcard/mobie-qwen-e2e-metrics.txt mobie-qwen-e2e-metrics.txt || echo "::warning::Runtime passed without metrics evidence"
             adb pull /sdcard/mobie-cpu-thread-benchmark.txt mobie-cpu-thread-benchmark.txt || echo "::warning::CPU thread benchmark passed without metrics evidence"
+            adb pull /sdcard/Android/data/dev.yashasvm.mobie/files/benchmarks/mobie-conversation-reconfigure-benchmark.json mobie-conversation-reconfigure-benchmark.json
+            adb pull /sdcard/Android/data/dev.yashasvm.mobie/files/benchmarks/mobie-conversation-reconfigure-benchmark.csv mobie-conversation-reconfigure-benchmark.csv
       - name: Upload real runtime E2E evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -116,6 +118,8 @@ jobs:
             mobie-qwen-e2e.png
             mobie-qwen-e2e-metrics.txt
             mobie-cpu-thread-benchmark.txt
+            mobie-conversation-reconfigure-benchmark.json
+            mobie-conversation-reconfigure-benchmark.csv
             app/build/reports/androidTests/connected/
             app/build/outputs/androidTest-results/connected/
           if-no-files-found: warn
