@@ -1,9 +1,16 @@
 package dev.yashasvm.mobie.data.history
 
 import android.content.Context
+import android.content.SharedPreferences
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import java.io.IOException
 import java.util.UUID
 
 @Serializable
@@ -23,89 +30,170 @@ data class ChatHistorySession(
     val messages: List<HistoryMessage> = emptyList(),
 )
 
-class ChatHistoryStore(context: Context) {
-    private val preferences = context.getSharedPreferences("chat_history", Context.MODE_PRIVATE)
+/**
+ * Local chat history persisted in app-private SharedPreferences.
+ *
+ * All public operations run on [Dispatchers.IO] under one [Mutex]. The lock is taken before
+ * dispatching to IO, so queued callers take effect in lock arrival order. Mutations finish even
+ * if their caller is cancelled and return only after the disk commit completes.
+ */
+class ChatHistoryStore private constructor(openPreferences: () -> SharedPreferences) {
+    internal constructor(preferences: SharedPreferences) : this({ preferences })
+
+    constructor(context: Context) : this({
+        context.applicationContext.getSharedPreferences("chat_history", Context.MODE_PRIVATE)
+    })
+
+    // First access, including opening the preferences file, happens under the IO lock.
+    private val preferences by lazy(openPreferences)
     private val json = Json { ignoreUnknownKeys = true }
-    // In-memory cache keyed by modelId. Eliminates redundant JSON deserialization when the ViewModel
-    // calls sessions() immediately after write() within the same event handler.
+    private val lock = Mutex()
+
+    // Guarded by [lock]; avoids decoding unchanged transcripts on each read.
     private val sessionsCache = HashMap<String, List<ChatHistorySession>>()
 
-    fun read(modelId: String): List<HistoryMessage> {
-        val available = sessions(modelId)
+    suspend fun read(modelId: String): List<HistoryMessage> = locked {
+        val available = sessionsLocked(modelId)
         val activeId = resolvedSessionId(modelId, available)
-        return available.firstOrNull { it.id == activeId }?.messages.orEmpty()
+        available.firstOrNull { it.id == activeId }?.messages.orEmpty()
     }
 
-    fun currentSessionId(modelId: String): String? = resolvedSessionId(modelId, sessions(modelId))
+    suspend fun currentSessionId(modelId: String): String? = locked {
+        resolvedSessionId(modelId, sessionsLocked(modelId))
+    }
 
-    fun write(modelId: String, messages: List<HistoryMessage>) {
-        val now = System.currentTimeMillis()
-        val available = sessions(modelId)
+    /**
+     * Saves into the active session, reusing restored legacy history. Identical transcripts skip
+     * encoding and disk work. Empty transcripts are ignored. Successful return means the disk
+     * commit finished; process death before then can still lose the in-flight save.
+     */
+    suspend fun write(modelId: String, messages: List<HistoryMessage>) {
+        persist(modelId, messages, sessionId = null, useActiveSession = true)
+    }
+
+    /**
+     * Saves a captured transcript and returns its id. An explicit [sessionId] never replaces a
+     * different active chat selected since capture. A null id creates and selects a new chat.
+     * Empty transcripts return an id without saving or changing the active chat.
+     */
+    suspend fun writeSession(modelId: String, sessionId: String?, messages: List<HistoryMessage>): String =
+        persist(modelId, messages, sessionId, useActiveSession = false)
+
+    private suspend fun persist(
+        modelId: String,
+        messages: List<HistoryMessage>,
+        sessionId: String?,
+        useActiveSession: Boolean,
+    ): String = mutate {
+        if (messages.isEmpty()) return@mutate sessionId ?: UUID.randomUUID().toString()
+        val trimmed = messages.takeLast(MAX_MESSAGES)
+        val available = sessionsLocked(modelId)
+        val current = resolvedSessionId(modelId, available)
         // Older installs had no active-session key. Reuse their restored conversation rather
         // than creating a duplicate when the user sends the next message.
-        val id = resolvedSessionId(modelId, available) ?: UUID.randomUUID().toString()
-        val existing = available.filterNot { it.id == id }
-        val title = messages.firstOrNull { it.fromUser && it.text.isNotBlank() }
-            ?.text
-            ?.replace("\n", " ")
-            ?.take(TITLE_LENGTH)
-            ?: "New local chat"
+        val id = sessionId ?: current?.takeIf { useActiveSession } ?: UUID.randomUUID().toString()
+        val activeId = if (useActiveSession || sessionId == null) id else current ?: id
+        val previous = available.firstOrNull { it.id == id }
+        if (previous != null && currentId(modelId) == activeId && previous.messages == trimmed) {
+            return@mutate id
+        }
+        val session = ChatHistorySession(id, titleFor(messages), System.currentTimeMillis(), trimmed)
         val updated = retainedChatSessions(
-            listOf(ChatHistorySession(id, title, now, messages.takeLast(MAX_MESSAGES))) + existing,
+            listOf(session) + available.filterNot { it.id == id },
             MAX_SESSIONS,
         )
-        sessionsCache[modelId] = updated
-        preferences.edit()
-            .putString(sessionsKey(modelId), json.encodeToString(updated))
-            .putString(currentKey(modelId), id)
-            .apply()
+        saveSessionsLocked(modelId, updated, activeId)
+        id
     }
 
-    fun startNewSession(modelId: String): String {
-        val id = UUID.randomUUID().toString()
-        val sessions = retainedChatSessions(
-            listOf(ChatHistorySession(id, "New local chat", System.currentTimeMillis())) + sessions(modelId),
+    /**
+     * Creates and selects an empty chat without consuming a saved-conversation slot. Only the
+     * newest empty draft is kept. Reusing an existing [id] keeps its messages.
+     */
+    suspend fun startNewSession(modelId: String, id: String = UUID.randomUUID().toString()): String = mutate {
+        val available = sessionsLocked(modelId)
+        val session = available.firstOrNull { it.id == id }
+            ?: ChatHistorySession(id, DEFAULT_TITLE, System.currentTimeMillis())
+        val updated = retainedChatSessions(
+            listOf(session) + available.filterNot { it.id == id },
             MAX_SESSIONS,
         )
-        sessionsCache[modelId] = sessions
-        preferences.edit()
-            .putString(sessionsKey(modelId), json.encodeToString(sessions))
-            .putString(currentKey(modelId), id)
-            .apply()
-        return id
+        saveSessionsLocked(modelId, updated, id)
+        id
     }
 
-    fun activate(modelId: String, sessionId: String) {
-        if (sessions(modelId).any { it.id == sessionId }) {
-            preferences.edit().putString(currentKey(modelId), sessionId).apply()
+    /** The model the user last opened a chat with; the app reopens it at launch. */
+    suspend fun lastModelId(): String? = locked { preferences.getString(LAST_MODEL_KEY, null) }
+
+    suspend fun setLastModelId(modelId: String) = mutate {
+        if (preferences.getString(LAST_MODEL_KEY, null) != modelId) {
+            commit(preferences.edit().putString(LAST_MODEL_KEY, modelId))
         }
     }
 
-    fun sessions(modelId: String): List<ChatHistorySession> {
+    suspend fun activate(modelId: String, sessionId: String) = mutate {
+        if (sessionsLocked(modelId).any { it.id == sessionId }) {
+            commit(preferences.edit().putString(currentKey(modelId), sessionId))
+        }
+    }
+
+    suspend fun sessions(modelId: String): List<ChatHistorySession> = locked { sessionsLocked(modelId) }
+
+    suspend fun clear(modelId: String): Unit = mutate {
+        commit(
+            preferences.edit()
+                .remove(modelId)
+                .remove(sessionsKey(modelId))
+                .remove(currentKey(modelId)),
+        )
+        sessionsCache.remove(modelId)
+    }
+
+    /** Takes the lock before dispatching to IO so queued callers keep their order. */
+    private suspend fun <T> locked(block: () -> T): T = lock.withLock {
+        withContext(Dispatchers.IO) { block() }
+    }
+
+    private suspend fun <T> mutate(block: () -> T): T = withContext(NonCancellable) { locked(block) }
+
+    private fun commit(editor: SharedPreferences.Editor) {
+        if (!editor.commit()) throw IOException("Local chat history could not be saved.")
+    }
+
+    private fun saveSessionsLocked(modelId: String, sessions: List<ChatHistorySession>, activeId: String) {
+        commit(
+            preferences.edit()
+                .putString(sessionsKey(modelId), json.encodeToString(sessions))
+                .putString(currentKey(modelId), activeId),
+        )
+        sessionsCache[modelId] = sessions
+    }
+
+    private fun sessionsLocked(modelId: String): List<ChatHistorySession> {
         sessionsCache[modelId]?.let { return it }
         return loadSessions(modelId).also { sessionsCache[modelId] = it }
     }
 
-    fun clear(modelId: String) {
-        sessionsCache.remove(modelId)
-        preferences.edit()
-            .remove(modelId)
-            .remove(sessionsKey(modelId))
-            .remove(currentKey(modelId))
-            .apply()
-    }
-
     private fun loadSessions(modelId: String): List<ChatHistorySession> {
         val saved = preferences.getString(sessionsKey(modelId), null)
-            ?.let { runCatching { json.decodeFromString<List<ChatHistorySession>>(it) }.getOrNull() }
+            ?.let { decodeSaved<List<ChatHistorySession>>(it) }
         if (saved != null) return saved.sortedByDescending { it.updatedAt }
 
         val legacy = preferences.getString(modelId, null)
-            ?.let { runCatching { json.decodeFromString<List<HistoryMessage>>(it) }.getOrNull() }
+            ?.let { decodeSaved<List<HistoryMessage>>(it) }
             .orEmpty()
         return if (legacy.isEmpty()) emptyList() else listOf(
-            ChatHistorySession("legacy", "Previous local chat", 0L, legacy),
+            ChatHistorySession(LEGACY_SESSION_ID, "Previous local chat", 0L, legacy),
         )
+    }
+
+    private inline fun <reified T> decodeSaved(payload: String): T? = try {
+        json.decodeFromString<T>(payload)
+    } catch (_: IllegalArgumentException) {
+        // Do not log the payload or exception message, which can contain conversation text.
+        java.util.logging.Logger.getLogger(ChatHistoryStore::class.java.name)
+            .warning("Saved chat history could not be decoded; trying the legacy history if available.")
+        null
     }
 
     private fun resolvedSessionId(modelId: String, available: List<ChatHistorySession>): String? =
@@ -118,9 +206,21 @@ class ChatHistoryStore(context: Context) {
 
     private fun currentKey(modelId: String) = "current:$modelId"
 
-    private companion object {
-        const val MAX_MESSAGES = 100
-        const val MAX_SESSIONS = 20
-        const val TITLE_LENGTH = 48
+    companion object {
+        const val LEGACY_SESSION_ID = "legacy"
+        // Model ids contain a slash and never a colon, so this key cannot collide with a legacy history key.
+        private const val LAST_MODEL_KEY = "meta:last_model"
+        private const val DEFAULT_TITLE = "New local chat"
+        private const val MAX_MESSAGES = 100
+        private const val MAX_SESSIONS = 20
+        private const val TITLE_LENGTH = 48
+
+        /** The automatic title: the first user prompt on one line, or a plain default. */
+        fun titleFor(messages: List<HistoryMessage>): String =
+            messages.firstOrNull { it.fromUser && it.text.isNotBlank() }
+                ?.text
+                ?.replace("\n", " ")
+                ?.take(TITLE_LENGTH)
+                ?: DEFAULT_TITLE
     }
 }

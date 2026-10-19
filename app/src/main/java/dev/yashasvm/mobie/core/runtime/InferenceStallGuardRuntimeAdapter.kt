@@ -1,6 +1,7 @@
 package dev.yashasvm.mobie.core.runtime
 
 import dev.yashasvm.mobie.core.model.ModelFormat
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,11 +34,14 @@ class InferenceStallGuardRuntimeAdapter(
     private val activeIdleTimeoutMs: Long = ACTIVE_IDLE_TIMEOUT_MS,
     private val cancellationTimeoutMs: Long = CANCELLATION_TIMEOUT_MS,
     private val lifecycleTimeoutMs: Long = LIFECYCLE_TIMEOUT_MS,
+    private val loadTimeoutMs: Long = LOAD_TIMEOUT_MS,
 ) : RuntimeAdapter {
     override val format: ModelFormat = delegate.format
     override val activeCompute: ActiveCompute? get() = if (recoveryRequired) null else delegate.activeCompute
+    override val computeCapabilities: ComputeCapabilities? get() = if (recoveryRequired) null else delegate.computeCapabilities
     override fun configureCompute(options: ComputeOptions) = delegate.configureCompute(options)
     override fun configureSampler(sampler: SamplerSettings) = delegate.configureSampler(sampler)
+    override fun configureThinking(enabled: Boolean?) = delegate.configureThinking(enabled)
     override val supportsImageInput: Boolean get() = !recoveryRequired && delegate.supportsImageInput
     @Volatile private var recoveryRequired = false
 
@@ -46,6 +50,7 @@ class InferenceStallGuardRuntimeAdapter(
         require(activeIdleTimeoutMs > 0L)
         require(cancellationTimeoutMs > 0L)
         require(lifecycleTimeoutMs > 0L)
+        require(loadTimeoutMs > 0L)
     }
 
     override suspend fun load(
@@ -54,18 +59,89 @@ class InferenceStallGuardRuntimeAdapter(
         history: List<RuntimeMessage>,
     ): Result<Unit> {
         if (recoveryRequired) return Result.failure(recoveryRequiredError())
-        return delegate.load(modelPath, vision, history)
+        return boundedLoad { delegate.load(modelPath, vision, history) }
     }
 
     override suspend fun loadAllowingMemoryReclaim(
         modelPath: String, vision: Boolean, history: List<RuntimeMessage>,
     ): Result<Unit> {
         if (recoveryRequired) return Result.failure(recoveryRequiredError())
-        return delegate.loadAllowingMemoryReclaim(modelPath, vision, history)
+        return boundedLoad { delegate.loadAllowingMemoryReclaim(modelPath, vision, history) }
+    }
+
+    /**
+     * A wedged native load cannot hold the caller or the lifecycle lock forever. The caller gets a
+     * failure after [loadTimeoutMs] and the adapter fails closed until a bounded unload succeeds. The
+     * timeout is generous because a first GPU shader compile can take tens of seconds, and one load
+     * call may cover a GPU attempt followed by the CPU fallback.
+     */
+    private suspend fun boundedLoad(block: suspend () -> Result<Unit>): Result<Unit> {
+        return try {
+            val outcome = requestBoundedCall(loadTimeoutMs, block) ?: run {
+                recoveryRequired = true
+                return Result.failure(
+                    IllegalStateException(
+                        "Loading the model did not finish within the safety timeout. Unload the model, or restart Mobie if unloading fails.",
+                    ),
+                )
+            }
+            outcome.fold(
+                // A returned admission failure can deliberately preserve the previous engine.
+                onSuccess = { it },
+                onFailure = { error ->
+                    recoveryRequired = true
+                    rethrowNonRecoverableRuntimeFailure(error)
+                    Result.failure(error)
+                },
+            )
+        } catch (error: CancellationException) {
+            // The native worker may still be inside load after its caller stops waiting.
+            recoveryRequired = true
+            throw error
+        }
     }
 
     override suspend fun resetConversation(history: List<RuntimeMessage>): Result<Unit> =
-        if (recoveryRequired) Result.failure(recoveryRequiredError()) else delegate.resetConversation(history)
+        boundedConversationChange("Restoring the conversation") { delegate.resetConversation(history) }
+
+    override suspend fun reconfigureConversation(
+        options: ComputeOptions,
+        sampler: SamplerSettings,
+        history: List<RuntimeMessage>,
+    ): Result<Unit> = boundedConversationChange("Changing conversation settings") {
+        delegate.reconfigureConversation(options, sampler, history)
+    }
+
+    /** Both warm reset and settings Apply can close/create native conversations and must fail closed. */
+    private suspend fun boundedConversationChange(
+        operation: String,
+        block: suspend () -> Result<Unit>,
+    ): Result<Unit> {
+        if (recoveryRequired) return Result.failure(recoveryRequiredError())
+        return try {
+            val outcome = requestBoundedCall(lifecycleTimeoutMs, block)
+            if (outcome == null) {
+                recoveryRequired = true
+                Result.failure(IllegalStateException("$operation timed out. Unload and reload the model."))
+            } else {
+                outcome.fold(
+                    onSuccess = { result ->
+                        if (result.isFailure) recoveryRequired = true
+                        result
+                    },
+                    onFailure = { error ->
+                        recoveryRequired = true
+                        rethrowNonRecoverableRuntimeFailure(error)
+                        Result.failure(error)
+                    },
+                )
+            }
+        } catch (error: CancellationException) {
+            // A detached native replacement may still be running after its caller stops waiting.
+            recoveryRequired = true
+            throw error
+        }
+    }
 
     override fun generate(
         prompt: String,
@@ -84,6 +160,12 @@ class InferenceStallGuardRuntimeAdapter(
                 delegate.generate(prompt, imagePath, config).collect { event ->
                     events.send(event)
                 }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                // An exception escaping this detached scope would reach the thread's uncaught handler and
+                // can kill the process. Closing with the cause hands it to the collector below instead.
+                events.close(error)
             } finally {
                 events.close()
             }
@@ -124,6 +206,14 @@ class InferenceStallGuardRuntimeAdapter(
 
                 val event = result.getOrNull()
                 if (event == null) {
+                    val failure = result.exceptionOrNull()
+                    if (failure != null) {
+                        // The producer failed outside the delegate's own error handling, so native state is uncertain.
+                        recoveryRequired = true
+                        if (isFatalRuntimeFailure(failure)) throw failure
+                        emit(InferenceEvent.Error(failure.message ?: "Inference failed", requiresReload = true))
+                        return@flow
+                    }
                     if (!sawTerminalEvent) {
                         emit(InferenceEvent.Error("Local inference ended without a completion signal. Retry the prompt."))
                     }
@@ -198,8 +288,8 @@ class InferenceStallGuardRuntimeAdapter(
     private suspend fun requestBoundedLifecycleCall(block: suspend () -> Unit): Result<Unit>? =
         requestBoundedCall(lifecycleTimeoutMs, block)
 
-    private suspend fun requestBoundedCall(timeoutMs: Long, block: suspend () -> Unit): Result<Unit>? {
-        val completion = CompletableDeferred<Result<Unit>>()
+    private suspend fun <T> requestBoundedCall(timeoutMs: Long, block: suspend () -> T): Result<T>? {
+        val completion = CompletableDeferred<Result<T>>()
         val detachedScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val worker = detachedScope.launch {
             completion.complete(runCatching { block() })
@@ -221,5 +311,7 @@ class InferenceStallGuardRuntimeAdapter(
         const val ACTIVE_IDLE_TIMEOUT_MS = 30_000L
         const val CANCELLATION_TIMEOUT_MS = 2_000L
         const val LIFECYCLE_TIMEOUT_MS = 30_000L
+        /** Covers a cold GPU shader compile plus the CPU fallback that the same load call may run. */
+        const val LOAD_TIMEOUT_MS = 300_000L
     }
 }

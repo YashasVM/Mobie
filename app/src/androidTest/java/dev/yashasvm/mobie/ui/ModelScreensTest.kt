@@ -19,6 +19,8 @@ import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
 import dev.yashasvm.mobie.core.model.ModelType
+import dev.yashasvm.mobie.core.runtime.ActiveCompute
+import dev.yashasvm.mobie.core.runtime.ComputeBackend
 import dev.yashasvm.mobie.data.download.InstalledModelEntry
 import dev.yashasvm.mobie.data.download.DownloadProgress
 import dev.yashasvm.mobie.ui.theme.MobieTheme
@@ -81,7 +83,7 @@ class ModelScreensTest {
             }
         }
 
-        composeRule.onNodeWithText("Type: Text generation").assertIsDisplayed()
+        composeRule.onNodeWithText("Text generation").assertIsDisplayed()
         composeRule.onNodeWithTag("model_primary_action").assertIsDisplayed().performClick()
         assertTrue(downloadRequested)
     }
@@ -150,6 +152,37 @@ class ModelScreensTest {
         composeRule.onNodeWithTag("chat_input").performTextInput("Hello locally")
         composeRule.onNodeWithContentDescription("Send message").performClick()
         composeRule.runOnIdle { assertTrue(sent == "Hello locally") }
+    }
+
+    @Test
+    fun terminalChatKeepsConversationVisibleAndOpensRunSettings() {
+        var settingsOpened = false
+        var menuOpened = false
+        composeRule.setContent {
+            ScreenTheme {
+                ChatScreen(
+                    state = MobieUiState(
+                        selected = testModel(),
+                        runtimeState = RuntimeState.READY,
+                        activeCompute = ActiveCompute(backend = ComputeBackend.GPU),
+                        messages = listOf(
+                            ChatMessage(fromUser = true, text = "Where do my messages go?"),
+                            ChatMessage(fromUser = false, text = "This is a UI fixture. Inference runs locally on your phone."),
+                        ),
+                    ),
+                    onSend = { _, _ -> true },
+                    onMenu = { menuOpened = true },
+                    onComputeSettings = { settingsOpened = true },
+                )
+            }
+        }
+        composeRule.onNodeWithText("Where do my messages go?").assertIsDisplayed()
+        composeRule.onNodeWithTag("open_menu").assertIsDisplayed().performClick()
+        composeRule.runOnIdle { assertTrue(menuOpened) }
+        composeRule.onNodeWithText("This is a UI fixture. Inference runs locally on your phone.").assertIsDisplayed()
+        composeRule.onNodeWithTag("open_compute_settings").assertIsDisplayed().performClick()
+        composeRule.runOnIdle { assertTrue(settingsOpened) }
+        captureEvidence("mobie-terminal-chat.png")
     }
 
     @Test

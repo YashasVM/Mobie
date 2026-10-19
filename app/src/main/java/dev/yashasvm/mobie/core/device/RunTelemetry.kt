@@ -50,10 +50,10 @@ class DeviceRunSampler(context: Context) {
     private val battery = appContext.getSystemService(BatteryManager::class.java)
 
     private var pssBytes: Long? = null
-    private var pssAt = Long.MIN_VALUE
+    private var pssAt: Long? = null
     private var voltageMillivolts = 0
     private var charging = false
-    private var batteryAt = Long.MIN_VALUE
+    private var batteryAt: Long? = null
 
     /**
      * Battery current is read every call. PSS walks this process's page maps and the sticky
@@ -63,11 +63,11 @@ class DeviceRunSampler(context: Context) {
      */
     fun sample(): Sample {
         val now = SystemClock.elapsedRealtime()
-        if (now - pssAt >= SLOW_REFRESH_MS) {
+        if (RunTelemetrySamplingPolicy.shouldRefresh(pssAt, now)) {
             pssBytes = Debug.getPss().takeIf { it > 0 }?.times(1_024L)
             pssAt = now
         }
-        if (now - batteryAt >= SLOW_REFRESH_MS) {
+        if (RunTelemetrySamplingPolicy.shouldRefresh(batteryAt, now)) {
             val status = appContext.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
             voltageMillivolts = status?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 0) ?: 0
             charging = (status?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0) != 0
@@ -83,10 +83,6 @@ class DeviceRunSampler(context: Context) {
             ),
             voltageMillivolts = voltageMillivolts,
         )
-    }
-
-    private companion object {
-        const val SLOW_REFRESH_MS = 1_000L
     }
 
     data class Sample(

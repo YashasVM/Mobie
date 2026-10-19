@@ -52,6 +52,29 @@ class ReleaseMappingTest(unittest.TestCase):
         result = self.verify(valid_mapping() + f'\n{PREFIX}Engine$$ExternalSyntheticLambda0 -> a.b:')
         self.assertEqual(0, result.returncode)
 
+    def test_modern_r8_generated_class_does_not_fail(self):
+        mapping = valid_mapping() + f'\n{PREFIX}EmbeddingEngine$0 -> a.b:\n'
+        mapping += '# {"id":"sourceFile","fileName":"R8$$SyntheticClass"}\n'
+        mapping += '# {"id":"com.android.tools.r8.synthesized"}\n'
+        self.assertEqual(0, self.verify(mapping).returncode)
+
+    def test_member_synthetic_marker_does_not_exempt_class(self):
+        mapping = valid_mapping() + f'\n{PREFIX}EmbeddingEngine -> a.b:\n'
+        mapping += '    # {"id":"sourceFile","fileName":"R8$$SyntheticClass"}\n'
+        mapping += '    # {"id":"com.android.tools.r8.synthesized"}\n'
+        self.assertNotEqual(0, self.verify(mapping).returncode)
+
+    def test_required_class_never_exempted(self):
+        mapping = valid_mapping().replace(f'-> {PREFIX}BenchmarkInfo:',
+            '-> a.b:\n# {"id":"sourceFile","fileName":"R8$$SyntheticClass"}\n'
+            '# {"id":"com.android.tools.r8.synthesized"}')
+        self.assertNotEqual(0, self.verify(mapping).returncode)
+
+    def test_source_file_label_alone_does_not_exempt_class(self):
+        mapping = valid_mapping() + f'\n{PREFIX}EmbeddingEngine -> a.b:\n'
+        mapping += '# {"id":"sourceFile","fileName":"R8$$SyntheticClass"}\n'
+        self.assertNotEqual(0, self.verify(mapping).returncode)
+
 
 if __name__ == '__main__':
     unittest.main()

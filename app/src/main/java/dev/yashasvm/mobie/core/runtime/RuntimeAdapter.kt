@@ -46,10 +46,13 @@ interface RuntimeAdapter {
     val format: ModelFormat
     /** Backend selected by the loaded engine, including a visible automatic fallback reason. */
     val activeCompute: ActiveCompute? get() = null
+    val computeCapabilities: ComputeCapabilities? get() = null
     /** Applied before load; artifactIdentity includes the repository, artifact and pinned source. */
     fun configureCompute(options: ComputeOptions) = Unit
     /** Stored sampler used to create the conversation at load; generate still applies its own sampler per request. */
     fun configureSampler(sampler: SamplerSettings) = Unit
+    /** Applied before load. Null preserves the artifact's reasoning default. */
+    fun configureThinking(enabled: Boolean?) = Unit
     /** True only while the loaded runtime has an initialized image encoder. */
     val supportsImageInput: Boolean get() = false
     suspend fun load(
@@ -64,6 +67,17 @@ interface RuntimeAdapter {
         history: List<RuntimeMessage> = emptyList(),
     ): Result<Unit> = load(modelPath, vision, history)
     suspend fun resetConversation(history: List<RuntimeMessage> = emptyList()): Result<Unit>
+    /**
+     * Replaces conversation-only settings and history without reloading initialized model weights.
+     * Engine-affecting changes and unsupported adapters fail; callers must use the normal load
+     * path. After any failure, do not generate or reset the old conversation: unload/reload first.
+     * Implementations must serialize this with generation and lifecycle changes.
+     */
+    suspend fun reconfigureConversation(
+        options: ComputeOptions,
+        sampler: SamplerSettings,
+        history: List<RuntimeMessage> = emptyList(),
+    ): Result<Unit> = Result.failure(UnsupportedOperationException("This runtime requires a model reload to change settings."))
     fun generate(
         prompt: String,
         imagePath: String? = null,

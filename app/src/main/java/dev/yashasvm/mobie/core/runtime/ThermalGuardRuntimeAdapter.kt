@@ -17,8 +17,10 @@ internal class ThermalGuardRuntimeAdapter(
 ) : RuntimeAdapter {
     override val format: ModelFormat = delegate.format
     override val activeCompute: ActiveCompute? get() = delegate.activeCompute
+    override val computeCapabilities: ComputeCapabilities? get() = delegate.computeCapabilities
     override fun configureCompute(options: ComputeOptions) = delegate.configureCompute(options)
     override fun configureSampler(sampler: SamplerSettings) = delegate.configureSampler(sampler)
+    override fun configureThinking(enabled: Boolean?) = delegate.configureThinking(enabled)
     override val supportsImageInput: Boolean get() = delegate.supportsImageInput
 
     override suspend fun load(
@@ -33,6 +35,12 @@ internal class ThermalGuardRuntimeAdapter(
 
     override suspend fun resetConversation(history: List<RuntimeMessage>): Result<Unit> =
         delegate.resetConversation(history)
+
+    override suspend fun reconfigureConversation(
+        options: ComputeOptions,
+        sampler: SamplerSettings,
+        history: List<RuntimeMessage>,
+    ): Result<Unit> = delegate.reconfigureConversation(options, sampler, history)
 
     override fun generate(
         prompt: String,

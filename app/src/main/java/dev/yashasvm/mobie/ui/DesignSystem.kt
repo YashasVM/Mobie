@@ -663,7 +663,7 @@ internal fun Compatibility?.signalColor(): Color = when (this) {
 
 internal fun statusLabel(status: Compatibility?) = when (status) {
     Compatibility.COMPATIBLE -> "Runs here"
-    Compatibility.WARNING -> "Free memory first"
+    Compatibility.WARNING -> "Tight on memory"
     Compatibility.INCOMPATIBLE -> "Won't fit"
     Compatibility.CONVERSION_REQUIRED -> "Needs conversion"
     null -> "Checking"
@@ -730,6 +730,7 @@ internal fun deviceLabel(device: DeviceProfile?): String {
 /** Human device name, e.g. "Google Pixel 8", or null when the platform reports nothing. */
 internal fun deviceName(device: DeviceProfile?): String? {
     if (device == null) return null
+    if (isEmulator(device)) return "Android emulator"
     val maker = device.manufacturer.replaceFirstChar { it.titlecase(Locale.US) }
     val model = device.model
     return when {
@@ -741,7 +742,16 @@ internal fun deviceName(device: DeviceProfile?): String? {
 
 /** Chip name, e.g. "Tensor G3", or null. */
 internal fun chipName(device: DeviceProfile?): String? =
-    device?.socModel?.takeIf { it.isNotBlank() && !it.equals("unknown", ignoreCase = true) }
+    device?.socModel?.takeIf {
+        it.isNotBlank() && !it.equals("unknown", ignoreCase = true) && !isEmulator(device)
+    }
+
+/** Emulator builds report codenames like "sdk_gphone64_x86_64" and "ranchu"; show plain words instead. */
+internal fun isEmulator(device: DeviceProfile?): Boolean {
+    val model = device?.model.orEmpty().lowercase(Locale.US)
+    val hardware = device?.socModel.orEmpty().lowercase(Locale.US)
+    return model.startsWith("sdk_gphone") || model.contains("emulator") || hardware in setOf("ranchu", "goldfish")
+}
 
 internal fun historyTime(timestamp: Long): String =
     if (timestamp <= 0) "saved chat" else SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()).format(Date(timestamp))

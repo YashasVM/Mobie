@@ -5,12 +5,14 @@ import java.util.concurrent.CountDownLatch
 import kotlin.system.measureTimeMillis
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -38,6 +40,31 @@ class InferenceStallGuardRuntimeAdapterTest {
         assertEquals(InferenceEvent.Token("hello"), events.first())
         val error = events.last() as InferenceEvent.Error
         assertTrue(error.message.contains("stopped making progress", ignoreCase = true))
+    }
+
+    @Test
+    fun downstreamFailureDuringEmitReachesTheCallerUnchangedAndCancelsNative() = runBlocking {
+        val delegate = RecordingRuntimeAdapter(
+            generation = flow {
+                emit(InferenceEvent.Token("hello"))
+                emit(InferenceEvent.Complete)
+            },
+        )
+        val adapter = InferenceStallGuardRuntimeAdapter(delegate = delegate, cancellationTimeoutMs = 100L)
+        val failure = IllegalStateException("collector gone")
+        val collector = FlowCollector<InferenceEvent> { event ->
+            if (event is InferenceEvent.Token) throw failure
+        }
+
+        try {
+            adapter.generate("prompt").collect(collector)
+            fail("The collector's failure must reach the caller")
+        } catch (error: IllegalStateException) {
+            assertSame(failure, error)
+            assertFalse(error.message.orEmpty().contains("transparency"))
+        }
+
+        assertTrue(delegate.cancelCalled)
     }
 
     @Test
