@@ -86,7 +86,8 @@ def summarize(records, args):
         if [r.get("iteration") for r in records] != list(range(expected)):
             raise ValueError("Invocation is incomplete or has nonconsecutive repetitions.")
     generations = [g for r in records for g in [r, r.get("warmup") or {}, *(r.get("samples") or [])]]
-    if any(g.get("error") or g.get("generation_error") for g in generations):
+    if any(g.get("error") or g.get("generation_error") or g.get("cleanup_error")
+           or g.get("cleanup_succeeded") is False for g in generations):
         raise ValueError("Latest matching invocation contains a failure; refusing a success-only summary.")
     for key in IDENTITY_FIELDS:
         if len({json.dumps(r.get(key), sort_keys=True) for r in records}) > 1:

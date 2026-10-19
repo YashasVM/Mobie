@@ -31,6 +31,7 @@ import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import org.json.JSONArray
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -288,8 +289,7 @@ class LiteRtGpuBenchmarkTest {
                 } catch (failure: Exception) {
                     result.put("error", failure.message ?: failure.javaClass.simpleName)
                 } finally {
-                    adapter.unload()
-                    monitor.cancel()
+                    recordCleanup(result, unload = { adapter.unload() }, stopMonitor = { monitor.cancel() })
                     result.put("peak_pss_bytes", peakPss.get())
                         .put("thermal_start", thermalStart).put("thermal_max", thermalMax.get())
                         .put("thermal_end", thermal())
@@ -297,6 +297,41 @@ class LiteRtGpuBenchmarkTest {
                 result
             }
         }
+
+    private suspend fun recordCleanup(result: JSONObject, unload: suspend () -> Unit, stopMonitor: () -> Unit) {
+        try {
+            unload()
+            result.put("cleanup_succeeded", true)
+        } catch (failure: Exception) {
+            val message = failure.message ?: failure.javaClass.simpleName
+            result.put("cleanup_succeeded", false).put("cleanup_error", message)
+            if (!result.has("error")) result.put("error", "Native runtime cleanup failed: $message")
+        } finally {
+            // A thrown unload must not leave this scope waiting forever for its monitor.
+            // Preserve the failed row instead of making an earlier invocation look current.
+            stopMonitor()
+        }
+    }
+
+    @Test
+    fun cleanupFailureStopsMonitorAndPreservesGenerationError(): Unit = runBlocking {
+        for (originalError in listOf(null, "generation failed")) {
+            val result = JSONObject()
+            if (originalError != null) result.put("error", originalError)
+            var stops = 0
+            recordCleanup(result, unload = { error("unload failed") }, stopMonitor = { stops++ })
+            assertEquals(1, stops)
+            assertEquals(false, result.getBoolean("cleanup_succeeded"))
+            assertEquals("unload failed", result.getString("cleanup_error"))
+            assertEquals(originalError ?: "Native runtime cleanup failed: unload failed", result.getString("error"))
+        }
+        val success = JSONObject()
+        var stops = 0
+        recordCleanup(success, unload = {}, stopMonitor = { stops++ })
+        assertEquals(1, stops)
+        assertTrue(success.getBoolean("cleanup_succeeded"))
+        assertTrue(!success.has("error") && !success.has("cleanup_error"))
+    }
 
     private class MeasurementWindow(initialPss: Long, initialThermal: Int) {
         val peakPss = AtomicLong(initialPss)

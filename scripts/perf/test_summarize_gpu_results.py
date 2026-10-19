@@ -47,6 +47,11 @@ class SummaryTest(unittest.TestCase):
     def test_failed_measured_repetition_not_discarded(self):
         with self.assertRaisesRegex(ValueError, "failure"):
             module.summarize([self.run_record(0), self.run_record(1), self.run_record(2, error="cancelled")], self.args)
+    def test_cleanup_failure_rejects_latest_invocation(self):
+        for failure in ({"cleanup_error": "native close failed"}, {"cleanup_succeeded": False}):
+            with self.subTest(failure=failure), self.assertRaisesRegex(ValueError, "failure"):
+                module.summarize([self.run_record(0), self.run_record(1),
+                                  self.run_record(0, **failure), self.run_record(1)], self.args)
     def test_latest_invocation_only_and_not_a_gallery_claim(self):
         result = module.summarize([self.run_record(0), self.run_record(1), self.run_record(0), self.run_record(1), self.run_record(2)], self.args)
         self.assertEqual(result["measured_repetitions"], 2)

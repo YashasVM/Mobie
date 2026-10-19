@@ -19,7 +19,7 @@ mkdir -p "$output_dir"
 run_id=$(python3 -c 'import uuid; print(uuid.uuid4())')
 printf '%s\n' "$run_id" > "$output_dir/run-id.txt"
 args=(-s "$serial")
-instrument_args=(-w -r -e class dev.yashasvm.mobie.LiteRtGpuBenchmarkTest
+instrument_args=(-w -r -e class 'dev.yashasvm.mobie.LiteRtGpuBenchmarkTest#measuresProductionBackendOnPhysicalArm64'
   -e gpuBenchmark true -e modelPath "$model_path" -e backend "$backend" -e repetitions "$repetitions")
 instrument_args+=(-e outputTokens "${OUTPUT_TOKENS:-64}")
 instrument_args+=(-e benchmarkRunId "$run_id")
