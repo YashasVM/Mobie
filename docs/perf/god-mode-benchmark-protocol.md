@@ -69,10 +69,13 @@ PROMPT_FIXTURE=sustained-decode OUTPUT_TOKENS=256 MIN_DECODE_TOKENS=64 \
 	SUSTAINED_SECONDS=120 BUILD_REVISION=$(git rev-parse HEAD) \
 	scripts/perf/run-gpu-benchmark.sh SERIAL APP_PRIVATE_MODEL_PATH CPU OUTPUT_DIR 1 4
 python3 docs/perf/summarize-gpu-results.py OUTPUT_DIR/cumulative-results.jsonl \
-	--fixture sustained-decode --backend CPU --cpu-threads 1
+	--fixture sustained-decode --backend CPU --cpu-threads 1 \
+	--run-id "$(cat OUTPUT_DIR/run-id.txt)"
 ```
 
 `SERIAL`, `APP_PRIVATE_MODEL_PATH`, and `OUTPUT_DIR` are operator inputs. The model path is relative to the app's private files directory. This command measures Mobie only. It does not run Gallery or verify matched Gallery settings.
+
+The runner saves a new run ID before instrumentation starts. Every native row includes that ID and the expected repetition count. Pin the summary with `--run-id` so a crash before the first new row cannot return older cumulative results. Missing or nonconsecutive repetitions fail validation. An unpinned legacy summary explicitly warns that it cannot exclude such a crash.
 
 With `SUSTAINED_SECONDS` greater than zero, each outer repetition loads an engine, performs one warm-up generation, and collects measured samples. The summary aggregates those samples, including samples from outer iteration zero, and excludes each in-row warm-up. With no sustained interval, the summary excludes outer iteration zero and uses subsequent generations.
 

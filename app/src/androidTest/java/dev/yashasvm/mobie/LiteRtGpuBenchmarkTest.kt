@@ -56,6 +56,7 @@ class LiteRtGpuBenchmarkTest {
         val backend = ComputeBackend.valueOf(args.getString("backend") ?: "AUTO")
         val threads = args.getString("cpuThreads")?.toInt()
         val repetitions = (args.getString("repetitions")?.toInt() ?: 3).also { require(it in 1..20) }
+        val benchmarkRunId = args.getString("benchmarkRunId") ?: java.util.UUID.randomUUID().toString()
         val outputTokens = (args.getString("outputTokens")?.toInt() ?: 64).also { require(it in 1..1024) }
         // The short fixture stays the default so existing invocations keep their prompt ID and bytes.
         val fixture = PromptFixture.fromArg(args.getString("promptFixture"))
@@ -107,6 +108,8 @@ class LiteRtGpuBenchmarkTest {
             val result = measure(context, model, options, sampler, outputTokens, thinkingOff, sustainedSeconds, holdSeconds,
                 fixture, minDecodeTokens)
                 .put("iteration", iteration)
+                .put("run_id", benchmarkRunId)
+                .put("expected_repetitions", repetitions)
                 .put("benchmark_protocol", "mobie-production-adapter-v3")
                 .put("comparison_target", "mobie_adapter_only")
                 .put("os_page_cache_controlled", false)
