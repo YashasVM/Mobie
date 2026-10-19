@@ -13,7 +13,6 @@ import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import dev.yashasvm.mobie.R
 import dev.yashasvm.mobie.core.security.HuggingFaceTokenStore
-import dev.yashasvm.mobie.data.catalog.awaitResponse
 import java.io.File
 import java.io.FileInputStream
 import java.io.IOException
@@ -126,7 +125,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
 
             var transferTotal = recoverySize
             var transferSha: String? = null
-            client.newCall(request).awaitResponse().use { response ->
+            client.newCall(request).useDownloadResponse { response ->
                 when (response.code) {
                     401, 403 -> return@withContext Result.failure(
                         dataOf("Access denied. Check the model terms and Hugging Face token."),

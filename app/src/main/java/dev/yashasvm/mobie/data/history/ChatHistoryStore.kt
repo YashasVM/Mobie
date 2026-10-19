@@ -50,8 +50,10 @@ class ChatHistoryStore(context: Context) {
             ?.replace("\n", " ")
             ?.take(TITLE_LENGTH)
             ?: "New local chat"
-        val updated = (listOf(ChatHistorySession(id, title, now, messages.takeLast(MAX_MESSAGES))) + existing)
-            .take(MAX_SESSIONS)
+        val updated = retainedChatSessions(
+            listOf(ChatHistorySession(id, title, now, messages.takeLast(MAX_MESSAGES))) + existing,
+            MAX_SESSIONS,
+        )
         sessionsCache[modelId] = updated
         preferences.edit()
             .putString(sessionsKey(modelId), json.encodeToString(updated))
@@ -61,8 +63,10 @@ class ChatHistoryStore(context: Context) {
 
     fun startNewSession(modelId: String): String {
         val id = UUID.randomUUID().toString()
-        val sessions = (listOf(ChatHistorySession(id, "New local chat", System.currentTimeMillis())) + sessions(modelId))
-            .take(MAX_SESSIONS)
+        val sessions = retainedChatSessions(
+            listOf(ChatHistorySession(id, "New local chat", System.currentTimeMillis())) + sessions(modelId),
+            MAX_SESSIONS,
+        )
         sessionsCache[modelId] = sessions
         preferences.edit()
             .putString(sessionsKey(modelId), json.encodeToString(sessions))
