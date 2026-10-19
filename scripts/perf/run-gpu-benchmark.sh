@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # Runs one opt-in production-adapter benchmark on a physical ARM64 phone.
+# PROMPT_FIXTURE=short-latency (default; latency probe only) or sustained-decode.
+# MIN_DECODE_TOKENS overrides the fixture's minimum native decoded tokens (sustained default 64);
+# it must not exceed OUTPUT_TOKENS, so sustained runs usually also raise OUTPUT_TOKENS.
 set -euo pipefail
 if (( $# < 4 || $# > 6 )); then
   echo 'Usage: run-gpu-benchmark.sh SERIAL MODEL_PATH BACKEND OUTPUT_DIR [CPU_THREADS] [REPETITIONS]' >&2
@@ -24,6 +27,8 @@ instrument_args+=(-e holdSeconds "${HOLD_SECONDS:-0}")
 instrument_args+=(-e activationType "${ACTIVATION_TYPE:-AUTO}")
 instrument_args+=(-e galleryEquivalent "${GALLERY_SAMPLER:-false}")
 instrument_args+=(-e cacheState "${CACHE_STATE:-uncontrolled}")
+instrument_args+=(-e promptFixture "${PROMPT_FIXTURE:-short-latency}")
+if [[ -n "${MIN_DECODE_TOKENS:-}" ]]; then instrument_args+=(-e minDecodeTokens "$MIN_DECODE_TOKENS"); fi
 if [[ -n "${CONTEXT_TOKENS:-}" ]]; then instrument_args+=(-e contextTokens "$CONTEXT_TOKENS"); fi
 if [[ -n "${SPECULATIVE_DECODING:-}" ]]; then instrument_args+=(-e speculativeDecoding "$SPECULATIVE_DECODING"); fi
 if [[ -n "${THINKING_BUDGET:-}" ]]; then instrument_args+=(-e thinkingBudget "$THINKING_BUDGET"); fi
