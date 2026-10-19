@@ -98,17 +98,26 @@ class ChatHistoryStore private constructor(openPreferences: () -> SharedPreferen
             return@mutate id
         }
         val session = ChatHistorySession(id, titleFor(messages), System.currentTimeMillis(), trimmed)
-        val updated = (listOf(session) + available.filterNot { it.id == id }).take(MAX_SESSIONS)
+        val updated = retainedChatSessions(
+            listOf(session) + available.filterNot { it.id == id },
+            MAX_SESSIONS,
+        )
         saveSessionsLocked(modelId, updated, activeId)
         id
     }
 
-    /** Creates and selects an empty chat. Reusing an existing [id] keeps its messages. */
+    /**
+     * Creates and selects an empty chat without consuming a saved-conversation slot. Only the
+     * newest empty draft is kept. Reusing an existing [id] keeps its messages.
+     */
     suspend fun startNewSession(modelId: String, id: String = UUID.randomUUID().toString()): String = mutate {
         val available = sessionsLocked(modelId)
         val session = available.firstOrNull { it.id == id }
             ?: ChatHistorySession(id, DEFAULT_TITLE, System.currentTimeMillis())
-        val updated = (listOf(session) + available.filterNot { it.id == id }).take(MAX_SESSIONS)
+        val updated = retainedChatSessions(
+            listOf(session) + available.filterNot { it.id == id },
+            MAX_SESSIONS,
+        )
         saveSessionsLocked(modelId, updated, id)
         id
     }

@@ -16,6 +16,7 @@ internal object LiteRtChannelText {
         if (channels.size == 1) {
             val (name, value) = channels.entries.first()
             if (value.isEmpty()) return EMPTY
+
             return if (name.lowercase() in reasoningChannels) Split(value, "") else Split("", value)
         }
         val reasoning = StringBuilder()

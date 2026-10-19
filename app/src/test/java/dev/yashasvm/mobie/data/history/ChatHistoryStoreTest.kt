@@ -373,13 +373,96 @@ class ChatHistoryStoreTest {
     fun retentionKeepsRecentSessionsAndMessagesAcrossRecreation() = runBlocking {
         val prefs = MemoryPreferences()
         val store = ChatHistoryStore(prefs)
-        repeat(21) { store.startNewSession(modelId, "session-$it") }
+        repeat(21) { index ->
+            store.startNewSession(modelId, "session-$index")
+            store.write(modelId, listOf(HistoryMessage(true, "Saved conversation $index")))
+        }
         val messages = List(105) { HistoryMessage(it % 2 == 0, "Message $it") }
         store.write(modelId, messages)
 
         val restored = ChatHistoryStore(prefs.reopened())
         assertEquals((1..20).map { "session-$it" }.toSet(), restored.sessions(modelId).map { it.id }.toSet())
         assertEquals(messages.takeLast(100), restored.read(modelId))
+    }
+
+    @Test
+    fun repeatedEmptyDraftsKeepSavedConversationsAcrossRecreation() = runBlocking {
+        val prefs = MemoryPreferences()
+        val store = ChatHistoryStore(prefs)
+        repeat(20) { index ->
+            store.startNewSession(modelId, "saved-$index")
+            store.write(modelId, listOf(HistoryMessage(true, "Saved conversation $index")))
+        }
+        repeat(30) { store.startNewSession(modelId, "draft-$it") }
+        val writes = prefs.commitCount
+
+        store.write(modelId, emptyList())
+
+        assertEquals(writes, prefs.commitCount)
+        val restored = ChatHistoryStore(prefs.reopened())
+        val sessions = restored.sessions(modelId)
+        assertEquals(21, sessions.size)
+        assertEquals("draft-29", sessions.single { it.messages.isEmpty() }.id)
+        assertEquals(
+            (0..19).map { "saved-$it" }.toSet(),
+            sessions.filter { it.messages.isNotEmpty() }.map { it.id }.toSet(),
+        )
+        assertEquals("draft-29", restored.currentSessionId(modelId))
+        assertTrue(restored.read(modelId).isEmpty())
+        restored.activate(modelId, "saved-0")
+        assertEquals("Saved conversation 0", restored.read(modelId).single().text)
+    }
+
+    @Test
+    fun firstMessageInDraftEvictsOnlyTheOldestSavedConversation() = runBlocking {
+        val prefs = MemoryPreferences()
+        val store = ChatHistoryStore(prefs)
+        repeat(20) { index ->
+            store.startNewSession(modelId, "saved-$index")
+            store.write(modelId, listOf(HistoryMessage(true, "Saved conversation $index")))
+        }
+        val draftId = store.startNewSession(modelId, "draft")
+        val messages = listOf(HistoryMessage(true, "First real message"))
+
+        store.write(modelId, messages)
+
+        val restored = ChatHistoryStore(prefs.reopened())
+        assertEquals(20, restored.sessions(modelId).size)
+        assertTrue(restored.sessions(modelId).all { it.messages.isNotEmpty() })
+        assertEquals(
+            (1..19).map { "saved-$it" }.toSet() + draftId,
+            restored.sessions(modelId).map { it.id }.toSet(),
+        )
+        assertEquals(draftId, restored.currentSessionId(modelId))
+        assertEquals(messages, restored.read(modelId))
+    }
+
+    @Test
+    fun capturedSaveOfReplacedDraftPreservesTheNewestActiveDraft() = runBlocking {
+        val prefs = MemoryPreferences()
+        val store = ChatHistoryStore(prefs)
+        repeat(20) { index ->
+            store.startNewSession(modelId, "saved-$index")
+            store.write(modelId, listOf(HistoryMessage(true, "Saved conversation $index")))
+        }
+        val capturedId = store.startNewSession(modelId, "captured-draft")
+        val activeId = store.startNewSession(modelId, "active-draft")
+        assertFalse(store.sessions(modelId).any { it.id == capturedId })
+        val messages = listOf(HistoryMessage(true, "Captured question"), HistoryMessage(false, "Delayed answer"))
+
+        assertEquals(capturedId, store.writeSession(modelId, capturedId, messages))
+
+        val restored = ChatHistoryStore(prefs.reopened())
+        assertEquals(21, restored.sessions(modelId).size)
+        assertEquals(activeId, restored.sessions(modelId).single { it.messages.isEmpty() }.id)
+        assertEquals(activeId, restored.currentSessionId(modelId))
+        assertTrue(restored.read(modelId).isEmpty())
+        assertEquals(
+            (1..19).map { "saved-$it" }.toSet() + capturedId,
+            restored.sessions(modelId).filter { it.messages.isNotEmpty() }.map { it.id }.toSet(),
+        )
+        restored.activate(modelId, capturedId)
+        assertEquals(messages, restored.read(modelId))
     }
 
     /** Reopening discards memory and restores only the last successful disk commit. */
