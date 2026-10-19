@@ -30,3 +30,12 @@ No exact-build physical ARM64 result exists for this checkpoint. Neither a Kotli
 - Python benchmark-summary failure, identity, warm-up and numeric validation.
 
 Test results must be tied to their exact commit in PR/CI. Historical pre-GOD-MODE benchmark values are not measurements of these changes.
+
+## Build toolchain compatibility
+
+The inherited Kotlin 2.3.0 / AGP 8.7.3 combination emitted R8 Kotlin metadata parse warnings. The catalog now pairs Kotlin 2.3.10 with AGP 8.13.2 (R8 8.13.19), retaining Gradle 8.13 and JDK 17. Both are within the published compatibility matrices:
+
+- https://developer.android.com/build/releases/agp-8-13-0-release-notes
+- https://kotlinlang.org/docs/gradle-configure-project.html
+
+This aligns the declared compiler and optimizer versions, but the first rebuilt release still emits metadata warnings, so dependency metadata is under investigation. It is not a demonstrated inference-speed improvement. Warnings alone did not prove the previous APK was miscompiled. The optimized APK still requires release JNI preservation checks and exact-build device validation.
