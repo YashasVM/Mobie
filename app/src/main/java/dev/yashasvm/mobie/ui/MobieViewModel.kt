@@ -216,31 +216,24 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
      * to chat from the catalog.
      */
     fun openLastChat() {
-        viewModelScope.launch {
-            val entry = try {
-                val (installed, lastUsed) = withContext(Dispatchers.IO) {
+        viewModelScope.openLatestChat(
+            selectionRevision = selectionRevision,
+            readSnapshot = {
+                withContext(Dispatchers.IO) {
                     container.downloads.installedModels() to container.chatHistory.lastModelId()
                 }
-                mutableState.update { it.copy(installedModels = installed) }
-                chooseLaunchModel(installed, lastUsed)
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
+            },
+            onInstalled = { installed -> mutableState.update { it.copy(installedModels = installed) } },
+            onOpening = { mutableState.update { it.copy(openingChat = true) } },
+            onResolved = { mutableState.update { it.copy(launchResolved = true, openingChat = false) } },
+            onFailure = { error ->
                 // Fall back to the catalog rather than leaving the launch screen blank.
-                mutableState.update {
-                    it.copy(error = error.message ?: "Installed models couldn't be read.")
-                }
-                null
-            }
-            if (entry == null) {
-                mutableState.update { it.copy(launchResolved = true, openingChat = false) }
-                return@launch
-            }
-            val opened = { mutableState.update { it.copy(launchResolved = true, openingChat = false) } }
-            mutableState.update { it.copy(openingChat = true) }
-            beginSelection(entry.model, onSuperseded = opened, retainLoadedEngine = true) {
+                mutableState.update { it.copy(error = error.message ?: "Installed models couldn't be read.") }
+            },
+        ) { entry, revision, opened ->
+            beginSelection(entry.model, onSuperseded = opened, retainLoadedEngine = true, reservedRevision = revision) { selectedRevision ->
                 try {
-                    openChat(entry.localPath)
+                    openChat(entry.localPath, selectedRevision)
                 } finally {
                     opened()
                 }
@@ -509,14 +502,22 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         model: AiModel?,
         onSuperseded: () -> Unit = {},
         retainLoadedEngine: Boolean = false,
-        afterSelect: (suspend () -> Unit)? = null,
+        reservedRevision: Long? = null,
+        afterSelect: (suspend (Long) -> Unit)? = null,
     ) {
+        // Chat-home requests reserve their place before disk IO. Never let their completion
+        // become a new selection, or an older Back action could override a newer model tap.
+        val revision = reservedRevision ?: selectionRevision.incrementAndGet()
+        if (selectionRevision.get() != revision) return
+        if (reservedRevision == null) {
+            // This explicit selection owns navigation now; obsolete completion callbacks do not.
+            mutableState.update { it.copy(launchResolved = true, openingChat = false) }
+        }
         downloadObserverJob?.cancel()
         cancelInference()
         val operation = nextRuntimeOperation()
         val retain = retainLoadedEngine && afterSelect != null && model != null && loadedEngine?.modelId == model.id
         if (!retain) viewModelScope.launch { unloadRuntime(operation) }
-        val revision = selectionRevision.incrementAndGet()
         viewModelScope.launch {
             try {
                 val applied = try {
@@ -526,14 +527,16 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                     throw error
                 } catch (error: Exception) {
                     // A failed read must not crash the app or leave a waiting caller (the launch screen) hanging.
-                    mutableState.update { it.copy(error = error.message ?: "This model couldn't be opened.") }
+                    if (selectionRevision.get() == revision) {
+                        mutableState.update { it.copy(error = error.message ?: "This model couldn't be opened.") }
+                    }
                     false
                 }
                 if (!applied) {
                     onSuperseded()
                     return@launch
                 }
-                afterSelect?.invoke()
+                afterSelect?.invoke(revision)
             } finally {
                 if (retain) withContext(NonCancellable) { unloadRuntime(operation) }
             }
@@ -640,11 +643,15 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun runInstalled(allowReclaim: Boolean = false) {
-        val path = state.value.downloadedPath
+        val current = state.value
+        val path = current.downloadedPath
+        val revision = selectionRevision.get()
         if (path != null && File(path).isFile) {
             viewModelScope.launch {
-                val current = state.value
                 val device = readDeviceProfile()
+                if (selectionRevision.get() != revision || state.value.selected?.id != current.selected?.id ||
+                    state.value.selectedArtifact != current.selectedArtifact
+                ) return@launch
                 val compatibility = container.compatibility.resolve(admissionArtifact(current.selectedArtifact), device,
                     current.selected?.supportsVision == true, current.computeBackend, allowReclaim = allowReclaim,
                     contextTokens = admissionContextTokens(current.selectedArtifact))
@@ -657,7 +664,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                     mutableState.update { it.copy(error = compatibility.reason) }
                     return@launch
                 }
-                openChat(path, allowReclaim)
+                openChat(path, revision, allowReclaim)
             }
         } else {
             mutableState.update {
@@ -670,11 +677,13 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    private suspend fun openChat(path: String, allowReclaim: Boolean = false) {
+    private suspend fun openChat(path: String, revision: Long, allowReclaim: Boolean = false) {
+        // A caller may have awaited session writes or device IO. Never adopt its successor's
+        // model metadata for a path captured by the previous selection, including A → B → A.
+        if (selectionRevision.get() != revision) return
         val current = state.value
         val model = current.selected ?: return
         val artifact = current.selectedArtifact ?: return
-        val revision = selectionRevision.get()
         val history = readHistory(model)
         val sessions = container.chatHistory.sessions(model.id)
         // A model without saved chats gets a draft id; nothing is stored until its first message.
@@ -1006,10 +1015,13 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun startInstalledChat(entry: InstalledModelEntry) {
-        beginSelection(entry.model, retainLoadedEngine = true) {
-            if (awaitHistoryWrite { container.chatHistory.startNewSession(entry.model.id) }) {
-                openChat(entry.localPath)
-            }
+        beginSelection(entry.model, retainLoadedEngine = true) { revision ->
+            openChatAfterSessionWrite(
+                selectionRevision = selectionRevision,
+                revision = revision,
+                writeSession = { awaitHistoryWrite { container.chatHistory.startNewSession(entry.model.id) } },
+                open = { openChat(entry.localPath, revision) },
+            )
         }
     }
 
@@ -1067,11 +1079,13 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun leaveChat() {
+        selectionRevision.incrementAndGet()
         cancelInference()
         val operation = nextRuntimeOperation()
         viewModelScope.launch { unloadRuntime(operation) }
         mutableState.update {
-            it.copy(chatting = false, runtimeState = RuntimeState.IDLE, stats = null, error = null, appliedComputeOptions = null, appliedSampler = null)
+            it.copy(chatting = false, launchResolved = true, openingChat = false, runtimeState = RuntimeState.IDLE,
+                stats = null, error = null, appliedComputeOptions = null, appliedSampler = null)
         }
     }
 
@@ -1091,12 +1105,15 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
-            // The stall guard fails closed after an unload timeout, so surface the state instead of crashing.
-            mutableState.update {
-                it.copy(
-                    runtimeState = RuntimeState.ERROR,
-                    error = error.message ?: "The model could not be unloaded. Restart Mobie before loading another model.",
-                )
+            // The stall guard still fails closed, but an obsolete unload cannot overwrite its
+            // successor's UI. The current operation will surface any remaining runtime failure.
+            if (isCurrentRuntimeOperation(operation)) {
+                mutableState.update {
+                    it.copy(
+                        runtimeState = RuntimeState.ERROR,
+                        error = error.message ?: "The model could not be unloaded. Restart Mobie before loading another model.",
+                    )
+                }
             }
         }
     }

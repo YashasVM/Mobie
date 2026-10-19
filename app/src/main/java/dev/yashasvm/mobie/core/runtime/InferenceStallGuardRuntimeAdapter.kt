@@ -76,42 +76,53 @@ class InferenceStallGuardRuntimeAdapter(
      * call may cover a GPU attempt followed by the CPU fallback.
      */
     private suspend fun boundedLoad(block: suspend () -> Result<Unit>): Result<Unit> {
-        val outcome = requestBoundedCall(loadTimeoutMs, block) ?: run {
-            recoveryRequired = true
-            return Result.failure(
-                IllegalStateException(
-                    "Loading the model did not finish within the safety timeout. Unload the model, or restart Mobie if unloading fails.",
-                ),
-            )
-        }
-        return outcome.fold(
-            onSuccess = { it },
-            onFailure = { error ->
-                if (error is CancellationException) throw error
-                // A throw from load means native state is uncertain, so fail closed like a stalled generation.
+        return try {
+            val outcome = requestBoundedCall(loadTimeoutMs, block) ?: run {
                 recoveryRequired = true
-                if (isFatalRuntimeFailure(error)) throw error
-                Result.failure(error)
-            },
-        )
+                return Result.failure(
+                    IllegalStateException(
+                        "Loading the model did not finish within the safety timeout. Unload the model, or restart Mobie if unloading fails.",
+                    ),
+                )
+            }
+            outcome.fold(
+                // A returned admission failure can deliberately preserve the previous engine.
+                onSuccess = { it },
+                onFailure = { error ->
+                    recoveryRequired = true
+                    rethrowNonRecoverableRuntimeFailure(error)
+                    Result.failure(error)
+                },
+            )
+        } catch (error: CancellationException) {
+            // The native worker may still be inside load after its caller stops waiting.
+            recoveryRequired = true
+            throw error
+        }
     }
 
     override suspend fun resetConversation(history: List<RuntimeMessage>): Result<Unit> =
-        if (recoveryRequired) Result.failure(recoveryRequiredError()) else delegate.resetConversation(history)
+        boundedConversationChange("Restoring the conversation") { delegate.resetConversation(history) }
 
     override suspend fun reconfigureConversation(
         options: ComputeOptions,
         sampler: SamplerSettings,
         history: List<RuntimeMessage>,
+    ): Result<Unit> = boundedConversationChange("Changing conversation settings") {
+        delegate.reconfigureConversation(options, sampler, history)
+    }
+
+    /** Both warm reset and settings Apply can close/create native conversations and must fail closed. */
+    private suspend fun boundedConversationChange(
+        operation: String,
+        block: suspend () -> Result<Unit>,
     ): Result<Unit> {
         if (recoveryRequired) return Result.failure(recoveryRequiredError())
         return try {
-            val outcome = requestBoundedCall(lifecycleTimeoutMs) {
-                delegate.reconfigureConversation(options, sampler, history)
-            }
+            val outcome = requestBoundedCall(lifecycleTimeoutMs, block)
             if (outcome == null) {
                 recoveryRequired = true
-                Result.failure(IllegalStateException("Changing conversation settings timed out. Unload and reload the model."))
+                Result.failure(IllegalStateException("$operation timed out. Unload and reload the model."))
             } else {
                 outcome.fold(
                     onSuccess = { result ->

@@ -397,7 +397,7 @@ class LiteRtLmRuntimeAdapter(
                             }
                             val split = LiteRtChannelText.split(chunk.channels, REASONING_CHANNELS)
                             val reasoning = split.reasoning
-                            val answer = split.visible.ifEmpty { if (reasoning.isEmpty()) chunk.toString() else "" }
+                            val answer = LiteRtMessageText.visibleAnswer(chunk, split)
                             if (reasoning.isNotEmpty() || answer.isNotEmpty()) {
                                 hints.onOutput()
                                 nonemptyChunkCount += 1
