@@ -11,6 +11,12 @@ internal object LiteRtChannelText {
 
     fun split(channels: Map<String, String>, reasoningChannels: Set<String>): Split {
         if (channels.isEmpty()) return EMPTY
+        // Most SDK callbacks contain one answer or reasoning channel. Preserve its immutable
+        // string rather than allocating two builders and copying the chunk on every callback.
+        if (channels.size == 1) {
+            val (name, value) = channels.entries.first()
+            return if (name.lowercase() in reasoningChannels) Split(value, "") else Split("", value)
+        }
         val reasoning = StringBuilder()
         val visible = StringBuilder()
         for ((name, value) in channels) {
