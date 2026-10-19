@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Runs one opt-in production-adapter benchmark on a physical ARM64 phone.
+# Host requirements: Bash, Python 3.8+, ripgrep, and Android platform-tools.
 # PROMPT_FIXTURE=short-latency (default; latency probe only) or sustained-decode.
 # MIN_DECODE_TOKENS overrides the fixture's minimum native decoded tokens (sustained default 64);
 # it must not exceed OUTPUT_TOKENS, so sustained runs usually also raise OUTPUT_TOKENS.
@@ -25,8 +26,8 @@ instrument_args+=(-e outputTokens "${OUTPUT_TOKENS:-64}")
 instrument_args+=(-e benchmarkRunId "$run_id")
 instrument_args+=(-e thinkingOff "${THINKING_OFF:-false}" -e sustainedSeconds "${SUSTAINED_SECONDS:-0}" -e coolStart "${COOL_START:-false}")
 instrument_args+=(-e holdSeconds "${HOLD_SECONDS:-0}")
-# Preserve explicit experiment settings in the instrumentation output. Arrays avoid shell
-# interpretation of caller-provided revision/model strings.
+# Preserve explicit experiment settings in the instrumentation output. The array protects
+# local argument boundaries; quote again below because adb shell joins arguments remotely.
 instrument_args+=(-e activationType "${ACTIVATION_TYPE:-AUTO}")
 instrument_args+=(-e galleryEquivalent "${GALLERY_SAMPLER:-false}")
 instrument_args+=(-e cacheState "${CACHE_STATE:-uncontrolled}")
@@ -42,8 +43,9 @@ if [[ -n "$cpu_threads" ]]; then
 fi
 "$adb_bin" "${args[@]}" shell dumpsys thermalservice > "$output_dir/thermal-before.txt"
 "$adb_bin" "${args[@]}" logcat -c
-"$adb_bin" "${args[@]}" shell am instrument "${instrument_args[@]}" \
-  dev.yashasvm.mobie.test/androidx.test.runner.AndroidJUnitRunner | tee "$output_dir/instrumentation.txt"
+remote_command=$(python3 -c 'import shlex, sys; print(shlex.join(sys.argv[1:]))' \
+  am instrument "${instrument_args[@]}" dev.yashasvm.mobie.test/androidx.test.runner.AndroidJUnitRunner)
+"$adb_bin" "${args[@]}" shell "$remote_command" | tee "$output_dir/instrumentation.txt"
 "$adb_bin" "${args[@]}" logcat -d -s native:V litert:V tflite:V MobieCompute:V MobieGpuBenchmark:V MobieGpuSustained:V AndroidRuntime:E \
   > "$output_dir/native-logcat.txt"
 "$adb_bin" "${args[@]}" exec-out run-as dev.yashasvm.mobie cat files/gpu-benchmark.jsonl \
