@@ -57,6 +57,13 @@ class LiteRtGpuBenchmarkTest {
         val threads = args.getString("cpuThreads")?.toInt()
         val repetitions = (args.getString("repetitions")?.toInt() ?: 3).also { require(it in 1..20) }
         val outputTokens = (args.getString("outputTokens")?.toInt() ?: 64).also { require(it in 1..1024) }
+        // The short fixture stays the default so existing invocations keep their prompt ID and bytes.
+        val fixture = PromptFixture.fromArg(args.getString("promptFixture"))
+        val minDecodeTokens = (args.getString("minDecodeTokens")?.toInt() ?: fixture.defaultMinDecodeTokens).also {
+            require(it in fixture.minDecodeTokensFloor..outputTokens) {
+                "minDecodeTokens=$it must be in ${fixture.minDecodeTokensFloor}..outputTokens($outputTokens) for ${fixture.argName}"
+            }
+        }
         val thinkingOff = args.getString("thinkingOff") == "true"
         val sampler = if (args.getString("galleryEquivalent") == "true") {
             SamplerSettings(temperature = 1.0, topK = 64, topP = 0.95, seed = 0)
@@ -80,12 +87,14 @@ class LiteRtGpuBenchmarkTest {
                 put(JSONObject().put("name", File(path).name).put("sha256", sha256(File(path))))
             }
         }
-        val promptSha = MessageDigest.getInstance("SHA-256").digest(PROMPT.toByteArray(Charsets.UTF_8))
+        val promptBytes = fixture.prompt.toByteArray(Charsets.UTF_8)
+        val promptSha = MessageDigest.getInstance("SHA-256").digest(promptBytes)
             .joinToString("") { "%02x".format(it) }
         val sustainedSeconds = (args.getString("sustainedSeconds")?.toInt() ?: 0).also { require(it in 0..600) }
         val coolStart = args.getString("coolStart") == "true"
         val holdSeconds = (args.getString("holdSeconds")?.toInt() ?: 0).also { require(it in 0..120) }
         val resultFile = File(context.filesDir, "gpu-benchmark.jsonl")
+        val ineligibleIterations = mutableListOf<Int>()
         repeat(repetitions) { iteration ->
             if (coolStart) {
                 val power = context.getSystemService(PowerManager::class.java)
@@ -95,9 +104,10 @@ class LiteRtGpuBenchmarkTest {
                 }
                 check(power.currentThermalStatus == PowerManager.THERMAL_STATUS_NONE) { "Phone did not cool to thermal status NONE" }
             }
-            val result = measure(context, model, options, sampler, outputTokens, thinkingOff, sustainedSeconds, holdSeconds)
+            val result = measure(context, model, options, sampler, outputTokens, thinkingOff, sustainedSeconds, holdSeconds,
+                fixture, minDecodeTokens)
                 .put("iteration", iteration)
-                .put("benchmark_protocol", "mobie-production-adapter-v2")
+                .put("benchmark_protocol", "mobie-production-adapter-v3")
                 .put("comparison_target", "mobie_adapter_only")
                 .put("os_page_cache_controlled", false)
                 .put("persistent_cache_state", args.getString("cacheState") ?: "uncontrolled")
@@ -112,8 +122,12 @@ class LiteRtGpuBenchmarkTest {
                 .put("split_apks", splitApks)
                 .put("device_fingerprint", Build.FINGERPRINT)
                 .put("supported_abis", JSONArray(Build.SUPPORTED_ABIS.toList()))
-                .put("prompt_id", "local-ai-benefits-v1")
+                .put("prompt_fixture", fixture.argName)
+                .put("fixture_role", fixture.role)
+                .put("prompt_id", fixture.id)
                 .put("prompt_sha256", promptSha)
+                .put("prompt_bytes", promptBytes.size)
+                .put("min_native_decode_tokens", minDecodeTokens)
                 .put("model", model.name)
                 .put("artifact_bytes", model.length())
                 .put("artifact_sha256", sha)
@@ -141,11 +155,20 @@ class LiteRtGpuBenchmarkTest {
             if (backend != ComputeBackend.AUTO) {
                 assertTrue("Requested backend must be used: $result", result.getString("active_backend") == backend.name)
             }
+            if (fixture.role == ROLE_SUSTAINED && !result.optBoolean("all_generations_throughput_eligible")) {
+                ineligibleIterations += iteration
+            }
         }
+        // Short outputs are kept as raw rows; the run still fails so it is not mistaken for sustained evidence.
+        assertTrue(
+            "Sustained-decode fixture produced throughput-ineligible generations in iterations $ineligibleIterations; " +
+                "rows are retained in gpu-benchmark.jsonl",
+            ineligibleIterations.isEmpty(),
+        )
     }
 
     private suspend fun measure(context: Context, model: File, options: ComputeOptions, sampler: SamplerSettings, outputTokens: Int,
-        thinkingOff: Boolean, sustainedSeconds: Int, holdSeconds: Int): JSONObject =
+        thinkingOff: Boolean, sustainedSeconds: Int, holdSeconds: Int, fixture: PromptFixture, minDecodeTokens: Int): JSONObject =
         withContext(Dispatchers.Default) {
             coroutineScope {
                 val power = context.getSystemService(PowerManager::class.java)
@@ -185,6 +208,7 @@ class LiteRtGpuBenchmarkTest {
                     suspend fun generateSample(): JSONObject {
                         var chunks = 0
                         var thinkingChunks = 0
+                        var visibleChunks = 0
                         val visible = StringBuilder()
                         val sample = JSONObject().put("thermal_start", thermal())
                         val window = MeasurementWindow(Debug.getPss() * 1024L, thermal())
@@ -193,15 +217,20 @@ class LiteRtGpuBenchmarkTest {
                         activeWindow.set(window)
                         try {
                         withTimeout(5 * 60_000L) {
-                        adapter.generate(PROMPT, config = GenerationConfig(maxNewTokens = outputTokens, sampler = sampler)).collect { event ->
+                        adapter.generate(fixture.prompt, config = GenerationConfig(maxNewTokens = outputTokens, sampler = sampler)).collect { event ->
                             when (event) {
-                                is InferenceEvent.Token -> { chunks++; if (event.thinking) thinkingChunks++ else visible.append(event.text) }
+                                is InferenceEvent.Token -> {
+                                    chunks++
+                                    if (event.thinking) thinkingChunks++ else { visibleChunks++; visible.append(event.text) }
+                                }
                                 is InferenceEvent.Error -> sample.put("generation_error", event.message)
                                 is InferenceEvent.Stats -> {
                                     val stats = event.value
+                                    // decode_tokens is kept for older readers; native_decode_tokens names its source.
                                     sample.put("decode_tps", stats.tokensPerSecond)
                                         .put("prefill_tps", stats.prefillTokensPerSecond)
                                         .put("decode_tokens", stats.decodeTokenCount)
+                                        .put("native_decode_tokens", stats.decodeTokenCount)
                                         .put("prefill_tokens", stats.prefillTokenCount)
                                         .put("first_chunk_ms", stats.timeToFirstTokenMs)
                                         .put("first_visible_ms", stats.timeToFirstVisibleOutputMs)
@@ -220,17 +249,21 @@ class LiteRtGpuBenchmarkTest {
                             thermalMax.accumulateAndGet(thermalStatus, ::maxOf)
                             activeWindow.compareAndSet(window, null)
                         }
+                        // SDK callback chunks are not tokens; a chunk can carry several native tokens.
                         sample.put("thermal_end", thermal()).put("thinking_chunks", thinkingChunks)
+                            .put("sdk_chunks", chunks).put("visible_chunks", visibleChunks)
                             .put("thermal_max", window.thermalMax.get()).put("peak_pss_bytes", window.peakPss.get())
                             .put("visible_sha256", MessageDigest.getInstance("SHA-256").digest(visible.toString().toByteArray())
                                 .joinToString("") { "%02x".format(it) })
                         check(!sample.has("generation_error")) { sample.getString("generation_error") }
                         check(chunks > 0 && sample.optDouble("decode_tps") > 0.0) { "No measured output" }
                         if (thinkingOff) check(thinkingChunks == 0) { "Reasoning appeared despite thinking-off configuration" }
+                        recordThroughputEligibility(sample, fixture, minDecodeTokens, outputTokens)
                         return sample
                     }
                     val first = generateSample()
                     for (key in first.keys()) result.put(key, first.get(key))
+                    var allEligible = first.getBoolean("throughput_eligible")
                     if (holdSeconds > 0) {
                         android.util.Log.i("MobieGpuBenchmark", "Holding loaded engine for memory inspection; pid=${android.os.Process.myPid()}")
                         delay(holdSeconds * 1000L)
@@ -242,10 +275,13 @@ class LiteRtGpuBenchmarkTest {
                             adapter.resetConversation().getOrThrow()
                             val sample = generateSample().put("elapsed_ms", SystemClock.elapsedRealtime() - sustainedStart)
                             samples.put(sample)
+                            allEligible = allEligible && sample.getBoolean("throughput_eligible")
                             android.util.Log.i("MobieGpuSustained", sample.toString())
                         } while (SystemClock.elapsedRealtime() - sustainedStart < sustainedSeconds * 1000L)
                         result.put("samples", samples).put("measured_duration_ms", SystemClock.elapsedRealtime() - sustainedStart)
                     }
+                    // Covers the warm-up and every sustained sample; an early EOS anywhere disqualifies the row.
+                    result.put("all_generations_throughput_eligible", allEligible)
                 } catch (failure: Exception) {
                     result.put("error", failure.message ?: failure.javaClass.simpleName)
                 } finally {
@@ -269,6 +305,27 @@ class LiteRtGpuBenchmarkTest {
         }
     }
 
+    /**
+     * Labels whether a generation can count as native decode-throughput evidence. Nothing is
+     * dropped or retried here: ineligible generations stay in the row with their reason.
+     */
+    private fun recordThroughputEligibility(sample: JSONObject, fixture: PromptFixture, minDecodeTokens: Int, outputTokens: Int) {
+        val nativeTokens = if (sample.has("native_decode_tokens")) sample.getInt("native_decode_tokens") else null
+        val rate = sample.optDouble("decode_tps", Double.NaN)
+        val reason = when {
+            fixture.role == ROLE_LATENCY -> "latency_probe_fixture"
+            nativeTokens == null -> "native_decode_tokens_missing"
+            nativeTokens < minDecodeTokens -> "native_decode_tokens_below_minimum"
+            !rate.isFinite() || rate <= 0.0 -> "native_decode_rate_invalid"
+            else -> null
+        }
+        sample.put("min_native_decode_tokens", minDecodeTokens)
+            .put("short_output", nativeTokens != null && nativeTokens < minDecodeTokens)
+            .put("stopped_before_output_budget", if (nativeTokens == null) JSONObject.NULL else nativeTokens < outputTokens)
+            .put("throughput_eligible", reason == null)
+            .put("throughput_ineligible_reason", reason ?: JSONObject.NULL)
+    }
+
     private fun sha256(file: File): String {
         val digest = MessageDigest.getInstance("SHA-256")
         file.inputStream().use { stream ->
@@ -282,7 +339,52 @@ class LiteRtGpuBenchmarkTest {
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
+    /**
+     * Fixed prompt workloads. Changing any prompt text changes its recorded SHA-256 and must come
+     * with a new ID; the summarizer refuses to mix prompt identities.
+     */
+    private enum class PromptFixture(
+        val argName: String,
+        val id: String,
+        val role: String,
+        val prompt: String,
+        val defaultMinDecodeTokens: Int,
+        val minDecodeTokensFloor: Int,
+    ) {
+        /** Original prompt and ID, unchanged. It can stop after a couple of tokens, so it only probes latency. */
+        SHORT_LATENCY(
+            argName = "short-latency",
+            id = "local-ai-benefits-v1",
+            role = ROLE_LATENCY,
+            prompt = "Explain in a few concise sentences why local AI inference can be useful on a phone. /no_think",
+            defaultMinDecodeTokens = 0,
+            minDecodeTokensFloor = 0,
+        ),
+
+        /** A longer fixed task intended to keep native decode running well past the minimum token count. */
+        SUSTAINED_DECODE(
+            argName = "sustained-decode",
+            id = "phone-care-twelve-tips-v1",
+            role = ROLE_SUSTAINED,
+            prompt = "Write a numbered list of exactly twelve practical tips for keeping a phone running smoothly. " +
+                "For each tip, write two complete sentences that explain what to do and why it helps. " +
+                "Do not add an introduction or a conclusion. /no_think",
+            defaultMinDecodeTokens = 64,
+            minDecodeTokensFloor = 64,
+        ),
+        ;
+
+        companion object {
+            fun fromArg(value: String?): PromptFixture =
+                if (value == null) SHORT_LATENCY
+                else requireNotNull(entries.firstOrNull { it.argName == value }) {
+                    "Unknown promptFixture=$value; expected one of ${entries.map { it.argName }}"
+                }
+        }
+    }
+
     private companion object {
-        const val PROMPT = "Explain in a few concise sentences why local AI inference can be useful on a phone. /no_think"
+        const val ROLE_LATENCY = "latency_probe"
+        const val ROLE_SUSTAINED = "sustained_decode"
     }
 }

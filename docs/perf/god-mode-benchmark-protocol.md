@@ -56,6 +56,28 @@ Run CPU thread choices, GPU, activation, speculation and thinking as separate co
 
 ## Measurement overhead and limits
 
+### Sustained native decode fixture
+
+Protocol `mobie-production-adapter-v3` distinguishes two fixed prompt fixtures. `short-latency` preserves the original `local-ai-benefits-v1` prompt and remains the default. A short response can measure latency but cannot establish sustained decode throughput. Older rows without a fixture are treated as short latency probes.
+
+`sustained-decode` uses the fixed `phone-care-twelve-tips-v1` prompt. Rows record its ID, exact UTF-8 byte count, and SHA-256. The default eligibility threshold is 64 native decoded tokens. SDK chunk counts are recorded separately and never substitute for native token counts. Match the prompt, output budget, thinking settings, and threshold in both comparison conditions.
+
+For example, after installing the benchmark APKs and placing the same artifact on a physical ARM64 phone, run:
+
+```bash
+PROMPT_FIXTURE=sustained-decode OUTPUT_TOKENS=256 MIN_DECODE_TOKENS=64 \
+	SUSTAINED_SECONDS=120 BUILD_REVISION=$(git rev-parse HEAD) \
+	scripts/perf/run-gpu-benchmark.sh SERIAL APP_PRIVATE_MODEL_PATH CPU OUTPUT_DIR 1 4
+python3 docs/perf/summarize-gpu-results.py OUTPUT_DIR/cumulative-results.jsonl \
+	--fixture sustained-decode --backend CPU --cpu-threads 1
+```
+
+`SERIAL`, `APP_PRIVATE_MODEL_PATH`, and `OUTPUT_DIR` are operator inputs. The model path is relative to the app's private files directory. This command measures Mobie only. It does not run Gallery or verify matched Gallery settings.
+
+With `SUSTAINED_SECONDS` greater than zero, each outer repetition loads an engine, performs one warm-up generation, and collects measured samples. The summary aggregates those samples, including samples from outer iteration zero, and excludes each in-row warm-up. With no sustained interval, the summary excludes outer iteration zero and uses subsequent generations.
+
+Short outputs remain in raw rows with their native token count and eligibility reason. An ineligible generation makes the sustained fixture fail and prevents a success-only summary. The summary rejects missing, failed, short, and nonfinite measured samples and mixed prompt or configuration identities. It reports individual token counts through their range, median, standard deviation, and total, alongside decode-rate dispersion. These checks establish workload eligibility, not answer quality, physical-phone superiority, or a 2× speedup. Review outputs against the same task checks in both apps.
+
 The benchmark uses one 100 ms PSS/thermal monitor feeding both whole-run and per-generation peaks, with endpoint samples for short generations. This avoids two simultaneous page-map scans. PSS is still a sampled process-memory metric: it is not an exact peak, all device memory, or a complete GPU allocation accounting. The monitor itself can perturb the workload; keep its cadence matched and assess observer overhead separately.
 
 Adapter timings start within the adapter and do not include every ViewModel, Compose or displayed-frame delay. Add a send-click timestamp and a first-rendered-answer marker to an end-to-end trace when evaluating perceived responsiveness. Keep native decode rate separate from these app timings. APK/model checksums and input setup must remain outside the reported timed region, with their cache effects disclosed.
