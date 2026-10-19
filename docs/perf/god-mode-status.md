@@ -38,4 +38,17 @@ The inherited Kotlin 2.3.0 / AGP 8.7.3 combination emitted R8 Kotlin metadata pa
 - https://developer.android.com/build/releases/agp-8-13-0-release-notes
 - https://kotlinlang.org/docs/gradle-configure-project.html
 
-This aligns the declared compiler and optimizer versions, but the first rebuilt release still emits metadata warnings, so dependency metadata is under investigation. It is not a demonstrated inference-speed improvement. Warnings alone did not prove the previous APK was miscompiled. The optimized APK still requires release JNI preservation checks and exact-build device validation.
+Inspection of resolved release inputs then identified Kotlin 2.4 metadata in LiteRT-LM 0.18.0's own Engine, EngineConfig and Conversation classes, and its required reflect/stdlib 2.4.0 dependencies. R8 8.13.19 therefore still emitted 100 metadata warnings. Coroutines 1.11.0 was not the source (its metadata is 2.2).
+
+The targeted candidate is the official R8 9.1.29 override, the documented minimum for Kotlin 2.4, while retaining AGP 8.13.2. Because Google Maven did not serve this version, the build uses Google's official R8 stable archive, scoped to the R8 module only. This does not add an application network destination. Validation must identify R8 9.1.29 in mapping output and show the warnings are absent; no broad AGP migration or runtime dependency downgrade is intended.
+
+- https://developer.android.com/build/kotlin-support
+- https://r8.googlesource.com/r8/+/refs/heads/main/README.md#replacing-r8-in-android-gradle-plugin
+
+This is not a demonstrated inference-speed improvement. Warnings alone did not prove the previous APK was miscompiled. The optimized APK still requires release JNI preservation checks and exact-build device validation.
+
+### Validated optimizer checkpoint
+
+The targeted R8 9.1.29 build completed all 135 tasks: unit tests, lint, debug APK, instrumentation APK and optimized release APK. Mapping identifies R8 9.1.29; metadata parse warnings fell from 100 to zero. The release verifier checks 110 SDK mapping entries and all four JNI callbacks; 10 verifier fixtures and six benchmark-summary fixtures pass. The verifier now recognizes R8-generated classes by class-level source and synthesized metadata, without exempting required JNI classes or accepting member-level synthetic markers. No keep rule was weakened. CI rejects recurrence of metadata parse warnings.
+
+The new opt-in LiteRtConversationReconfigurationTest compiles and is included in runtime E2E CI. It verifies actual engine-object retention, changed conversation/sampler/history, fail-closed rejection and full-reload recovery using the existing pinned Qwen fixture. Execution is pending; it is not a timing benchmark or physical ARM64 evidence.

@@ -29,7 +29,11 @@ jobs:
         run: |
           python3 scripts/test_verify_litert_release.py
           python3 scripts/perf/test_summarize_gpu_results.py
-          ./gradlew --no-daemon assembleRelease
+          ./gradlew --no-daemon assembleRelease 2>&1 | tee release-build.log
+          if grep -q 'An error occurred when parsing kotlin metadata' release-build.log; then
+            echo "::error::R8 cannot parse dependency Kotlin metadata; use a compatible optimizer."
+            exit 1
+          fi
           python3 scripts/verify-litert-release.py app/build/outputs/mapping/release/mapping.txt
       - name: Upload debug APK
         if: success()
@@ -99,7 +103,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -memory 4096
           disable-animations: true
           script: |
-            ./gradlew --no-daemon connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=dev.yashasvm.mobie.LiteRtEndToEndTest,dev.yashasvm.mobie.LiteRtCpuThreadBenchmarkTest -Pandroid.testInstrumentationRunnerArguments.litertE2E=true
+            ./gradlew --no-daemon connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=dev.yashasvm.mobie.LiteRtEndToEndTest,dev.yashasvm.mobie.LiteRtCpuThreadBenchmarkTest,dev.yashasvm.mobie.LiteRtConversationReconfigurationTest -Pandroid.testInstrumentationRunnerArguments.litertE2E=true
             adb pull /sdcard/mobie-qwen-e2e.png mobie-qwen-e2e.png || echo "::warning::Runtime passed without screenshot evidence"
             adb pull /sdcard/mobie-qwen-e2e-metrics.txt mobie-qwen-e2e-metrics.txt || echo "::warning::Runtime passed without metrics evidence"
             adb pull /sdcard/mobie-cpu-thread-benchmark.txt mobie-cpu-thread-benchmark.txt || echo "::warning::CPU thread benchmark passed without metrics evidence"
