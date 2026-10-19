@@ -67,8 +67,15 @@ class LiteRtConversationReconfigureBenchmarkTest {
         withTimeout(30 * 60_000L) {
             val instrumentation = InstrumentationRegistry.getInstrumentation()
             val context = instrumentation.targetContext
-            val model = verifiedFixture(context, arguments.getString("modelPath"))
             val evidenceDir = File(checkNotNull(context.getExternalFilesDir(null)), "benchmarks")
+            // An early fixture/hash failure must not leave an earlier successful run as evidence.
+            withContext(Dispatchers.IO) {
+                listOf("json", "csv", "json.part", "csv.part").forEach { extension ->
+                    val previous = File(evidenceDir, "$BASENAME.$extension")
+                    check(!previous.exists() || previous.delete()) { "Cannot clear prior benchmark evidence" }
+                }
+            }
+            val model = verifiedFixture(context, arguments.getString("modelPath"))
             val report = withContext(Dispatchers.IO) {
                 JSONObject()
                     .put("protocol", "mobie-conversation-reconfigure-emulator-v1")
