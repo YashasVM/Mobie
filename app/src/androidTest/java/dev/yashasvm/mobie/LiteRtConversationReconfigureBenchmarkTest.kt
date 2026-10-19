@@ -71,7 +71,10 @@ class LiteRtConversationReconfigureBenchmarkTest {
             val evidenceDir = File(checkNotNull(context.getExternalFilesDir(null)), "benchmarks")
             // An early fixture/hash failure must not leave an earlier successful run as evidence.
             withContext(Dispatchers.IO) {
-                shellChecked("rm -f /sdcard/$BASENAME.json /sdcard/$BASENAME.csv")
+                shellOutput("rm -f /sdcard/$BASENAME.json /sdcard/$BASENAME.csv")
+                listOf("json", "csv").forEach { extension ->
+                    check(shellOutput("cat /sdcard/$BASENAME.$extension").isEmpty()) { "Cannot clear exported benchmark evidence" }
+                }
                 listOf("json", "csv", "json.part", "csv.part").forEach { extension ->
                     val previous = File(evidenceDir, "$BASENAME.$extension")
                     check(!previous.exists() || previous.delete()) { "Cannot clear prior benchmark evidence" }
@@ -333,17 +336,20 @@ class LiteRtConversationReconfigureBenchmarkTest {
         // connectedAndroidTest may uninstall the target after execution, deleting externalFilesDir.
         // Export only these synthetic benchmark artifacts before teardown so CI can retrieve them.
         listOf("json", "csv").forEach { extension ->
-            shellChecked("cp ${shellQuote(File(directory, "$BASENAME.$extension").absolutePath)} /sdcard/$BASENAME.$extension")
+            val source = File(directory, "$BASENAME.$extension")
+            val destination = "/sdcard/$BASENAME.$extension"
+            // UiAutomation uses Runtime.exec(String), not a shell parser. These app-owned paths
+            // must be plain argv tokens: quotes and && would be passed literally to cp.
+            check(source.absolutePath.matches(Regex("[A-Za-z0-9_./-]+"))) { "Unexpected benchmark export path" }
+            shellOutput("cp ${source.absolutePath} $destination")
+            val exportedHash = shellOutput("sha256sum $destination").trim().substringBefore(' ')
+            check(exportedHash == sha256(source)) { "Benchmark evidence export checksum mismatch" }
         }
     }
 
-    private fun shellQuote(value: String): String = "'" + value.replace("'", "'\\''") + "'"
-
-    private fun shellChecked(command: String) {
-        val descriptor = InstrumentationRegistry.getInstrumentation().uiAutomation
-            .executeShellCommand("$command && echo MOBIE_BENCHMARK_EXPORT_OK")
-        val output = ParcelFileDescriptor.AutoCloseInputStream(descriptor).bufferedReader().use { it.readText() }
-        check(output.trimEnd().endsWith("MOBIE_BENCHMARK_EXPORT_OK")) { "Benchmark evidence export failed: $output" }
+    private fun shellOutput(command: String): String {
+        val descriptor = InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command)
+        return ParcelFileDescriptor.AutoCloseInputStream(descriptor).bufferedReader().use { it.readText() }
     }
 
     private fun nativeField(runtime: LiteRtLmRuntimeAdapter, name: String): Any? =
