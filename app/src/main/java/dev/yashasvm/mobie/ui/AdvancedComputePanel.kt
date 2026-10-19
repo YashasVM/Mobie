@@ -320,6 +320,7 @@ internal fun ComputeSettingsSheet(
                     measurements = state.decodeMeasurements, backendAdmissions = backendAdmissions,
                     options = state.computeOptions, sampler = state.sampler,
                     capabilities = state.computeCapabilities, activeCompute = state.activeCompute,
+                    appliedOptions = state.appliedComputeOptions,
                     needsApply = state.computeNeedsApply, loaded = state.appliedComputeOptions != null,
                     runtimeState = state.runtimeState, downloaded = state.downloadedPath != null,
                     onOptionsChange = onOptionsChange, onSamplerChange = onSamplerChange, onApply = onApply, onReset = onReset,

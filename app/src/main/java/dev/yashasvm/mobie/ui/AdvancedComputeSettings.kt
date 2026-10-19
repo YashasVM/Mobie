@@ -13,6 +13,7 @@ import dev.yashasvm.mobie.core.runtime.ComputeBackend
 import dev.yashasvm.mobie.core.runtime.ComputeCapabilities
 import dev.yashasvm.mobie.core.runtime.ComputeOptions
 import dev.yashasvm.mobie.core.runtime.RuntimeComputeSettings
+import dev.yashasvm.mobie.core.runtime.RuntimeConversationReconfigurationPolicy
 import dev.yashasvm.mobie.core.runtime.SamplerSettings
 
 /** Persisted options are preferences, never evidence that a configuration works on a phone. */
@@ -128,6 +129,17 @@ internal object AdvancedComputePolicy {
         return options.copy(artifactIdentity = "") != applied.copy(artifactIdentity = "") ||
             sampler != (appliedSampler ?: SamplerSettings())
     }
+
+    /**
+     * False when only conversation settings or the sampler differ from the loaded engine, so Apply
+     * can keep the model loaded. Both sides describe the selected artifact; the ViewModel and
+     * runtime still verify its exact identity and fall back to a full reload when unproven.
+     */
+    fun changesNeedReload(options: ComputeOptions, applied: ComputeOptions?): Boolean = applied == null ||
+        !RuntimeConversationReconfigurationPolicy.canRetainEngine(
+            applied.copy(artifactIdentity = SELECTED_ARTIFACT), options.copy(artifactIdentity = SELECTED_ARTIFACT))
+
+    private const val SELECTED_ARTIFACT = "selected"
 }
 
 /**

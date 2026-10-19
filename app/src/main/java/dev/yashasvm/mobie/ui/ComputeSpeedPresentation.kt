@@ -5,8 +5,11 @@ import dev.yashasvm.mobie.core.device.DecodeSpeed
 import dev.yashasvm.mobie.core.device.DecodeSpeedConfidence
 import dev.yashasvm.mobie.core.device.DecodeSpeedSource
 import dev.yashasvm.mobie.core.device.HardwareProfile
+import dev.yashasvm.mobie.core.device.DecodeRunSettings
 import dev.yashasvm.mobie.core.model.CompatibilityResult
+import dev.yashasvm.mobie.core.runtime.ActiveCompute
 import dev.yashasvm.mobie.core.runtime.ComputeBackend
+import dev.yashasvm.mobie.core.runtime.ComputeOptions
 import java.util.Locale
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -56,6 +59,26 @@ internal fun decodeSpeedSourceLabel(speed: DecodeSpeed, exactSettings: Boolean =
         val runs = if (speed.sampleCount == 1) "last run" else "${speed.sampleCount} recent runs"
         if (exactSettings) "measured on this phone · $runs" else "measured at different settings · $runs"
     }
+}
+
+/**
+ * The settings a backend row's speed is looked up with. Activation and speculation always come from
+ * [pending]. The engine's resolved CPU/context counts are added only for the row it is running on,
+ * and only while [pending] asks for exactly the settings it was loaded with; otherwise pending or
+ * unloaded choices would borrow another configuration's exact measurements.
+ */
+internal fun decodeLookupSettings(
+    pending: ComputeOptions,
+    applied: ComputeOptions?,
+    activeCompute: ActiveCompute?,
+    row: ComputeBackend,
+): DecodeRunSettings {
+    val running = applied != null && activeCompute != null && activeCompute.backend == row &&
+        pending.backend == applied.backend && pending.cpuThreads == applied.cpuThreads &&
+        pending.contextTokens == applied.contextTokens && pending.activationType == applied.activationType &&
+        pending.speculativeDecoding == applied.speculativeDecoding
+    return if (running) DecodeRunSettings.fromApplied(checkNotNull(applied), activeCompute)
+    else DecodeRunSettings(pending.cpuThreads, pending.contextTokens, pending.activationType, pending.speculativeDecoding)
 }
 
 /** One backend row's RAM, e.g. `needs ~3.6 GB RAM · Free memory first`; null when the size is unknown. */

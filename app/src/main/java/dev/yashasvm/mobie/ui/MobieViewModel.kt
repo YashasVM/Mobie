@@ -145,6 +145,12 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     private val runtimeOperation = AtomicLong(0L)
     private val selectionRevision = AtomicLong(0L)
     private val runtimeOwnership = RuntimeModelOwnership()
+    /**
+     * The exact engine that is loaded and healthy, or null whenever that is not proven. Written only
+     * under [runtimeLifecycle] (or cleared, which is always safe) on the main thread. Unlike
+     * [runtimeOwnership], which assumes ownership when unsure, this is what reuse decisions trust.
+     */
+    private var loadedEngine: LoadedEngine? = null
     private val credentialAccess = Mutex()
     // One writer at a time keeps preference and history saves in the order they were made.
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -232,7 +238,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             }
             val opened = { mutableState.update { it.copy(launchResolved = true, openingChat = false) } }
             mutableState.update { it.copy(openingChat = true) }
-            beginSelection(entry.model, onSuperseded = opened) {
+            beginSelection(entry.model, onSuperseded = opened, retainLoadedEngine = true) {
                 try {
                     openChat(entry.localPath)
                 } finally {
@@ -280,8 +286,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                         return@launch
                     }
                     val operation = runtimeOperation.get()
-                    container.runtimes.all().forEach { it.unload() }
-                    runtimeOwnership.clear()
+                    unloadAllRuntimes()
                     if (isCurrentRuntimeOperation(operation)) {
                         mutableState.update {
                             it.copy(runtimeState = RuntimeState.IDLE, activeCompute = null, imageInputReady = false, stats = null)
@@ -361,6 +366,8 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         mutableState.update { it.copy(chatting = true, runtimeState = RuntimeState.LOADING, activeCompute = null,
             stats = null, telemetry = RunTelemetry(), error = null) }
         inferenceJob = viewModelScope.launch {
+            // Conversation-only changes keep the loaded weights. Engine changes take the preflighted reload below.
+            if (reconfigureLoadedConversation(model, artifact, path, current, operation)) return@launch
             val device = readDeviceProfile()
             if (!isCurrentRuntimeOperation(operation) || selectionRevision.get() != revision || state.value.selectedArtifact != artifact) return@launch
             val compatibility = container.compatibility.resolve(admissionArtifact(artifact), device,
@@ -375,6 +382,67 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             loadRuntimeConversation(model, artifact, path, current.messages, preferReset = false, operation = operation,
                 preserveLoadedEngineOnFailure = true)
         }
+    }
+
+    /**
+     * Replaces only the conversation when the loaded engine provably matches every engine-level
+     * setting. Returns false, without touching the runtime, when a full reload is needed instead;
+     * true once this operation is finished or superseded. Settings are published only on success.
+     * Any failure leaves no usable conversation, so the engine is unloaded and chat shows an error.
+     */
+    private suspend fun reconfigureLoadedConversation(
+        model: AiModel,
+        artifact: ModelArtifact,
+        path: String,
+        before: MobieUiState,
+        operation: Long,
+    ): Boolean {
+        computePreferences.join()
+        if (!isCurrentRuntimeOperation(operation)) return true
+        val adapter = container.runtimes.adapterFor(artifact.format) ?: return false
+        val latest = state.value
+        val options = AdvancedComputePolicy.forArtifact(latest.computeOptions,
+            latest.hardware?.cpuCoreCount ?: Runtime.getRuntime().availableProcessors(), latest.computeCapabilities)
+        val sampler = AdvancedComputePolicy.sampler(latest.sampler)
+        val identity = modelPerformanceIdentity(model.id, artifact)
+        var unloadFailure: String? = null
+        val result = runtimeLifecycle.withLock {
+            if (!isCurrentRuntimeOperation(operation)) return true
+            val requested = LoadedEnginePolicy.requested(options, identity, Runtime.getRuntime().availableProcessors())
+            val retained = loadedEngine
+            if (retained == null || !LoadedEnginePolicy.canReconfigure(retained, model.id, path, model.supportsVision,
+                    requested, before.runtimeState, adapter.activeCompute)
+            ) return false
+            // Until success is confirmed, nothing may reuse this engine: even a cancelled attempt breaks the conversation.
+            loadedEngine = null
+            val outcome = try {
+                adapter.reconfigureConversation(requested, sampler, before.messages.toRuntimeMessages())
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                Result.failure(error)
+            }
+            if (outcome.isSuccess) {
+                loadedEngine = retained.copy(options = requested, sampler = sampler)
+            } else {
+                // The runtime refuses every later load until it is unloaded, and the old conversation is gone.
+                unloadFailure = try {
+                    unloadAllRuntimes()
+                    null
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    error.message ?: "The model could not be unloaded. Restart Mobie before loading a model."
+                }
+            }
+            outcome
+        }
+        if (!isCurrentRuntimeOperation(operation)) return true
+        mutableState.update {
+            if (result.isSuccess) it.afterReconfigured(options, sampler, adapter.activeCompute, adapter.supportsImageInput)
+            else it.afterFailedReconfigure(result.exceptionOrNull()?.message, unloadFailure)
+        }
+        return true
     }
 
     fun loadFeatured() = loadCatalog { container.catalog.featured() }
@@ -432,33 +500,43 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     /**
      * Stops the previous model's work now, then applies the new selection once the device profile
      * is read off the main thread. A newer selection made in the meantime supersedes this one.
+     *
+     * With [retainLoadedEngine], reopening the loaded model's chat keeps its engine for [afterSelect]
+     * (openChat), which reuses it only after proving it matches exactly. If nothing started a newer
+     * runtime operation by the end, the engine is released here as it would have been up front.
      */
     private fun beginSelection(
         model: AiModel?,
         onSuperseded: () -> Unit = {},
+        retainLoadedEngine: Boolean = false,
         afterSelect: (suspend () -> Unit)? = null,
     ) {
         downloadObserverJob?.cancel()
         cancelInference()
         val operation = nextRuntimeOperation()
-        viewModelScope.launch { unloadRuntime(operation) }
+        val retain = retainLoadedEngine && afterSelect != null && model != null && loadedEngine?.modelId == model.id
+        if (!retain) viewModelScope.launch { unloadRuntime(operation) }
         val revision = selectionRevision.incrementAndGet()
         viewModelScope.launch {
-            val applied = try {
-                val device = readDeviceProfile()
-                selectionRevision.get() == revision && applySelection(model, device, revision)
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                // A failed read must not crash the app or leave a waiting caller (the launch screen) hanging.
-                mutableState.update { it.copy(error = error.message ?: "This model couldn't be opened.") }
-                false
+            try {
+                val applied = try {
+                    val device = readDeviceProfile()
+                    selectionRevision.get() == revision && applySelection(model, device, revision)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    // A failed read must not crash the app or leave a waiting caller (the launch screen) hanging.
+                    mutableState.update { it.copy(error = error.message ?: "This model couldn't be opened.") }
+                    false
+                }
+                if (!applied) {
+                    onSuperseded()
+                    return@launch
+                }
+                afterSelect?.invoke()
+            } finally {
+                if (retain) withContext(NonCancellable) { unloadRuntime(operation) }
             }
-            if (!applied) {
-                onSuperseded()
-                return@launch
-            }
-            afterSelect?.invoke()
         }
     }
 
@@ -620,7 +698,8 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         launchHistoryWrite(model.id) { container.chatHistory.setLastModelId(model.id) }
         cancelInference()
         inferenceJob = viewModelScope.launch {
-            loadRuntimeConversation(model, artifact, path, history, preferReset = false,
+            // A retained engine is reused only when it is exactly this artifact with these settings.
+            loadRuntimeConversation(model, artifact, path, history, preferReset = true,
                 operation = operation, allowReclaim = allowReclaim)
         }
     }
@@ -644,14 +723,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             }
             return
         }
-        val restored = history.map {
-            RuntimeMessage(
-                fromUser = it.fromUser,
-                text = it.text,
-                interrupted = it.interrupted,
-                imagePath = it.imagePath,
-            )
-        }
+        val restored = history.toRuntimeMessages()
         val loadState = state.value
         val preserveLoadedSettings = !preserveLoadedEngineOnFailure && runtimeOwnership.owns(model.id)
         val options = AdvancedComputePolicy.forArtifact(
@@ -659,32 +731,33 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             loadState.hardware?.cpuCoreCount ?: Runtime.getRuntime().availableProcessors(), loadState.computeCapabilities)
         val sampler = AdvancedComputePolicy.sampler(
             if (preserveLoadedSettings) loadState.appliedSampler ?: loadState.sampler else loadState.sampler)
-        val settingsUnchanged = loadState.appliedComputeOptions == options && loadState.appliedSampler == sampler
+        val identity = modelPerformanceIdentity(model.id, artifact)
         val result = try {
             runtimeLifecycle.withLock {
                 if (!isCurrentRuntimeOperation(operation)) return
-                adapter.configureCompute(options.copy(artifactIdentity = modelPerformanceIdentity(model.id, artifact)))
+                // Normalized here, beside configureCompute, so the record matches what the runtime loads.
+                val requested = LoadedEnginePolicy.requested(options, identity, Runtime.getRuntime().availableProcessors())
+                adapter.configureCompute(options.copy(artifactIdentity = identity))
                 adapter.configureSampler(sampler)
-                if (preferReset && settingsUnchanged && runtimeOwnership.owns(model.id)) {
+                // Only the exact loaded engine (artifact, file, vision mode, every setting) is reused.
+                if (preferReset && LoadedEnginePolicy.canReuse(loadedEngine, model.id, path, model.supportsVision, requested, sampler)) {
                     val reset = adapter.resetConversation(restored)
-                    if (reset.isSuccess) {
-                        reset
-                    } else {
-                        container.runtimes.all().forEach { it.unload() }
-                        runtimeOwnership.clear()
-                        (if (allowReclaim) adapter.loadAllowingMemoryReclaim(path, model.supportsVision, restored)
-                         else adapter.load(path, model.supportsVision, restored)).also { loaded ->
-                            if (loaded.isSuccess) runtimeOwnership.markLoaded(model.id)
-                        }
-                    }
-                } else {
-                    if (!preserveLoadedEngineOnFailure || !runtimeOwnership.owns(model.id)) {
-                        container.runtimes.all().forEach { it.unload() }
-                        runtimeOwnership.clear()
-                    }
-                    (if (allowReclaim) adapter.loadAllowingMemoryReclaim(path, model.supportsVision, restored)
-                     else adapter.load(path, model.supportsVision, restored)).also { loaded ->
-                        if (loaded.isSuccess) runtimeOwnership.markLoaded(model.id)
+                    if (reset.isSuccess) return@withLock reset
+                    unloadAllRuntimes()
+                } else if (!preserveLoadedEngineOnFailure || loadedEngine?.modelId != model.id || adapter.activeCompute == null) {
+                    // An engine in an unproven state is released first; the runtime refuses loads until it is.
+                    unloadAllRuntimes()
+                }
+                val previous = loadedEngine
+                loadedEngine = null
+                (if (allowReclaim) adapter.loadAllowingMemoryReclaim(path, model.supportsVision, restored)
+                 else adapter.load(path, model.supportsVision, restored)).also { loaded ->
+                    if (loaded.isSuccess) {
+                        runtimeOwnership.markLoaded(model.id)
+                        loadedEngine = LoadedEngine(model.id, path, model.supportsVision, requested, sampler)
+                    } else if (previous != null && adapter.activeCompute != null) {
+                        // Refused before anything was released, so the previous engine still answers unchanged.
+                        loadedEngine = previous
                     }
                 }
             }
@@ -771,15 +844,17 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                                 messages = it.messages.attachStatsToLastAssistant(event.value),
                             )
                         }
-                        viewModelScope.launch {
-                            // Settings are the requested ones the engine was loaded with, so the key matches what the user chose.
-                            val applied = current.appliedComputeOptions ?: current.effectiveComputeOptions
-                            val settings = DecodeRunSettings(cpuThreads = applied.cpuThreads, contextTokens = applied.contextTokens)
-                            val measurements = decodeSpeeds.record(modelPerformanceIdentity(model.id, artifact), event.value, settings)
-                            mutableState.update {
-                                if (it.selected?.id == model.id && it.selectedArtifact == artifact) {
-                                    it.copy(decodeMeasurements = measurements)
-                                } else it
+                        // The engine's requested settings plus what it resolved. Without applied settings the
+                        // configuration is unknown, so the run is not attributed to any settings group.
+                        current.appliedComputeOptions?.let { applied ->
+                            viewModelScope.launch {
+                                val settings = DecodeRunSettings.fromApplied(applied, event.value.compute)
+                                val measurements = decodeSpeeds.record(modelPerformanceIdentity(model.id, artifact), event.value, settings)
+                                mutableState.update {
+                                    if (it.selected?.id == model.id && it.selectedArtifact == artifact) {
+                                        it.copy(decodeMeasurements = measurements)
+                                    } else it
+                                }
                             }
                         }
                     }
@@ -794,6 +869,8 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                     }
                     is InferenceEvent.Error -> {
                         telemetryJob?.cancel()
+                        // The runtime refuses reuse until unloaded; the next load must release it first.
+                        if (event.requiresReload) loadedEngine = null
                         val messages = state.value.messages.finishInterruptedReply()
                         persistHistory(model.id, sessionId, messages)
                         mutableState.update {
@@ -929,7 +1006,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun startInstalledChat(entry: InstalledModelEntry) {
-        beginSelection(entry.model) {
+        beginSelection(entry.model, retainLoadedEngine = true) {
             if (awaitHistoryWrite { container.chatHistory.startNewSession(entry.model.id) }) {
                 openChat(entry.localPath)
             }
@@ -944,10 +1021,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             val deleted = try {
                 runtimeLifecycle.withLock {
                     if (operation != null && !isCurrentRuntimeOperation(operation)) return@withLock false
-                    if (deletingSelectedModel || runtimeOwnership.owns(entry.model.id)) {
-                        container.runtimes.all().forEach { it.unload() }
-                        runtimeOwnership.clear()
-                    }
+                    if (deletingSelectedModel || runtimeOwnership.owns(entry.model.id)) unloadAllRuntimes()
                     if (operation != null && !isCurrentRuntimeOperation(operation)) return@withLock false
                     container.downloads.deleteInstalled(entry.model)
                 }
@@ -1001,12 +1075,18 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /** Call under [runtimeLifecycle]. The record is cleared first, so a failed unload never looks reusable. */
+    private suspend fun unloadAllRuntimes() {
+        loadedEngine = null
+        container.runtimes.all().forEach { it.unload() }
+        runtimeOwnership.clear()
+    }
+
     private suspend fun unloadRuntime(operation: Long) {
         try {
             runtimeLifecycle.withLock {
                 if (!isCurrentRuntimeOperation(operation)) return
-                container.runtimes.all().forEach { it.unload() }
-                runtimeOwnership.clear()
+                unloadAllRuntimes()
             }
         } catch (error: CancellationException) {
             throw error
@@ -1189,6 +1269,10 @@ internal fun List<ChatMessage>.updateLastAssistant(chunk: String, thinkingChunk:
         }
         this[index] = message.copy(text = answer, thinking = thinking, rawText = newRawText)
     }
+}
+
+private fun List<ChatMessage>.toRuntimeMessages(): List<RuntimeMessage> = map {
+    RuntimeMessage(fromUser = it.fromUser, text = it.text, interrupted = it.interrupted, imagePath = it.imagePath)
 }
 
 internal fun List<ChatMessage>.markLastAssistantInterrupted(): List<ChatMessage> {

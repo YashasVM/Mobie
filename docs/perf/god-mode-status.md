@@ -14,9 +14,15 @@ One open PR: #36, titled GOD MODE. Existing terminal UI/GPU work is preserved. M
 
 ## Not complete
 
-The new fast path and complete speed-history identity must still be wired into the ViewModel/presentation by Claude, as requested by the owner. Until then, the runtime API is not a shipped interaction-speed improvement and the UI recording call site still needs its full applied configuration. Do not claim an end-to-end speed gain from this checkpoint.
+Presentation wiring implemented by Claude Opus with an Opus test-design subagent; local build/test passed, exact-head CI and independent review pending:
 
-Independent Claude review is also pending. The prior Claude sign-in did not survive the cloud workspace reset. No alternative model is being represented as Claude.
+- Apply calls `reconfigureConversation` only when the ViewModel's lock-guarded record proves the READY engine has the same artifact identity, file and vision mode, and `RuntimeConversationReconfigurationPolicy` admits the change. Thread counts are normalized as the runtime normalizes them. Engine-level changes keep the preflighted full reload with refusal preservation. Settings publish only on success. Any failure unloads the engine and shows an error; READY is never restored.
+- Reopening the loaded model's chat (`openLastChat`, `startInstalledChat`) keeps the engine until `openChat` proves an exact match (artifact, file, vision, every setting, sampler). It then only resets history; otherwise it unloads and fully loads, as before.
+- Speed history records `DecodeRunSettings.fromApplied`. Model-page lookup includes activation/speculation and uses resolved CPU/context only for the running backend's row while the pending engine settings equal the applied ones.
+
+These avoid reload work. No end-to-end speed gain is claimed until it is measured on a physical ARM64 device.
+
+Independent Claude review started but did not complete before a provider session limit. It must resume before this checkpoint is represented as reviewed. No alternative model is being represented as Claude.
 
 No exact-build physical ARM64 result exists for this checkpoint. Neither a Kotlin unit test nor an x86 emulator establishes superiority over Google AI Edge Gallery, native GPU correctness, thermal behavior, or measured token throughput.
 
@@ -51,4 +57,8 @@ This is not a demonstrated inference-speed improvement. Warnings alone did not p
 
 The targeted R8 9.1.29 build completed all 135 tasks: unit tests, lint, debug APK, instrumentation APK and optimized release APK. Mapping identifies R8 9.1.29; metadata parse warnings fell from 100 to zero. The release verifier checks 110 SDK mapping entries and all four JNI callbacks; 10 verifier fixtures and six benchmark-summary fixtures pass. The verifier now recognizes R8-generated classes by class-level source and synthesized metadata, without exempting required JNI classes or accepting member-level synthetic markers. No keep rule was weakened. CI rejects recurrence of metadata parse warnings.
 
-The new opt-in LiteRtConversationReconfigurationTest compiles and is included in runtime E2E CI. It verifies actual engine-object retention, changed conversation/sampler/history, fail-closed rejection and full-reload recovery using the existing pinned Qwen fixture. Execution is pending; it is not a timing benchmark or physical ARM64 evidence.
+The new opt-in LiteRtConversationReconfigurationTest compiles and is included in runtime E2E CI. It verifies actual engine-object retention, changed conversation/sampler/history, fail-closed rejection and full-reload recovery using the existing pinned Qwen fixture. At core checkpoint 0fd68c1, the test executed and passed in CI (JUnit verified), alongside text lifecycle, vision and UI smoke checks. It is not a timing benchmark or physical ARM64 evidence.
+
+### Presentation checkpoint validation
+
+Local testDebugUnitTest, lintDebug, assembleDebug, assembleDebugAndroidTest and assembleRelease passed after the Opus presentation changes: 572 unit tests, zero failures/errors/skips. Release JNI verification again checked 110 SDK mapping entries and all four callbacks. The focused tests exercise reuse admission, safe error states and speed-history identity. Repeated/cancelled Apply are not yet covered by an actual ViewModel integration harness; policy-level tests alone do not establish that end-to-end behavior. Exact-head emulator CI and independent Claude review remain gates.

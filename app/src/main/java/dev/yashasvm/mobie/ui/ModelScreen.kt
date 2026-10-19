@@ -74,7 +74,6 @@ import dev.yashasvm.mobie.core.device.BackendAdmission
 import dev.yashasvm.mobie.core.device.CompatibilityResolver
 import dev.yashasvm.mobie.core.device.CpuThreadPolicy
 import dev.yashasvm.mobie.core.device.DecodeMeasurement
-import dev.yashasvm.mobie.core.device.DecodeRunSettings
 import dev.yashasvm.mobie.core.device.DecodeSpeedEstimator
 import dev.yashasvm.mobie.core.device.matchDecodeMeasurement
 import dev.yashasvm.mobie.core.device.HardwareProfile
@@ -154,6 +153,7 @@ internal fun ModelScreen(
                     sampler = state.sampler,
                     capabilities = state.computeCapabilities,
                     activeCompute = state.activeCompute,
+                    appliedOptions = state.appliedComputeOptions,
                     needsApply = state.computeNeedsApply,
                     loaded = state.appliedComputeOptions != null,
                     runtimeState = state.runtimeState,
@@ -556,7 +556,7 @@ internal fun ComputeSettingsPanel(
     modifier: Modifier = Modifier,
     hardware: HardwareProfile? = null,
     artifactSizeBytes: Long = 0,
-    /** Past runs on this phone. Each speed row shows the closest run for the current thread and context settings. */
+    /** Past runs on this phone. Each speed row shows the closest run with the same activation and speculation. */
     measurements: List<DecodeMeasurement> = emptyList(),
     /** Per requested backend: what it would run and its RAM. Empty hides the RAM lines. */
     backendAdmissions: Map<ComputeBackend, BackendAdmission> = emptyMap(),
@@ -564,6 +564,8 @@ internal fun ComputeSettingsPanel(
     sampler: SamplerSettings = SamplerSettings(),
     capabilities: ComputeCapabilities? = null,
     activeCompute: ActiveCompute? = null,
+    /** What the loaded engine runs with; null when nothing is loaded. */
+    appliedOptions: ComputeOptions? = null,
     needsApply: Boolean = false,
     /** Whether an engine is loaded with saved settings. Pending changes only ask for a reload then. */
     loaded: Boolean = false,
@@ -578,7 +580,7 @@ internal fun ComputeSettingsPanel(
     val coreCount = hardware?.cpuCoreCount?.takeIf { it > 0 } ?: Runtime.getRuntime().availableProcessors()
     // Speeds match the settings the next load would use, after this artifact's limits.
     val effective = AdvancedComputePolicy.forArtifact(options, coreCount, capabilities)
-    val runSettings = DecodeRunSettings(cpuThreads = effective.cpuThreads, contextTokens = effective.contextTokens)
+    val reloadNeeded = AdvancedComputePolicy.changesNeedReload(effective, appliedOptions)
     var inputsValid by remember { mutableStateOf(true) }
     val body: @Composable () -> Unit = {
         Column(Modifier.padding(if (framed) 12.dp else 0.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -605,6 +607,7 @@ internal fun ComputeSettingsPanel(
                         }
                     }
                     listOf(ComputeBackend.CPU, ComputeBackend.GPU).forEach { choice ->
+                        val runSettings = decodeLookupSettings(effective, appliedOptions, activeCompute, choice)
                         val match = remember(measurements, choice, runSettings) { matchDecodeMeasurement(measurements, choice, runSettings) }
                         val prediction = remember(hardware, artifactSizeBytes, choice, match?.speed) {
                             DecodeSpeedEstimator.predict(hardware, artifactSizeBytes, choice, match?.speed)
@@ -644,7 +647,7 @@ internal fun ComputeSettingsPanel(
                     style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             AdvancedComputePanel(options, sampler, coreCount, capabilities, onOptionsChange, onSamplerChange, onReset) { inputsValid = it }
-            ComputeApplyStatus(needsApply, loaded, inputsValid, runtimeState, downloaded, onApply)
+            ComputeApplyStatus(needsApply, loaded, inputsValid, runtimeState, downloaded, onApply, reloadNeeded)
         }
     }
     if (framed) {
@@ -668,8 +671,11 @@ private fun ComputeApplyStatus(
     runtimeState: RuntimeState,
     downloaded: Boolean,
     onApply: () -> Unit,
+    /** False when only conversation settings changed, so the loaded model can stay loaded. */
+    reloadNeeded: Boolean = true,
 ) {
     val dim = MaterialTheme.colorScheme.onSurfaceVariant
+    val keepsModel = !reloadNeeded && runtimeState != RuntimeState.ERROR
     if (!loaded) {
         // Nothing is loaded, so there is no reload to ask for; the choices simply wait for the next load.
         Text("Saved. Used next time you load a model.", modifier = Modifier.testTag("saved_settings"),
@@ -683,7 +689,8 @@ private fun ComputeApplyStatus(
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("Changes need a reload. Your saved conversation will be kept.", modifier = Modifier.testTag("reload_prompt"),
+            Text(if (keepsModel) "Changes apply without reloading the model. Your conversation will be kept."
+                else "Changes need a reload. Your saved conversation will be kept.", modifier = Modifier.testTag("reload_prompt"),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
             when {
                 !inputsValid -> Text("Fix the highlighted fields before applying.", style = MaterialTheme.typography.bodySmall,
@@ -694,7 +701,7 @@ private fun ComputeApplyStatus(
                 !downloaded -> Text("Download this model before applying. These settings are saved for its next load.",
                     style = MaterialTheme.typography.bodySmall, color = dim)
             }
-            TermButton("Apply & reload", onClick = onApply, enabled = inputsValid && AdvancedComputePolicy.canApply(runtimeState, downloaded),
+            TermButton(if (keepsModel) "Apply" else "Apply & reload", onClick = onApply, enabled = inputsValid && AdvancedComputePolicy.canApply(runtimeState, downloaded),
                 modifier = Modifier.fillMaxWidth().testTag("apply_compute"))
         }
     } else {
