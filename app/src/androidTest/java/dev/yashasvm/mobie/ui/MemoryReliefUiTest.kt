@@ -123,7 +123,7 @@ class MemoryReliefUiTest {
             resumedActivity = ParcelFileDescriptor.AutoCloseInputStream(
                 instrumentation.uiAutomation.executeShellCommand("dumpsys activity activities"),
             ).bufferedReader().use { reader ->
-                reader.lineSequence().firstOrNull {
+                reader.readLines().firstOrNull {
                     it.contains("topResumedActivity=") || it.contains("mResumedActivity:") ||
                         it.contains("mResumedActivity=")
                 }.orEmpty()
@@ -133,11 +133,50 @@ class MemoryReliefUiTest {
                 root?.packageName?.toString() == "com.android.settings" && hasVisibleText(root)
             if (!settingsVisible) android.os.SystemClock.sleep(100)
         }
-        assertTrue("A Settings activity must be resumed on this emulator: $resumedActivity",
-            resumedActivity.contains(" com.android.settings/"))
-        assertTrue("The resumed Settings activity must display content", settingsVisible)
-        capture("memory-system-apps.png")
-        instrumentation.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
+        try {
+            recordSettingsDiagnostics(resumedActivity)
+            assertTrue("A Settings activity must be resumed on this emulator: $resumedActivity",
+                resumedActivity.contains(" com.android.settings/"))
+            assertTrue("The resumed Settings activity must display content", settingsVisible)
+        } finally {
+            runCatching {
+                instrumentation.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
+            }.onFailure { android.util.Log.w("MobieSettingsDiag", "Could not leave Settings", it) }
+        }
+    }
+
+    private fun recordSettingsDiagnostics(resumedActivity: String) {
+        runCatching { capture("memory-system-apps.png") }
+            .onFailure { android.util.Log.w("MobieSettingsDiag", "Could not capture Settings screenshot", it) }
+        runCatching {
+            val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+            var nodes = 0
+            val hierarchy = buildString {
+                appendLine(resumedActivity)
+                fun describe(node: AccessibilityNodeInfo?, depth: Int) {
+                    if (node == null || depth > 24 || nodes++ >= 500) return
+                    val bounds = android.graphics.Rect().also { node.getBoundsInScreen(it) }
+                    appendLine("${"  ".repeat(depth)}package=${node.packageName} class=${node.className} " +
+                        "visible=${node.isVisibleToUser} bounds=$bounds text=${node.text?.take(160)} " +
+                        "description=${node.contentDescription?.take(160)}")
+                    for (index in 0 until node.childCount) describe(node.getChild(index), depth + 1)
+                }
+                appendLine("ACTIVE WINDOW")
+                describe(automation.rootInActiveWindow, 0)
+                automation.windows.forEach { window ->
+                    appendLine("WINDOW id=${window.id} type=${window.type} " +
+                        "active=${window.isActive} focused=${window.isFocused}")
+                    describe(window.root, 0)
+                }
+            }
+            android.util.Log.i("MobieSettingsDiag", hierarchy)
+            val output = File(checkNotNull(InstrumentationRegistry.getInstrumentation()
+                .targetContext.getExternalFilesDir(null)), "memory-system-apps-hierarchy.txt")
+            output.writeText(hierarchy)
+            ParcelFileDescriptor.AutoCloseInputStream(automation.executeShellCommand(
+                "cp ${output.absolutePath} /sdcard/${output.name}",
+            )).use { it.readBytes() }
+        }.onFailure { android.util.Log.w("MobieSettingsDiag", "Could not capture Settings hierarchy", it) }
     }
 
     private fun hasVisibleText(node: AccessibilityNodeInfo): Boolean {
