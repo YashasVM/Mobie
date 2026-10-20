@@ -45,13 +45,26 @@ fi
 "$adb_bin" "${args[@]}" logcat -c
 remote_command=$(python3 -c 'import shlex, sys; print(shlex.join(sys.argv[1:]))' \
   am instrument "${instrument_args[@]}" dev.yashasvm.mobie.test/androidx.test.runner.AndroidJUnitRunner)
+# Capture the pipeline status before attempting diagnostics. A disconnected/crashed
+# instrumentation process must not prevent collection of whatever evidence remains.
+set +e
 "$adb_bin" "${args[@]}" shell "$remote_command" | tee "$output_dir/instrumentation.txt"
+instrument_status=$?
+evidence_status=0
 "$adb_bin" "${args[@]}" logcat -d -s native:V litert:V tflite:V MobieCompute:V MobieGpuBenchmark:V MobieGpuSustained:V AndroidRuntime:E \
-  > "$output_dir/native-logcat.txt"
+  > "$output_dir/native-logcat.txt" || evidence_status=$?
 "$adb_bin" "${args[@]}" exec-out run-as dev.yashasvm.mobie cat files/gpu-benchmark.jsonl \
-  > "$output_dir/cumulative-results.jsonl"
-"$adb_bin" "${args[@]}" shell dumpsys thermalservice > "$output_dir/thermal-after.txt"
+  > "$output_dir/cumulative-results.jsonl" || evidence_status=$?
+"$adb_bin" "${args[@]}" shell dumpsys thermalservice > "$output_dir/thermal-after.txt" || evidence_status=$?
+if (( instrument_status != 0 )); then
+  echo "Instrumentation failed (status $instrument_status); available evidence is in $output_dir" >&2
+  exit "$instrument_status"
+fi
 if ! grep -Fq 'OK (1 test)' "$output_dir/instrumentation.txt"; then
   echo "Benchmark failed; inspect $output_dir/instrumentation.txt and native-logcat.txt" >&2
   exit 1
+fi
+if (( evidence_status != 0 )); then
+  echo "Benchmark evidence collection failed (status $evidence_status); results are incomplete in $output_dir" >&2
+  exit "$evidence_status"
 fi

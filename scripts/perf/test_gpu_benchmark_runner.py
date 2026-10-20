@@ -58,6 +58,73 @@ if 'instrument' in ' '.join(sys.argv[1:]):
             self.assertEqual("4", extras["repetitions"])
             self.assertEqual("1", extras["cpuThreads"])
 
+    def run_failure_case(self, instrument_status=0, success_marker=True, failed_collection=None, tee_status=0):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            log = root / "calls.jsonl"
+            adb = root / "fake-adb"
+            adb.write_text("""#!/usr/bin/env python3
+import json, os, sys
+args = sys.argv[1:]
+with open(os.environ['FAKE_ADB_LOG'], 'a') as stream:
+    stream.write(json.dumps(args) + '\\n')
+if 'instrument' in ' '.join(args):
+    print('OK (1 test)' if os.environ['SUCCESS_MARKER'] == 'true' else 'FAILURES!!!')
+    sys.exit(int(os.environ['INSTRUMENT_STATUS']))
+if '-d' in args:
+    stage = 'logcat'
+elif 'exec-out' in args:
+    stage = 'results'
+elif 'thermalservice' in args:
+    # Only the second thermal sample belongs to post-run collection.
+    with open(os.environ['FAKE_ADB_LOG']) as stream:
+        stage = 'thermal' if sum('thermalservice' in line for line in stream) == 2 else 'before'
+else:
+    stage = 'other'
+if stage == os.environ['FAILED_COLLECTION']:
+    sys.exit(23)
+print(stage)
+""")
+            adb.chmod(0o755)
+            environment = dict(os.environ, ADB=str(adb), FAKE_ADB_LOG=str(log),
+                               INSTRUMENT_STATUS=str(instrument_status),
+                               SUCCESS_MARKER=str(success_marker).lower(),
+                               FAILED_COLLECTION=failed_collection or "none")
+            if tee_status:
+                tee = root / "tee"
+                tee.write_text("#!/usr/bin/env python3\nimport sys\ndata = sys.stdin.read()\nopen(sys.argv[1], 'w').write(data)\nprint(data, end='')\nsys.exit(" + str(tee_status) + ")\n")
+                tee.chmod(0o755)
+                environment["PATH"] = str(root) + os.pathsep + environment["PATH"]
+            completed = subprocess.run(["bash", str(RUNNER), "serial", "model.litertlm", "CPU", str(root / "output")],
+                                       env=environment, text=True, capture_output=True)
+            expected = tee_status or instrument_status or (1 if not success_marker else (23 if failed_collection else 0))
+            self.assertEqual(expected, completed.returncode, completed.stderr)
+            calls = [json.loads(line) for line in log.read_text().splitlines()]
+            self.assertTrue(any("-d" in call for call in calls))
+            self.assertTrue(any("exec-out" in call for call in calls))
+            self.assertEqual(2, sum("thermalservice" in call for call in calls))
+            for name in ("instrumentation.txt", "native-logcat.txt", "cumulative-results.jsonl", "thermal-after.txt"):
+                self.assertTrue((root / "output" / name).exists(), name)
+
+    def test_tee_failure_still_collects_all_evidence(self):
+        self.run_failure_case(tee_status=29)
+
+    def test_instrument_failure_still_collects_all_evidence(self):
+        self.run_failure_case(instrument_status=17)
+
+    def test_collection_failures_preserve_instrument_failure(self):
+        for stage in ("logcat", "results", "thermal"):
+            with self.subTest(stage=stage):
+                self.run_failure_case(instrument_status=17, failed_collection=stage)
+
+    def test_collection_failures_are_not_reported_as_success(self):
+        for stage in ("logcat", "results", "thermal"):
+            with self.subTest(stage=stage):
+                self.run_failure_case(failed_collection=stage)
+
+    def test_missing_success_marker_preserves_test_failure(self):
+        self.run_failure_case(success_marker=False, failed_collection="logcat")
+
     def test_plain_model_path(self):
         self.run_case("models/model.litertlm", "abc123")
 
