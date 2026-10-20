@@ -75,3 +75,67 @@ The repository still requires its complete test/lint/build gates and physical ex
 One warmup per condition is followed by four pairs with alternating order. Exclude warmups; require top-level `status=complete`, cleanup success, `paired_comparison_valid=true`, all eight measured rows successful, matching settings and fixture identity, and expected engine identity changes. Report raw rows and medians separately for setup, runtime first SDK chunk, setup plus that chunk, and native decode. A fast setup path does not imply faster native decode or physical-phone performance. OS page cache is not controlled; both warmups and fixture hashing happen before measurement.
 
 Run on a debug x86 emulator using `connectedDebugAndroidTest` with runner class `dev.yashasvm.mobie.LiteRtConversationReconfigureBenchmarkTest` and arguments `litertReconfigureBenchmark=true`, optionally `buildRevision=<source SHA>`. The existing runtime E2E CI invokes it and uploads `mobie-conversation-reconfigure-benchmark.json` and `.csv` exported to `/sdcard` by the instrumentation before target-app teardown (the original working copies live under external-files `benchmarks`). There are no timing thresholds in assertions; this avoids turning shared-runner variance into a flaky correctness gate. Physical-device comparisons remain deferred to owner testing and use the stricter protocol above.
+
+## Phone comparison against Gallery
+
+`GodModeSpeedBenchmarkTest` is an opt-in physical ARM64 comparison using LiteRT-LM 0.18.0. Compilation verifies the test code, but cannot establish model compatibility, native throughput, or superiority over Gallery. No timing threshold is asserted. Successful generations must complete and produce visible output. A failed load, generation, reset, or cleanup invalidates the report.
+
+Select a phone explicitly, then run from the repository:
+
+```bash
+ANDROID_SERIAL=<physical-phone-serial> scripts/perf/god-mode-benchmark.sh
+# Optional settings, with defaults shown:
+ANDROID_SERIAL=<physical-phone-serial> REPETITIONS=3 ROUNDS=2 OUTPUT_TOKENS=256 \
+  WITH_VISION=false COOL_START=false scripts/perf/god-mode-benchmark.sh
+```
+
+The script rejects emulator serials, `ro.kernel.qemu=1`, and non-ARM64 primary ABIs before installing anything. It downloads once into `${XDG_CACHE_HOME:-$HOME/.cache}/mobie-bench`, resumes a `.part` download with curl, and checks SHA-256 before atomic finalization. A corrupt cached file or completed partial file requires removal before retrying. It builds both debug APKs, installs each only through `adb -s "$ANDROID_SERIAL" install -r`, stages the model through `/data/local/tmp`, and copies it into the debug app's private files using `run-as`. The temporary device copy is removed. The app independently checks artifact bytes and checksum before timing.
+
+The exact ungated Apache-2.0 fixture is `litert-community/gemma-4-E2B-it-litert-lm`, revision `41c5569623a7c189d6eec3e5225260c58cedbce7`, file `gemma-4-E2B-it.litertlm`, 2,588,147,712 bytes, SHA-256 `181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c`. The download destination is Hugging Face and its artifact redirects; inference and synthetic prompts remain on the phone. The benchmark introduces no production permissions, SDKs, or credentials.
+
+Each condition gets a separate engine load per round:
+
+| Condition | Configuration |
+|---|---|
+| `gallery_default` | Raw SDK, GPU text backend, context 4000, `cacheDir=null`, default activation and seed, sampler top-K 64 / top-P 0.95 / temperature 1.0, engine speculative flag false, per-send `enable_thinking=false`. |
+| `gallery_mtp` | Same raw configuration with the engine speculative flag true, matching Gallery's user toggle. |
+| `mobie_default` | Production `LiteRtLmRuntimeAdapter`, `ComputeOptions()` Auto backend/context/speculation defaults, default `SamplerSettings()` of 40 / 0.95 / 0.7 with seed 0. Thinking is explicitly off and the output cap is shared. |
+| `mobie_gallery_sampler` | The same production adapter defaults with sampler 64 / 0.95 / 1.0 and seed 0, to isolate runtime configuration from sampling. |
+
+All conditions use the same `outputTokens` cap, default 256. The raw SDK receives it through `sendMessageAsync(maxOutputToken=...)`; Mobie receives it through compute and generation configuration while retaining its production context admission checks. Mobie's actual context, backend, CPU threads, fallback reason, and drafter state are recorded. The raw drafter field is the requested engine flag, not an independently measured native activation signal. Raw conditions do not silently fall back from GPU.
+
+The raw configuration follows Gallery's `LlmChatModelHelper.kt` and `model_allowlists/1_0_20.json`. `ExperimentalFlags.enableBenchmark=true` differs from Gallery's default false. This mode records native timing/token statistics so `BenchmarkInfo` can be read; it does not select a different sampler or backend. Instrumentation overhead is still present and should be assessed separately. Raw settings leave optional conversation fields at SDK defaults. These text workloads disable audio on both paths. Gallery uses a CPU audio backend only when audio input is enabled. `WITH_VISION=true` adds Gallery's GPU vision backend and requests production vision loading in Mobie, with no attached images. The test records Mobie's actual `vision_backend` after production fallback. If production cannot initialize GPU vision, the optional matched-vision block fails instead of comparing different encoders. The default text-only run does not initialize vision or audio encoders.
+
+Default rounds run the four conditions in the order shown, then in reverse, giving ABBA ordering when projected onto any pair. `ROUNDS` must be even, between 2 and 20. Each block performs one excluded warmup, then `REPETITIONS` of all four prompts, recreating/resetting the conversation before each subsequent generation. The warmup uses the summarization prompt. `COOL_START=true` waits up to 180 seconds for Android thermal status NONE before each block. It records wait duration and timeout, then proceeds even if cooling times out. Thermal reporting needs Android 10 or newer for this option; otherwise thermal fields are -1. Keep timeouts visible in conclusions.
+
+The report contains literal UTF-8 prompt text, IDs, and hashes. The four fixed task categories mirror model-card use cases; they are not Google's published evaluation fixtures. For manual Gallery entry, use exactly these strings with no trailing newline:
+
+```text
+Summarize this text in three sentences: A neighborhood library started lending tools as well as books. Residents can borrow drills, ladders, and gardening equipment for one week. Volunteers inspect each returned item and teach a monthly repair workshop. The program reduces duplicate purchases and helps neighbors finish small projects. Its main challenges are storage space, maintenance costs, and making popular tools available fairly.
+```
+
+```text
+Write a short Kotlin function that takes a list of integers and returns the three most frequent values. Break ties by ascending numeric value. Include a small example and explain the time complexity.
+```
+
+```text
+Rewrite this message in a friendly, professional tone while preserving every request: Your report is late again. Send the corrected sales totals by Thursday at noon, explain why the numbers changed, and tell me who will review the next draft.
+```
+
+```text
+Design a small balcony garden for someone with two hours a week, morning sunlight, and a limited budget. Suggest plants, a simple watering routine, and one way to reuse household materials. Explain your choices.
+```
+
+Every generation records load duration for its block, first nonempty SDK chunk latency, native decode/prefill rates and token counts, generation duration, generation ms divided by native decode tokens, visible output hash and length, sampled PSS, thermals, resolved compute, and errors. The Mobie first-chunk/generation values come from adapter statistics; raw values bracket SDK streaming. Neither measures displayed-frame latency. One 100 ms PSS/thermal monitor serves each block, with endpoint reads for short generations. The generation PSS peak and load PSS peak are distinct. Sampling misses peaks and excludes some GPU memory. File hashes, reset, and export occur outside generation timing.
+
+JSONL is written incrementally under app-private files as `mobie-god-mode-benchmark.jsonl`. A JSON report and CSV are staged under external-files `benchmarks` and checksum-verified after export to `/sdcard/mobie-god-mode-benchmark.json` and `.csv` before teardown, including on handled failures. The script clears prior exports first, pulls both files, and saves instrumentation output and `summary.md` under `build/god-mode-benchmark/<UTC timestamp>` or `RESULT_DIR`. A native process crash may prevent export; missing output is a failed run. The summarizer rejects failures, incomplete sample matrices, mixed model/APK/device identities, and missing conditions, and excludes warmups. Re-run it with:
+
+```bash
+python3 scripts/perf/summarize_god_mode.py <results>/mobie-god-mode-benchmark.json
+```
+
+Results apply only to the recorded device/build. Hashing warms model pages; neither the OS cache nor persistent compiled caches are cleared. Mobie retains its production app-private cache and Gallery uses the SDK default. Different samplers can change output length, content, and quality. Report native decode ratios separately from first-chunk and overall latency, review individual outputs/lengths, and do not attribute all differences to MTP.
+
+For a real Gallery-app cross-check, record Gallery's exact version and APK hashes on the same phone, verify it loads the identical artifact bytes above, and select Gemma 4 E2B chat with GPU, context 4000, sampler 64 / 0.95 / 1.0, and thinking off. Match text-only versus vision input mode. Leave MTP off for `gallery_default`, then repeat with it on for `gallery_mtp`. Start a fresh chat before each prompt, perform an excluded summarization warmup, and repeat the same four prompt strings and cap. Gallery exposes per-message statistics; record its decode/prefill rates, token counts and reported latency for every message, save screenshots, and record thermal state/cooling and output length. Alternate Gallery and Mobie blocks rather than always measuring one app first.
+
+Check Gallery's actual output limit controls: its context limit is not an output-token cap. If its UI cannot enforce the same output cap, record that mismatch and compare native decode cautiously, rather than treating total duration as matched. Gallery's UI timing and release build can also differ from raw SDK instrumentation. This manual collection is independent evidence to cross-check the raw configuration, not a result produced by this test. No Gallery app or physical-phone performance was verified when authoring the harness.
