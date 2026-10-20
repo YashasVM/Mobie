@@ -82,6 +82,77 @@ class LiteRtArtifactHeaderTest {
     }
 
     @Test
+    fun `system SoC keys restrict otherwise portable main decoders`() {
+        listOf("soc_name", "soc_model", "target_soc", "soc", "chipset", "target_device").forEach { key ->
+            val bytes = LiteRtTestHeaderBuilder().build(systemEntries = listOf(key.uppercase() to "SM8750"))
+            val header = LiteRtArtifactHeader.parse(bytes)
+            assertTrue(header.isLlm)
+            assertEquals("SM8750", header.socName)
+            assertEquals("built for SM8750", header.acceleratorRequirement)
+        }
+    }
+
+    @Test
+    fun `GPU constrained main decoder without CPU fallback is not portable`() {
+        val bytes = LiteRtTestHeaderBuilder().build(entries = listOf(
+            "model_type" to "tf_lite_prefill_decode", "backend_constraint" to "gpu",
+        ))
+        val header = LiteRtArtifactHeader.parse(bytes)
+        assertTrue(header.isLlm)
+        assertFalse(header.runsOnCpu)
+        assertEquals("GPU-only build with no CPU fallback", header.acceleratorRequirement)
+    }
+
+    @Test
+    fun `rejects thousands of aliases to a large key within a small header`() {
+        val bytes = LiteRtTestHeaderBuilder().build(
+            itemAliases = 8_192, entries = listOf("x".repeat(90_000) to null),
+        )
+        assertTrue(bytes.size < 128 * 1024)
+        assertThrows(IllegalArgumentException::class.java) { LiteRtArtifactHeader.parse(bytes) }
+    }
+
+    @Test
+    fun `rejects section and item reference counts independently of unique table counts`() {
+        listOf(
+            LiteRtTestHeaderBuilder().build(sectionReferences = LiteRtArtifactHeader.MAX_SECTIONS),
+            LiteRtTestHeaderBuilder().build(itemAliases = LiteRtArtifactHeader.MAX_ITEMS_PER_SECTION + 1),
+            LiteRtTestHeaderBuilder().build(sectionReferences = 33, itemAliases = 128),
+        ).forEach { bytes ->
+            assertThrows(IllegalArgumentException::class.java) { LiteRtArtifactHeader.parse(bytes) }
+        }
+    }
+
+    @Test
+    fun `rejects oversized individual strings and aggregate decoded string allocations`() {
+        listOf(
+            LiteRtTestHeaderBuilder().build(entries = listOf("x".repeat(4_097) to null)),
+            LiteRtTestHeaderBuilder().build(entries = List(17) { "$it".padEnd(4_096, 'x') to null }),
+        ).forEach { bytes ->
+            assertThrows(IllegalArgumentException::class.java) { LiteRtArtifactHeader.parse(bytes) }
+        }
+    }
+
+    @Test
+    fun `shared strings in distinct item tables are charged and decoded only once`() {
+        val bytes = LiteRtTestHeaderBuilder().build(
+            entries = List(128) { "x".repeat(4_096) to null }, shareKey = true,
+        )
+        // Without string memoization these references exceed the 64 KiB decoded byte budget.
+        val header = LiteRtArtifactHeader.parse(bytes)
+        assertEquals(2, header.sections.size)
+    }
+
+    @Test
+    fun `aliases within budgets reuse decoded section objects`() {
+        val bytes = LiteRtTestHeaderBuilder().build(sectionReferences = 32, itemAliases = 128)
+        val header = LiteRtArtifactHeader.parse(bytes)
+        assertTrue(header.isLlm)
+        assertEquals(33, header.sections.size)
+        assertTrue(header.sections.drop(1).all { it === header.sections[1] })
+    }
+
+    @Test
     fun `preamble yields the header end offset`() {
         assertEquals(1_872, LiteRtArtifactHeader.headerEndOffset(fixture("gemma-4-E2B-it.hdr").copyOf(32)))
         assertEquals(704, LiteRtArtifactHeader.headerEndOffset(fixture("gemma-4-E2B-it-gpu.hdr").copyOf(32)))

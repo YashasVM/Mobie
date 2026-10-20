@@ -14,6 +14,7 @@ data class LiteRtArtifactHeader(
     val majorVersion: Int,
     val minorVersion: Int,
     val sections: List<LiteRtHeaderSection>,
+    val socName: String? = null,
 ) {
     private val mainSections get() = sections.filter { it.isTfLite && it.modelType in MAIN_LLM_MODEL_TYPES }
 
@@ -30,16 +31,18 @@ data class LiteRtArtifactHeader(
 
     /**
      * Why the main decoder needs a specific accelerator runtime, or null when it is portable.
-     * Portable means LiteRT-LM's own default: no constraint (CPU and GPU), or only `cpu`/`gpu`.
+     * Portable requires a main decoder with CPU fallback and no unsupported accelerator constraint.
      * Artisan graphs, NPU graphs, SoC-bound sections and NPU auxiliary graphs are not portable.
      */
     val acceleratorRequirement: String?
         get() {
+            socName?.let { return "built for $it" }
             val main = mainSections
             main.firstOrNull { it.socName != null }?.let { return "built for ${it.socName}" }
             main.firstOrNull { it.modelType == "tf_lite_artisan_text_decoder" }?.let { return "GPU-only artisan build" }
             main.flatMap { it.backendConstraints }.firstOrNull { it !in PORTABLE_BACKENDS }?.let { return "requires $it" }
             if (sections.any { it.isTfLite && it.modelType == "tf_lite_aux" }) return "includes an NPU graph"
+            if (main.isNotEmpty() && !runsOnCpu) return "GPU-only build with no CPU fallback"
             return null
         }
 
@@ -54,6 +57,13 @@ data class LiteRtArtifactHeader(
         const val PREAMBLE_BYTES = 32
         /** Real headers are under 4 KiB; refuse anything implausibly large instead of buffering it. */
         const val MAX_HEADER_BYTES = 256 * 1024
+        // Published headers have <=16 sections and occupy 0.4-2 KiB. These independent
+        // budgets bound references as well as unique allocations, even with aliased tables.
+        internal const val MAX_SECTIONS = 256
+        internal const val MAX_ITEMS_PER_SECTION = 128 // Also applies to system metadata.
+        internal const val MAX_TOTAL_ITEMS = 4_096
+        internal const val MAX_STRING_BYTES = 4_096
+        internal const val MAX_DECODED_STRING_BYTES = 64 * 1024
         internal const val DATA_TYPE_TFLITE_MODEL = 3
         internal const val DATA_TYPE_LLM_METADATA = 5
         internal const val MTP_DRAFTER_MODEL_TYPE = "tf_lite_mtp_drafter"
@@ -103,21 +113,48 @@ data class LiteRtArtifactHeader(
      * against the header region, so a corrupt or hostile header fails instead of reading past it.
      */
     private class FlatReader(private val buffer: ByteBuffer, private val start: Int, private val end: Int) {
+        private val strings = mutableMapOf<Int, String>()
+        private val normalizedStrings = mutableMapOf<Int, String>()
+        private val items = mutableMapOf<Int, Pair<String, String?>>()
+        private val sections = mutableMapOf<Int, LiteRtHeaderSection>()
+        private val stringValues = mutableMapOf<Int, String?>()
+        private var decodedStringBytes = 0
+        private var totalItems = 0
+
         fun readHeader(majorVersion: Int, minorVersion: Int): LiteRtArtifactHeader {
             val root = indirect(start)
             val sectionMetadata = field(root, 1) ?: throw IllegalArgumentException("Missing section metadata.")
             val objects = field(indirect(sectionMetadata), 0) ?: throw IllegalArgumentException("Missing sections.")
-            return LiteRtArtifactHeader(majorVersion, minorVersion, vector(objects).map { readSection(indirect(it)) })
+            val positions = vector(objects, MAX_SECTIONS)
+            // Charge references before consulting caches so aliasing cannot bypass work limits.
+            positions.forEach { position ->
+                field(indirect(position), 0)?.let(::chargeItems)
+            }
+            val systemItems = field(root, 0)?.let { field(indirect(it), 0) }
+                ?.let { pointer -> chargeItems(pointer).map { readItem(indirect(it)) } }.orEmpty()
+            val globalSoc = systemItems.firstOrNull { it.first in SOC_KEYS && !it.second.isNullOrBlank() }?.second
+            return LiteRtArtifactHeader(
+                majorVersion, minorVersion, positions.map { readSection(indirect(it)) }, globalSoc,
+            )
         }
 
-        private fun readSection(table: Int): LiteRtHeaderSection {
-            val items = field(table, 0)?.let { pointer -> vector(pointer).map { readItem(indirect(it)) } }.orEmpty()
+        private fun chargeItems(pointer: Int): List<Int> {
+            val positions = vector(pointer, MAX_ITEMS_PER_SECTION)
+            require(positions.size <= MAX_TOTAL_ITEMS - totalItems) { "Header has too many metadata items." }
+            totalItems += positions.size
+            return positions
+        }
+
+        private fun readSection(table: Int): LiteRtHeaderSection = sections.getOrPut(table) {
+            val items = field(table, 0)?.let { pointer ->
+                vector(pointer, MAX_ITEMS_PER_SECTION).map { readItem(indirect(it)) }
+            }.orEmpty()
             val begin = field(table, 1)?.let { long(it) } ?: 0L
             val finish = field(table, 2)?.let { long(it) } ?: 0L
             require(begin >= 0 && finish >= begin) { "Section has invalid offsets." }
             val dataType = field(table, 3)?.let { byte(it) } ?: 0
-            val strings = items.filter { it.second != null }.associate { (key, value) -> key.lowercase() to value!! }
-            return LiteRtHeaderSection(
+            val strings = items.filter { it.second != null }.associate { (key, value) -> key to value!! }
+            LiteRtHeaderSection(
                 dataType = dataType,
                 modelType = strings["model_type"]?.lowercase(),
                 backendConstraints = strings["backend_constraint"]?.lowercase()
@@ -128,15 +165,18 @@ data class LiteRtArtifactHeader(
         }
 
         /** Key plus its string value; non-string values are irrelevant to classification. */
-        private fun readItem(table: Int): Pair<String, String?> {
-            val key = string(field(table, 0) ?: throw IllegalArgumentException("Header item without a key."))
+        private fun readItem(table: Int): Pair<String, String?> = items.getOrPut(table) {
+            val key = string(field(table, 0) ?: throw IllegalArgumentException("Header item without a key."), normalize = true)
             val valueType = field(table, 1)?.let { byte(it) } ?: 0
             val value = if (valueType == VDATA_STRING_VALUE) {
-                field(table, 2)?.let { pointer -> field(indirect(pointer), 0)?.let(::string) }
+                field(table, 2)?.let { pointer ->
+                    val valueTable = indirect(pointer)
+                    stringValues.getOrPut(valueTable) { field(valueTable, 0)?.let { string(it) } }
+                }
             } else {
                 null
             }
-            return key to value
+            key to value
         }
 
         /** Absolute position of a table field, or null when absent from the vtable. */
@@ -152,20 +192,28 @@ data class LiteRtArtifactHeader(
 
         private fun indirect(position: Int): Int = (position + uint(position)).also(::inRange)
 
-        private fun vector(pointer: Int): List<Int> {
+        private fun vector(pointer: Int, maximum: Int): List<Int> {
             val vector = indirect(pointer)
             val count = uint(vector)
-            require(count in 0..((end - vector) / 4)) { "Header vector is out of range." }
+            require(count <= maximum) { "Header vector exceeds metadata budget." }
+            require(count in 0..((end - vector - 4) / 4)) { "Header vector is out of range." }
             return List(count) { vector + 4 + it * 4 }
         }
 
-        private fun string(pointer: Int): String {
+        private fun string(pointer: Int, normalize: Boolean = false): String {
             val position = indirect(pointer)
-            val length = uint(position)
-            require(length in 0..(end - position - 4)) { "Header string is out of range." }
-            val bytes = ByteArray(length)
-            for (i in 0 until length) bytes[i] = buffer.get(position + 4 + i)
-            return String(bytes, Charsets.UTF_8)
+            val decoded = strings.getOrPut(position) {
+                val length = uint(position)
+                require(length in 0..(end - position - 4)) { "Header string is out of range." }
+                require(length <= MAX_STRING_BYTES && length <= MAX_DECODED_STRING_BYTES - decodedStringBytes) {
+                    "Header exceeds decoded string budget."
+                }
+                decodedStringBytes += length
+                val bytes = ByteArray(length)
+                for (i in 0 until length) bytes[i] = buffer.get(position + 4 + i)
+                String(bytes, Charsets.UTF_8)
+            }
+            return if (normalize) normalizedStrings.getOrPut(position) { decoded.lowercase() } else decoded
         }
 
         private fun inRange(position: Int) = require(position in start until end) { "Header offset is out of range." }

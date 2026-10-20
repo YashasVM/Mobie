@@ -117,10 +117,11 @@ class CompatibilityResolver {
             )
         }
         if (artifact.executionTarget != ArtifactExecutionTarget.GENERIC) {
-            val detail = artifact.acceleratorRequirement?.let { " (${it.replaceFirstChar(Char::uppercaseChar)})" }.orEmpty()
+            val reason = artifact.acceleratorRequirement?.let { "Mobie cannot run this package yet: $it." }
+                ?: "This package targets device-specific acceleration that Mobie's current runtime does not support yet."
             return CompatibilityResult(
                 Compatibility.INCOMPATIBLE,
-                "This package targets device-specific acceleration that Mobie's current runtime does not support yet$detail.",
+                reason,
                 0,
             )
         }

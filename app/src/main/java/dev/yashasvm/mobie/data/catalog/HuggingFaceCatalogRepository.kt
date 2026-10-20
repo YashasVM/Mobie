@@ -11,11 +11,13 @@ import dev.yashasvm.mobie.core.model.inferArtifactExecutionTarget
 import dev.yashasvm.mobie.core.model.inferArtifactQuantization
 import dev.yashasvm.mobie.core.security.HuggingFaceTokenStore
 import java.net.URLEncoder
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.SerialName
@@ -118,8 +120,16 @@ class HuggingFaceCatalogRepository(
                     }
                 }.awaitAll()
             }
-            val inspected = coroutineScope {
-                models.map { model -> async { withArtifactHeaders(model, limiter) } }.awaitAll()
+            val headers = probeCatalogHeaders(
+                models.map { model ->
+                    model.headerProbeTargets().map { huggingFaceArtifactUrl(model.repoId(), it, model.sha) }
+                },
+                headerInspector,
+            )
+            val inspected = models.map { model ->
+                model.copy(artifactHeaders = model.headerProbeTargets().mapNotNull { fileName ->
+                    headers[huggingFaceArtifactUrl(model.repoId(), fileName, model.sha)]?.let { fileName to it }
+                }.toMap())
             }
             inspected.mapNotNull(HfModel::toDomain).filter { model ->
                 model.artifacts.any {
@@ -129,23 +139,6 @@ class HuggingFaceCatalogRepository(
                 } && model.type in setOf(ModelType.TEXT_GENERATION, ModelType.VISION)
             }
         }
-    }
-
-    /** Reads container headers only for files whose name or repository tags cannot be trusted. */
-    private suspend fun withArtifactHeaders(model: HfModel, limiter: Semaphore): HfModel {
-        val repoId = model.repoId()
-        val targets = model.headerProbeTargets()
-        if (targets.isEmpty()) return model
-        val headers = coroutineScope {
-            targets.map { fileName ->
-                async {
-                    limiter.withPermit {
-                        headerInspector.inspect(huggingFaceArtifactUrl(repoId, fileName, model.sha))
-                    }?.let { fileName to it }
-                }
-            }.awaitAll().filterNotNull().toMap()
-        }
-        return if (headers.isEmpty()) model else model.copy(artifactHeaders = headers)
     }
 
     private suspend fun fetchDetails(repoId: String, expectedRevision: String?): HfModel? = runCatching {
@@ -190,6 +183,35 @@ class HuggingFaceCatalogRepository(
             if (!response.isSuccessful) null else response.body?.string()
         }
     }
+}
+
+// Bound both network work and catalog latency. Skipped or unfinished URLs have no header,
+// so their artifacts remain ineligible. Successful results survive expiration of the deadline.
+internal const val MAX_HEADER_PROBES_PER_REPO = 4
+internal const val MAX_HEADER_PROBES_PER_FETCH = 24
+internal const val HEADER_PROBE_PHASE_TIMEOUT_MILLIS = 5_000L
+
+internal suspend fun probeCatalogHeaders(
+    targetsByRepository: List<List<String>>,
+    inspector: LiteRtHeaderInspector,
+    timeoutMillis: Long = HEADER_PROBE_PHASE_TIMEOUT_MILLIS,
+): Map<String, LiteRtArtifactHeader> {
+    val headers = ConcurrentHashMap<String, LiteRtArtifactHeader>()
+    val targets = targetsByRepository.flatMap { it.distinct().take(MAX_HEADER_PROBES_PER_REPO) }
+        .distinct().take(MAX_HEADER_PROBES_PER_FETCH)
+    val limiter = Semaphore(6)
+    withTimeoutOrNull(timeoutMillis) {
+        coroutineScope {
+            targets.map { url ->
+                async {
+                    limiter.withPermit {
+                        inspector.inspect(url)?.let { headers[url] = it }
+                    }
+                }
+            }.awaitAll()
+        }
+    }
+    return headers.toMap()
 }
 
 private val hubJson = Json { ignoreUnknownKeys = true }
@@ -246,6 +268,7 @@ private data class HfModel(
     fun toDomain(): AiModel? {
         val repoId = modelId ?: id ?: return null
         if (!catalogOwnerAllowed(repoId)) return null
+        val probeTargets = headerProbeTargets().toSet()
         val artifacts = siblings.mapNotNull { file ->
             val format = when {
                 file.rfilename.endsWith(".litertlm", ignoreCase = true) -> ModelFormat.LITERT_LM
@@ -255,6 +278,11 @@ private data class HfModel(
             val contextWindowTokens = artifactContextWindows[file.rfilename]
                 ?: inferArtifactContextWindow(file.rfilename)
             val header = artifactHeaders[file.rfilename]
+            val requirement = if (file.rfilename in probeTargets && header == null) {
+                "package contents could not be verified"
+            } else {
+                header?.acceleratorRequirement
+            }
             val fileName = runtimeAwareArtifactFileName(file.rfilename, contextWindowTokens)
             ModelArtifact(
                 fileName = fileName,
@@ -264,11 +292,11 @@ private data class HfModel(
                 format = format,
                 quantization = inferArtifactQuantization(file.rfilename),
                 // A header that names a specific accelerator overrides a generic-looking filename.
-                executionTarget = if (header?.acceleratorRequirement != null) ArtifactExecutionTarget.HARDWARE_SPECIFIC
+                executionTarget = if (requirement != null) ArtifactExecutionTarget.HARDWARE_SPECIFIC
                     else inferArtifactExecutionTarget(fileName),
                 contextWindowTokens = contextWindowTokens,
                 speculativeDrafter = header?.hasSpeculativeDrafter,
-                acceleratorRequirement = header?.acceleratorRequirement,
+                acceleratorRequirement = requirement,
             )
         }
         return AiModel(

@@ -1,9 +1,19 @@
 package dev.yashasvm.mobie.data.catalog
 
 import java.io.InputStream
+import java.io.IOException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import okhttp3.Call
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -118,6 +128,91 @@ class LiteRtHeaderInspectorTest {
         assertNull(notLiteRt.inspect(pinned))
         val offline = LiteRtHeaderInspector(client(CopyOnWriteArrayList()) { throw java.io.IOException("offline") }) { null }
         assertNull(offline.inspect(pinned))
+    }
+
+    private class StalledBody : ResponseBody() {
+        val started = CompletableDeferred<Unit>()
+        val interrupted = AtomicBoolean()
+        val closed = AtomicBoolean()
+        override fun contentType() = "application/octet-stream".toMediaType()
+        override fun contentLength() = -1L
+        private val input = object : InputStream() {
+            override fun read(): Int {
+                started.complete(Unit)
+                try {
+                    CountDownLatch(1).await(60, TimeUnit.SECONDS)
+                } catch (error: InterruptedException) {
+                    interrupted.set(true)
+                    throw IOException("Interrupted stalled body", error)
+                }
+                return -1
+            }
+            override fun close() { closed.set(true) }
+        }.source().buffer()
+        override fun source(): BufferedSource = input
+    }
+
+    @Test(timeout = 5_000)
+    fun `stalled body returns null within probe timeout and releases the read`() = runBlocking {
+        val body = StalledBody()
+        val inspector = LiteRtHeaderInspector(
+            client(CopyOnWriteArrayList()) { response(it, 206, body) }, probeTimeoutMillis = 250,
+        ) { null }
+        val start = System.nanoTime()
+        assertNull(inspector.inspect(pinned))
+        assertTrue("Probe exceeded bounded wait", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start) < 2_000)
+        assertTrue(body.started.isCompleted)
+        assertTrue(body.interrupted.get())
+        assertTrue(body.closed.get())
+    }
+
+    @Test(timeout = 5_000)
+    fun `caller cancellation interrupts a stalled body and cancels the call`() = runBlocking {
+        val body = StalledBody()
+        val call = AtomicReference<Call>()
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            call.set(chain.call())
+            response(chain.request(), 206, body)
+        }.build()
+        val inspector = LiteRtHeaderInspector(client, probeTimeoutMillis = 10_000) { null }
+        val inspection = async { inspector.inspect(pinned) }
+        withTimeout(2_000) { body.started.await() }
+        inspection.cancelAndJoin()
+        assertTrue(body.interrupted.get())
+        assertTrue(body.closed.get())
+        assertTrue(call.get().isCanceled())
+        assertEquals(TimeUnit.MILLISECONDS.toNanos(10_000), call.get().timeout().timeoutNanos())
+    }
+
+    @Test(timeout = 5_000)
+    fun `catalog phase deadline keeps completed headers and cancels unfinished reads`() = runBlocking {
+        val stalled = StalledBody()
+        val slow = pinned.replace("gemma-4-E2B-it.litertlm", "slow.litertlm")
+        val inspector = LiteRtHeaderInspector(client(CopyOnWriteArrayList()) { request ->
+            if (request.url.toString() == slow) response(request, 206, stalled) else ranged(request)
+        }, probeTimeoutMillis = 10_000) { null }
+        val start = System.nanoTime()
+        val headers = probeCatalogHeaders(listOf(listOf(pinned, slow)), inspector, timeoutMillis = 500)
+        assertEquals(setOf(pinned), headers.keys)
+        assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start) < 2_000)
+        assertTrue(stalled.interrupted.get())
+        assertTrue(stalled.closed.get())
+    }
+
+    @Test
+    fun `catalog bounds probes per repository and per fetch`() = runBlocking {
+        val requests = CopyOnWriteArrayList<Recorded>()
+        val inspector = LiteRtHeaderInspector(client(requests, ::ranged)) { null }
+        val targets = List(10) { repo ->
+            List(10) { file -> pinned.replace("gemma-4-E2B-it.litertlm", "repo$repo-file$file.litertlm") }
+        }
+        val headers = probeCatalogHeaders(targets, inspector)
+        assertEquals(MAX_HEADER_PROBES_PER_FETCH, headers.size)
+        assertEquals(MAX_HEADER_PROBES_PER_FETCH, requests.size)
+        targets.forEach { repository ->
+            assertTrue(repository.count { it in headers } <= MAX_HEADER_PROBES_PER_REPO)
+            assertTrue(repository.drop(MAX_HEADER_PROBES_PER_REPO).none { it in headers })
+        }
     }
 
     @Test

@@ -5,6 +5,7 @@ import dev.yashasvm.mobie.core.model.ArtifactExecutionTarget
 import dev.yashasvm.mobie.core.model.Compatibility
 import dev.yashasvm.mobie.core.model.DeviceProfile
 import dev.yashasvm.mobie.core.model.LiteRtArtifactHeader
+import dev.yashasvm.mobie.core.model.LiteRtTestHeaderBuilder
 import dev.yashasvm.mobie.core.model.ModelType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -68,12 +69,47 @@ class LiteRtHeaderCatalogTest {
     }
 
     @Test
+    fun `successful generic header cannot validate a failed gpu sibling probe`() {
+        val headers = gemmaHeaders.filterKeys { it == "gemma-4-E2B-it.litertlm" }
+        val model = checkNotNull(catalogModelFromHubJson(hub("gemma-4-E2B-it-litert-lm"), headers))
+        assertEquals(ModelType.VISION, model.type)
+        val unverified = model.artifacts.single { it.fileName == "gemma-4-E2B-it-gpu.litertlm" }
+        assertEquals(ArtifactExecutionTarget.HARDWARE_SPECIFIC, unverified.executionTarget)
+        assertEquals("package contents could not be verified", unverified.acceleratorRequirement)
+        assertEquals("gemma-4-E2B-it.litertlm", model.bestArtifact?.fileName)
+        assertEquals("gemma-4-E2B-it.litertlm", CompatibilityResolver().selectBestArtifact(model, flagshipPhone)?.fileName)
+        assertEquals(
+            "Mobie cannot run this package yet: package contents could not be verified.",
+            CompatibilityResolver().resolve(unverified, flagshipPhone).reason,
+        )
+    }
+
+    @Test
+    fun `global SoC and CPU fallback restrictions exclude generic-looking artifacts`() {
+        val restricted = listOf(
+            LiteRtTestHeaderBuilder().build(systemEntries = listOf("soc_name" to "SM8750")),
+            LiteRtTestHeaderBuilder().build(entries = listOf(
+                "model_type" to "tf_lite_prefill_decode", "backend_constraint" to "gpu",
+            )),
+        )
+        restricted.forEach { bytes ->
+            val model = checkNotNull(catalogModelFromHubJson(
+                hub("gemma-4-E2B-it-litert-lm"),
+                mapOf("gemma-4-E2B-it.litertlm" to LiteRtArtifactHeader.parse(bytes)),
+            ))
+            val artifact = model.artifacts.single { it.fileName == "gemma-4-E2B-it.litertlm" }
+            assertEquals(ArtifactExecutionTarget.HARDWARE_SPECIFIC, artifact.executionTarget)
+            assertNull(model.bestArtifact)
+        }
+    }
+
+    @Test
     fun `an artisan build explains why it cannot run`() {
         val model = checkNotNull(catalogModelFromHubJson(hub("gemma-4-E2B-it-litert-lm"), gemmaHeaders))
         val artisan = model.artifacts.single { it.fileName == "gemma-4-E2B-it-gpu.litertlm" }
         val result = CompatibilityResolver().resolve(artisan, flagshipPhone)
         assertEquals(Compatibility.INCOMPATIBLE, result.status)
-        assertTrue(result.reason, result.reason.contains("GPU-only artisan build"))
+        assertEquals("Mobie cannot run this package yet: GPU-only artisan build.", result.reason)
     }
 
     @Test
