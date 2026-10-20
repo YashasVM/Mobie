@@ -17,6 +17,10 @@ data class ModelArtifact(
     val quantization: String? = null,
     val executionTarget: ArtifactExecutionTarget = inferArtifactExecutionTarget(fileName),
     val contextWindowTokens: Int? = inferArtifactContextWindow(fileName),
+    /** From the container header: true when it ships an MTP drafter. Null when not inspected. */
+    val speculativeDrafter: Boolean? = null,
+    /** From the container header: why the main graph needs a specific accelerator, if it does. */
+    val acceleratorRequirement: String? = null,
 ) {
     val runtimeLabel: String
         get() = when (format) {

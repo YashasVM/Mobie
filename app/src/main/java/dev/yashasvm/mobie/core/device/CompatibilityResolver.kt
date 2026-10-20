@@ -12,6 +12,7 @@ import dev.yashasvm.mobie.core.runtime.ComputeBackend
 import dev.yashasvm.mobie.core.runtime.LiteRtContextWindowPolicy
 import dev.yashasvm.mobie.core.runtime.RuntimeLoadMemoryPolicy
 import dev.yashasvm.mobie.core.runtime.RuntimeLoadStoragePolicy
+import dev.yashasvm.mobie.core.runtime.SpeculativeDecodingPolicy
 import java.util.Locale
 import kotlin.math.max
 
@@ -56,7 +57,9 @@ class CompatibilityResolver {
         backend: ComputeBackend = ComputeBackend.CPU,
         allowReclaim: Boolean = false,
         contextTokens: Int? = null,
-    ): CompatibilityResult = resolveBackend(artifact, device, visionEncoderLoaded, backend, allowReclaim, contextTokens).result
+        speculativeDecoding: Boolean? = null,
+    ): CompatibilityResult =
+        resolveBackend(artifact, device, visionEncoderLoaded, backend, allowReclaim, contextTokens, speculativeDecoding).result
 
     /**
      * Admission for the backend a load would run. Explicit CPU and GPU are judged as requested.
@@ -72,15 +75,17 @@ class CompatibilityResolver {
         backend: ComputeBackend = ComputeBackend.CPU,
         allowReclaim: Boolean = false,
         contextTokens: Int? = null,
+        /** The speculative-decoding request (null is Auto); a built drafter adds to the RAM estimate. */
+        speculativeDecoding: Boolean? = null,
     ): BackendAdmission {
         if (backend != ComputeBackend.AUTO) {
-            return BackendAdmission(backend, resolveFor(artifact, device, visionEncoderLoaded, backend, contextTokens))
+            return BackendAdmission(backend, resolveFor(artifact, device, visionEncoderLoaded, backend, contextTokens, speculativeDecoding))
         }
-        val cpu = resolveFor(artifact, device, visionEncoderLoaded, ComputeBackend.CPU, contextTokens)
+        val cpu = resolveFor(artifact, device, visionEncoderLoaded, ComputeBackend.CPU, contextTokens, speculativeDecoding)
         if (!device.gpuAttemptable || cpu.status == Compatibility.INCOMPATIBLE) {
             return BackendAdmission(ComputeBackend.CPU, cpu)
         }
-        val gpu = resolveFor(artifact, device, visionEncoderLoaded, ComputeBackend.GPU, contextTokens)
+        val gpu = resolveFor(artifact, device, visionEncoderLoaded, ComputeBackend.GPU, contextTokens, speculativeDecoding)
         val gpuAdmitted = gpu.status != Compatibility.INCOMPATIBLE && when (gpu.memoryTier) {
             MemoryAdmissionTier.FITS_NOW -> true
             MemoryAdmissionTier.FITS_AFTER_RECLAIM -> allowReclaim
@@ -102,6 +107,7 @@ class CompatibilityResolver {
         visionEncoderLoaded: Boolean,
         backend: ComputeBackend,
         contextTokens: Int?,
+        speculativeDecoding: Boolean?,
     ): CompatibilityResult {
         if (artifact == null || artifact.format != ModelFormat.LITERT_LM) {
             return CompatibilityResult(
@@ -111,9 +117,10 @@ class CompatibilityResolver {
             )
         }
         if (artifact.executionTarget != ArtifactExecutionTarget.GENERIC) {
+            val detail = artifact.acceleratorRequirement?.let { " (${it.replaceFirstChar(Char::uppercaseChar)})" }.orEmpty()
             return CompatibilityResult(
                 Compatibility.INCOMPATIBLE,
-                "This package targets device-specific acceleration that Mobie's current runtime does not support yet.",
+                "This package targets device-specific acceleration that Mobie's current runtime does not support yet$detail.",
                 0,
             )
         }
@@ -170,7 +177,12 @@ class CompatibilityResolver {
         }
         // Same estimator as the native load gate, so pre-download, compute-panel and pre-load RAM agree.
         val memoryEstimate = requireNotNull(
-            RuntimeLoadMemoryPolicy.estimate(artifact.copy(contextWindowTokens = selectedContext), backend, visionEncoderLoaded),
+            RuntimeLoadMemoryPolicy.estimate(
+                artifact.copy(contextWindowTokens = selectedContext), backend, visionEncoderLoaded,
+                speculativeDrafter = SpeculativeDecodingPolicy.buildsDrafter(
+                    speculativeDecoding, artifact.speculativeDrafter == true, backend,
+                ),
+            ),
         )
         val estimatedRam = memoryEstimate.estimatedRamBytes
         val requiredStorage = requiredStorageBytes(artifact.sizeBytes)

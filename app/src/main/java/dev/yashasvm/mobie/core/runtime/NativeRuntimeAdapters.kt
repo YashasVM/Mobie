@@ -82,6 +82,8 @@ class LiteRtLmRuntimeAdapter(
     @Volatile private var conversation: Conversation? = null
     /** Estimated RAM of the loaded engine; credited as reclaimable when a reload is admitted. */
     private var loadedRamEstimateBytes = 0L
+    /** Whether the loaded engine built the model's MTP drafter during initialization. */
+    private var engineDrafterBuilt = false
     @Volatile private var visionReady = false
     @Volatile private var computeOptions = ComputeOptions()
     @Volatile private var selectedCompute: ActiveCompute? = null
@@ -145,7 +147,9 @@ class LiteRtLmRuntimeAdapter(
                             val sampler = configuredSampler
                             engine = loadedEngine.engine
                             visionReady = loadedEngine.visionReady
-                            selectedCompute = loadedEngine.compute
+                            engineDrafterBuilt = loadedEngine.drafterBuilt
+                            val usesDrafter = SpeculativeDecodingPolicy.conversationUses(options.speculativeDecoding, loadedEngine.drafterBuilt)
+                            selectedCompute = loadedEngine.compute.copy(speculativeDecoding = usesDrafter)
                             selectedCapabilities = capabilities
                             activeOptions = options
                             conversation = loadedEngine.engine.createConversation(
@@ -172,6 +176,7 @@ class LiteRtLmRuntimeAdapter(
                                 contextWindowTokens = loadedEngine.contextWindowTokens,
                                 backend = loadedEngine.compute.backend,
                                 visionEncoderLoaded = loadedEngine.visionReady,
+                                speculativeDrafter = usesDrafter,
                             )
                             Unit
                         } catch (error: Throwable) {
@@ -187,6 +192,7 @@ class LiteRtLmRuntimeAdapter(
                             }
                             engine = null
                             visionReady = false
+                            engineDrafterBuilt = false
                             selectedCompute = null
                             selectedCapabilities = null
                             activeOptions = ComputeOptions()
@@ -230,6 +236,9 @@ class LiteRtLmRuntimeAdapter(
             allowReclaim = allowReclaim,
             vision = vision,
             backend = gateBackend,
+            speculativeDrafter = SpeculativeDecodingPolicy.buildsDrafter(
+                options.speculativeDecoding, capabilities.supportsSpeculativeDecoding, gateBackend,
+            ),
             reclaimableBytes = loadedRamEstimateBytes,
         )
         return AdmittedLoad(options, capabilities)
@@ -294,6 +303,9 @@ class LiteRtLmRuntimeAdapter(
                 installReplacement = { replacement ->
                     conversation = replacement
                     activeOptions = effective
+                    selectedCompute = selectedCompute?.copy(
+                        speculativeDecoding = SpeculativeDecodingPolicy.conversationUses(effective.speculativeDecoding, engineDrafterBuilt),
+                    )
                     computeOptions = requested
                     activeSampler = validatedSampler
                     configuredSampler = validatedSampler
@@ -523,13 +535,12 @@ class LiteRtLmRuntimeAdapter(
         contextWindowTokens: Int,
         textBackend: Backend,
         options: ComputeOptions,
+        speculation: Boolean?,
     ): LoadedEngine {
-        if (!vision) {
-            return LoadedEngine(
-                initializeEngine(modelPath, textBackend, visionBackend = null, contextWindowTokens = contextWindowTokens, options = options),
-                visionReady = false,
-            )
-        }
+        fun initialize(visionBackend: Backend?, visionReady: Boolean): LoadedEngine =
+            initializeEngine(modelPath, textBackend, visionBackend, contextWindowTokens, options, speculation)
+                .let { LoadedEngine(it.engine, visionReady, drafterBuilt = it.drafterBuilt, drafterNote = it.drafterNote) }
+        if (!vision) return initialize(visionBackend = null, visionReady = false)
 
         var gpuVisionError: Exception? = null
         if (
@@ -542,10 +553,7 @@ class LiteRtLmRuntimeAdapter(
             )
         ) {
             try {
-                return LoadedEngine(
-                    initializeEngine(modelPath, textBackend, visionBackend = Backend.GPU(), contextWindowTokens = contextWindowTokens, options = options),
-                    visionReady = true,
-                )
+                return initialize(visionBackend = Backend.GPU(), visionReady = true)
             } catch (error: Exception) {
                 rethrowCancellation(error)
                 gpuVisionError = error
@@ -553,17 +561,11 @@ class LiteRtLmRuntimeAdapter(
         }
 
         return try {
-            LoadedEngine(
-                initializeEngine(modelPath, textBackend, visionBackend = Backend.CPU(), contextWindowTokens = contextWindowTokens, options = options),
-                visionReady = true,
-            )
+            initialize(visionBackend = Backend.CPU(), visionReady = true)
         } catch (cpuVisionError: Exception) {
             rethrowCancellation(cpuVisionError)
             try {
-                LoadedEngine(
-                    initializeEngine(modelPath, textBackend, visionBackend = null, contextWindowTokens = contextWindowTokens, options = options),
-                    visionReady = false,
-                )
+                initialize(visionBackend = null, visionReady = false)
             } catch (textOnlyError: Exception) {
                 rethrowCancellation(textOnlyError)
                 gpuVisionError?.let(textOnlyError::addSuppressed)
@@ -589,8 +591,11 @@ class LiteRtLmRuntimeAdapter(
         val contexts = attempts.associateWith { backend ->
             contextWindowTokensFor(modelPath, capabilities, options.contextTokens, backend)
         }
+        fun buildsDrafter(backend: ComputeBackend) = SpeculativeDecodingPolicy.buildsDrafter(
+            options.speculativeDecoding, capabilities.supportsSpeculativeDecoding, backend,
+        )
         val admitted = admitAttemptsForMemory(options.backend, attempts) { backend ->
-            memoryBlockReason(modelPath, contexts.getValue(backend), allowReclaim, vision, backend)
+            memoryBlockReason(modelPath, contexts.getValue(backend), allowReclaim, vision, backend, speculativeDrafter = buildsDrafter(backend))
         }
         admitted.skippedReason?.let { Log.w("MobieCompute", it) }
         // Resolve topology only if CPU is actually attempted, then reuse that exact count in stats.
@@ -607,9 +612,12 @@ class LiteRtLmRuntimeAdapter(
                     ComputeBackend.GPU -> Backend.GPU()
                     ComputeBackend.AUTO, ComputeBackend.NPU -> error("Unsupported text backend: $backend")
                 }
+                val speculation = SpeculativeDecodingPolicy.engineRequest(
+                    options.speculativeDecoding, capabilities.supportsSpeculativeDecoding, backend,
+                )
                 // Each failed attempt closes its own engine (see initializeEngine) before the next backend starts.
                 try {
-                    initializeEngineWithVisionFallback(modelPath, vision, contextWindowTokens, nativeBackend, options)
+                    initializeEngineWithVisionFallback(modelPath, vision, contextWindowTokens, nativeBackend, options, speculation)
                         .copy(contextWindowTokens = contextWindowTokens)
                 } catch (failure: Exception) {
                     rethrowCancellation(failure)
@@ -625,20 +633,63 @@ class LiteRtLmRuntimeAdapter(
                 }
             },
         )
-        Log.i("MobieCompute", "Selected ${result.backend.name}; fallback=${result.fallbackReason ?: admitted.skippedReason ?: "none"}")
+        Log.i(
+            "MobieCompute",
+            "Selected ${result.backend.name}; draft model=${result.value.drafterBuilt}; " +
+                "fallback=${result.fallbackReason ?: admitted.skippedReason ?: "none"}",
+        )
         return result.value.copy(
             compute = ActiveCompute(
                 backend = result.backend,
                 cpuThreads = if (result.backend == ComputeBackend.CPU) cpuThreads else null,
                 contextTokens = result.value.contextWindowTokens,
-                fallbackReason = listOfNotNull(admitted.skippedReason, result.fallbackReason)
+                fallbackReason = listOfNotNull(admitted.skippedReason, result.fallbackReason, result.value.drafterNote)
                     .joinToString(" ").ifEmpty { null },
             ),
             rememberPreferred = ComputeBackendPolicy.shouldRememberSuccess(options.backend, admitted.attempts, result.backend),
         )
     }
 
-    private fun initializeEngine(modelPath: String, textBackend: Backend, visionBackend: Backend?, contextWindowTokens: Int, options: ComputeOptions): Engine {
+    /**
+     * One engine for one backend/vision combination. [speculation] is the engine-level drafter
+     * request from [SpeculativeDecodingPolicy.engineRequest]. When Auto asked for the drafter and
+     * initialization fails, the same configuration is retried once without it, so a drafter
+     * problem costs speed rather than the backend.
+     */
+    private fun initializeEngine(
+        modelPath: String,
+        textBackend: Backend,
+        visionBackend: Backend?,
+        contextWindowTokens: Int,
+        options: ComputeOptions,
+        speculation: Boolean?,
+    ): InitializedEngine = try {
+        InitializedEngine(createEngine(modelPath, textBackend, visionBackend, contextWindowTokens, options, speculation), speculation == true)
+    } catch (failure: Exception) {
+        rethrowCancellation(failure)
+        if (!SpeculativeDecodingPolicy.mayRetryWithoutDrafter(options.speculativeDecoding, speculation)) throw failure
+        Log.w("MobieCompute", "Draft model failed on ${textBackend.name}; retrying without it", failure)
+        try {
+            InitializedEngine(
+                createEngine(modelPath, textBackend, visionBackend, contextWindowTokens, options, speculation = null),
+                drafterBuilt = false,
+                drafterNote = "The model's draft model could not start on ${textBackend.name}, so replies use normal decoding.",
+            )
+        } catch (retryFailure: Exception) {
+            rethrowCancellation(retryFailure)
+            retryFailure.addSuppressed(failure)
+            throw retryFailure
+        }
+    }
+
+    private fun createEngine(
+        modelPath: String,
+        textBackend: Backend,
+        visionBackend: Backend?,
+        contextWindowTokens: Int,
+        options: ComputeOptions,
+        speculation: Boolean?,
+    ): Engine {
         val modelFile = File(modelPath)
         val cacheDirectory = liteRtCacheDirectory(modelFile).apply {
             if (!isDirectory && !mkdirs()) {
@@ -661,13 +712,22 @@ class LiteRtLmRuntimeAdapter(
             ),
         )
         try {
-            createdEngine.initialize()
+            // The SDK reads this process-wide flag inside initialize(). Loads are serialized by the
+            // lifecycle lock, and the flag is restored so no later engine inherits the request.
+            ExperimentalFlags.enableSpeculativeDecoding = speculation
+            try {
+                createdEngine.initialize()
+            } finally {
+                ExperimentalFlags.enableSpeculativeDecoding = null
+            }
             return createdEngine
         } catch (error: Throwable) {
             runRuntimeCleanupUnlessFatal(error) { createdEngine.close() }
             throw error
         }
     }
+
+    private class InitializedEngine(val engine: Engine, val drafterBuilt: Boolean, val drafterNote: String? = null)
 
     /**
      * Kept beside the model in its app-private directory, not in `cacheDir`: Android may clear
@@ -819,9 +879,10 @@ class LiteRtLmRuntimeAdapter(
         allowReclaim: Boolean,
         vision: Boolean,
         backend: ComputeBackend,
+        speculativeDrafter: Boolean,
         reclaimableBytes: Long = 0L,
     ) {
-        val memoryReason = memoryBlockReason(modelPath, contextWindowTokens, allowReclaim, vision, backend, reclaimableBytes)
+        val memoryReason = memoryBlockReason(modelPath, contextWindowTokens, allowReclaim, vision, backend, reclaimableBytes, speculativeDrafter)
         if (memoryReason != null) throw IllegalStateException(memoryReason)
 
         val modelFile = File(modelPath)
@@ -845,6 +906,7 @@ class LiteRtLmRuntimeAdapter(
         vision: Boolean,
         backend: ComputeBackend,
         reclaimableBytes: Long = 0L,
+        speculativeDrafter: Boolean = false,
     ): String? {
         val manager = appContext.getSystemService(ActivityManager::class.java)
         val memory = MemorySnapshotReader(manager).read()
@@ -861,6 +923,7 @@ class LiteRtLmRuntimeAdapter(
             allowReclaim = allowReclaim,
             visionEncoderLoaded = vision,
             backend = backend,
+            speculativeDrafter = speculativeDrafter,
             reclaimableBytes = reclaimableBytes,
         )
     }
@@ -891,6 +954,7 @@ class LiteRtLmRuntimeAdapter(
         conversation = null
         engine = null
         visionReady = false
+        engineDrafterBuilt = false
         selectedCompute = null
         selectedCapabilities = null
         activeOptions = ComputeOptions()
@@ -924,6 +988,10 @@ class LiteRtLmRuntimeAdapter(
         val rememberPreferred: Boolean = false,
         /** Context the engine was created with. Set by initializeTextBackend for the attempt that succeeded. */
         val contextWindowTokens: Int = DEFAULT_LITERT_CONTEXT_WINDOW_TOKENS,
+        /** The MTP drafter was built at initialization; conversations inherit it unless told otherwise. */
+        val drafterBuilt: Boolean = false,
+        /** Plain-language note when Auto's drafter failed and the engine was rebuilt without it. */
+        val drafterNote: String? = null,
     )
 
     private companion object {

@@ -159,10 +159,11 @@ internal fun AdvancedComputePanel(
         }
         SectionLabel("Experimental")
         if (capabilities?.supportsSpeculativeDecoding == true) {
-            AdvancedField("Speculative decoding", "Uses the model's built-in draft model to guess tokens ahead; may need extra memory.",
+            AdvancedField("Speculative decoding", "Uses the model's built-in draft model to guess tokens ahead. The model checks every guess, " +
+                "so replies are its own; only the speed changes. Auto turns it on for GPU, where it is faster. Needs extra memory.",
                 "advanced_speculative", experimental = true) {
                 AdvancedChoices(listOf<Boolean?>(null, false, true), effective.speculativeDecoding,
-                    { when (it) { null -> "Model default"; true -> "On"; false -> "Off" } }) {
+                    { when (it) { null -> "Auto"; true -> "On"; false -> "Off" } }) {
                     onOptionsChange(options.copy(speculativeDecoding = it))
                 }
             }

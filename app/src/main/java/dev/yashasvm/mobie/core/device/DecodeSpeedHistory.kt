@@ -24,6 +24,8 @@ data class DecodeRunSettings(
     val speculativeDecoding: Boolean? = null,
     val resolvedCpuThreads: Int? = null,
     val resolvedContextTokens: Int? = null,
+    /** Whether the drafter actually ran. Auto runs it on GPU but not CPU, and a failed drafter falls back. */
+    val resolvedSpeculativeDecoding: Boolean? = null,
 ) {
     internal fun forBackend(backend: ComputeBackend): DecodeRunSettings =
         if (backend == ComputeBackend.CPU) this else copy(cpuThreads = null, resolvedCpuThreads = null)
@@ -37,6 +39,7 @@ data class DecodeRunSettings(
             speculativeDecoding = options.speculativeDecoding,
             resolvedCpuThreads = actual?.cpuThreads,
             resolvedContextTokens = actual?.contextTokens,
+            resolvedSpeculativeDecoding = actual?.speculativeDecoding,
         ).let { if (actual == null) it else it.forBackend(actual.backend) }
     }
 }
@@ -51,7 +54,8 @@ data class DecodeMeasurement(val backend: ComputeBackend, val settings: DecodeRu
 data class DecodeMatch(val speed: DecodeSpeed, val exactSettings: Boolean)
 
 /**
- * Never compare different activation/speculation modes. Within that mode, prefer exact settings,
+ * Never compare different activation/speculation modes, nor runs with and without the drafter
+ * when both are known. Within that mode, prefer exact settings,
  * then nearby requested thread/context counts, then resolved counts. Unknown Auto resolutions are
  * not labeled exact matches to known resolutions.
  */
@@ -63,9 +67,12 @@ fun matchDecodeMeasurement(
     val wanted = current.forBackend(backend)
     val nearest = measurements
         .filter { it.backend == backend && it.settings.activationType == wanted.activationType &&
-            it.settings.speculativeDecoding == wanted.speculativeDecoding }
+            it.settings.speculativeDecoding == wanted.speculativeDecoding &&
+            (it.settings.resolvedSpeculativeDecoding == null || wanted.resolvedSpeculativeDecoding == null ||
+                it.settings.resolvedSpeculativeDecoding == wanted.resolvedSpeculativeDecoding) }
         .minWithOrNull(
             compareBy<DecodeMeasurement>(
+                { if (it.settings.resolvedSpeculativeDecoding == wanted.resolvedSpeculativeDecoding) 0 else 1 },
                 { settingDistance(it.settings.cpuThreads, wanted.cpuThreads) },
                 { settingDistance(it.settings.contextTokens, wanted.contextTokens) },
                 { settingDistance(it.settings.resolvedCpuThreads, wanted.resolvedCpuThreads) },
@@ -176,32 +183,38 @@ internal class DecodeSpeedHistory(
             settings.speculativeDecoding?.toString() ?: AUTO,
             settings.resolvedCpuThreads?.toString() ?: AUTO,
             settings.resolvedContextTokens?.toString() ?: AUTO,
+            settings.resolvedSpeculativeDecoding?.toString() ?: AUTO,
             samples.joinToString(","),
         ).joinToString(";")
 
         companion object {
             fun decode(line: String): Group? {
-                val parts = line.split(';', limit = 7)
-                if (parts.size != 7) return null
+                val parts = line.split(';', limit = 8)
+                if (parts.size != 8) return null
                 val threads = setting(parts[0], 1..8) ?: return null
                 val context = setting(parts[1], 1_024..4_096) ?: return null
                 val activation = ActivationType.entries.find { it.name == parts[2] } ?: return null
-                val speculative = when (parts[3]) {
-                    AUTO -> null
-                    "true" -> true
-                    "false" -> false
-                    else -> return null
-                }
+                val speculative = flag(parts[3]) ?: return null
                 val resolvedThreads = setting(parts[4], 1..8) ?: return null
                 // Fixed-context artifacts can exceed the adjustable 4K UI limit.
                 val resolvedContext = setting(parts[5], 1..Int.MAX_VALUE) ?: return null
-                val samples = parts[6].split(',').mapNotNull {
+                val resolvedSpeculative = flag(parts[6]) ?: return null
+                val samples = parts[7].split(',').mapNotNull {
                     it.toDoubleOrNull()?.takeIf { value -> value.isFinite() && value > 0 }
                 }.takeLast(MAX_SAMPLES)
                 if (samples.isEmpty()) return null
-                return Group(DecodeRunSettings(threads.value, context.value, activation, speculative,
-                    resolvedThreads.value, resolvedContext.value), samples)
+                return Group(DecodeRunSettings(threads.value, context.value, activation, speculative.value,
+                    resolvedThreads.value, resolvedContext.value, resolvedSpeculative.value), samples)
             }
+
+            private fun flag(text: String): Flag? = when (text) {
+                AUTO -> Flag(null)
+                "true" -> Flag(true)
+                "false" -> Flag(false)
+                else -> null
+            }
+
+            private class Flag(val value: Boolean?)
 
             /** Null when the text is not Auto or a number in range; Auto is a value, not a failure. */
             private fun setting(text: String, range: IntRange): Setting? = when (text) {
@@ -214,7 +227,8 @@ internal class DecodeSpeedHistory(
     }
 
     internal companion object {
-        const val SCHEMA_VERSION = 4
+        /** 5: Auto speculation became "on for GPU", and groups record whether the drafter ran. */
+        const val SCHEMA_VERSION = 5
         const val MAX_HISTORIES = 64
         const val MAX_GROUPS_PER_BUCKET = 4
         const val MAX_SAMPLES = 8

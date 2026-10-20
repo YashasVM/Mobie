@@ -11,8 +11,12 @@ data class ActiveCompute(
     val cpuThreads: Int? = null,
     val fallbackReason: String? = null,
     val contextTokens: Int? = null,
+    /** True when the current conversation decodes with the model's built-in draft model (MTP). */
+    val speculativeDecoding: Boolean = false,
 ) {
-    val label: String get() = if (backend == ComputeBackend.CPU) "CPU · $cpuThreads threads" else backend.name
+    val label: String get() =
+        (if (backend == ComputeBackend.CPU) "CPU · $cpuThreads threads" else backend.name) +
+            if (speculativeDecoding) " · draft model" else ""
 }
 
 internal object ComputeBackendPolicy {

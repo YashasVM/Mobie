@@ -107,6 +107,7 @@ class ModelDownloadManager(context: Context) {
             .putString(ModelDownloadWorker.KEY_QUANTIZATION, artifact.quantization)
             .putLong(ModelDownloadWorker.KEY_SIZE, artifact.sizeBytes)
             .apply { artifact.sha256?.let { putString(ModelDownloadWorker.KEY_SHA256, it) } }
+            .apply { artifact.speculativeDrafter?.let { putString(ModelDownloadWorker.KEY_SPECULATIVE_DRAFTER, it.toString()) } }
             .build()
         val request = OneTimeWorkRequestBuilder<ModelDownloadWorker>()
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
@@ -152,6 +153,9 @@ class ModelDownloadManager(context: Context) {
                 sha256 = expectedSha,
                 format = ModelFormat.LITERT_LM,
                 quantization = properties.getProperty("quantization")?.ifBlank { null },
+                // Absent in installs made before header inspection; the load still reads ModelInfo.
+                speculativeDrafter = properties.getProperty(ModelDownloadWorker.KEY_SPECULATIVE_DRAFTER)
+                    ?.toBooleanStrictOrNull(),
             )
             InstalledModelEntry(
                 model = AiModel(

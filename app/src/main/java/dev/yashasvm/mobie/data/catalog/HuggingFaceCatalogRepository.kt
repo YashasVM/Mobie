@@ -2,10 +2,12 @@ package dev.yashasvm.mobie.data.catalog
 
 import dev.yashasvm.mobie.core.model.AiModel
 import dev.yashasvm.mobie.core.model.ArtifactExecutionTarget
+import dev.yashasvm.mobie.core.model.LiteRtArtifactHeader
 import dev.yashasvm.mobie.core.model.ModelArtifact
 import dev.yashasvm.mobie.core.model.ModelFormat
 import dev.yashasvm.mobie.core.model.ModelType
 import dev.yashasvm.mobie.core.model.inferArtifactContextWindow
+import dev.yashasvm.mobie.core.model.inferArtifactExecutionTarget
 import dev.yashasvm.mobie.core.model.inferArtifactQuantization
 import dev.yashasvm.mobie.core.security.HuggingFaceTokenStore
 import java.net.URLEncoder
@@ -18,6 +20,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import okhttp3.OkHttpClient
@@ -72,9 +75,13 @@ class HuggingFaceCatalogRepository(
 ) {
     private val json = Json { ignoreUnknownKeys = true }
     private val detailCache = ModelDetailCache<HfModel>()
+    private val headerInspector = LiteRtHeaderInspector(client) { tokenStore.read() }
 
     /** Drops optional in-memory metadata without deleting downloaded models or optimized files. */
-    fun trimMemory() = detailCache.clear()
+    fun trimMemory() {
+        detailCache.clear()
+        headerInspector.clear()
+    }
 
     suspend fun featured(): Result<List<AiModel>> = fetchModels(
         "https://huggingface.co/api/models?author=litert-community&sort=downloads&direction=-1&limit=60&full=true",
@@ -111,7 +118,10 @@ class HuggingFaceCatalogRepository(
                     }
                 }.awaitAll()
             }
-            models.mapNotNull(HfModel::toDomain).filter { model ->
+            val inspected = coroutineScope {
+                models.map { model -> async { withArtifactHeaders(model, limiter) } }.awaitAll()
+            }
+            inspected.mapNotNull(HfModel::toDomain).filter { model ->
                 model.artifacts.any {
                     it.format == ModelFormat.LITERT_LM &&
                         it.sizeBytes > 0 &&
@@ -119,6 +129,23 @@ class HuggingFaceCatalogRepository(
                 } && model.type in setOf(ModelType.TEXT_GENERATION, ModelType.VISION)
             }
         }
+    }
+
+    /** Reads container headers only for files whose name or repository tags cannot be trusted. */
+    private suspend fun withArtifactHeaders(model: HfModel, limiter: Semaphore): HfModel {
+        val repoId = model.repoId()
+        val targets = model.headerProbeTargets()
+        if (targets.isEmpty()) return model
+        val headers = coroutineScope {
+            targets.map { fileName ->
+                async {
+                    limiter.withPermit {
+                        headerInspector.inspect(huggingFaceArtifactUrl(repoId, fileName, model.sha))
+                    }?.let { fileName to it }
+                }
+            }.awaitAll().filterNotNull().toMap()
+        }
+        return if (headers.isEmpty()) model else model.copy(artifactHeaders = headers)
     }
 
     private suspend fun fetchDetails(repoId: String, expectedRevision: String?): HfModel? = runCatching {
@@ -165,6 +192,16 @@ class HuggingFaceCatalogRepository(
     }
 }
 
+private val hubJson = Json { ignoreUnknownKeys = true }
+
+/** Maps one Hub model JSON object plus any inspected headers exactly as the catalog does. */
+internal fun catalogModelFromHubJson(body: String, headers: Map<String, LiteRtArtifactHeader> = emptyMap()): AiModel? =
+    hubJson.decodeFromString<HfModel>(body).copy(artifactHeaders = headers).toDomain()
+
+/** Whether the catalog would read container headers for this Hub model JSON, and for which files. */
+internal fun catalogHeaderProbeTargets(body: String): List<String> =
+    hubJson.decodeFromString<HfModel>(body).headerProbeTargets()
+
 @Serializable
 private data class HfModel(
     @SerialName("modelId") val modelId: String? = null,
@@ -177,8 +214,18 @@ private data class HfModel(
     val siblings: List<HfSibling> = emptyList(),
     val sha: String? = null,
     val artifactContextWindows: Map<String, Int> = emptyMap(),
+    /** Container headers read with range requests, keyed by Hub filename. Never serialized. */
+    @Transient val artifactHeaders: Map<String, LiteRtArtifactHeader> = emptyMap(),
 ) {
     fun repoId(): String = modelId ?: id.orEmpty()
+
+    /** Sized LiteRT-LM files whose name or repository tags cannot be trusted without the header. */
+    fun headerProbeTargets(): List<String> {
+        val typeUnknown = taggedType() == ModelType.UNKNOWN
+        return siblings.filter { file ->
+            (file.size ?: file.lfs?.size) != null && LiteRtHeaderInspector.shouldProbe(file.rfilename, typeUnknown)
+        }.map { it.rfilename }
+    }
 
     fun hasLiteRtArtifact(): Boolean = siblings.any { it.rfilename.endsWith(".litertlm", ignoreCase = true) }
 
@@ -207,16 +254,50 @@ private data class HfModel(
             val size = file.size ?: file.lfs?.size ?: return@mapNotNull null
             val contextWindowTokens = artifactContextWindows[file.rfilename]
                 ?: inferArtifactContextWindow(file.rfilename)
+            val header = artifactHeaders[file.rfilename]
+            val fileName = runtimeAwareArtifactFileName(file.rfilename, contextWindowTokens)
             ModelArtifact(
-                fileName = runtimeAwareArtifactFileName(file.rfilename, contextWindowTokens),
+                fileName = fileName,
                 downloadUrl = huggingFaceArtifactUrl(repoId, file.rfilename, sha),
                 sizeBytes = size,
                 sha256 = file.lfs?.sha256 ?: file.lfs?.oid?.removePrefix("sha256:"),
                 format = format,
                 quantization = inferArtifactQuantization(file.rfilename),
+                // A header that names a specific accelerator overrides a generic-looking filename.
+                executionTarget = if (header?.acceleratorRequirement != null) ArtifactExecutionTarget.HARDWARE_SPECIFIC
+                    else inferArtifactExecutionTarget(fileName),
                 contextWindowTokens = contextWindowTokens,
+                speculativeDrafter = header?.hasSpeculativeDrafter,
+                acceleratorRequirement = header?.acceleratorRequirement,
             )
         }
+        return AiModel(
+            id = repoId,
+            title = repoId.substringAfter('/'),
+            author = author ?: repoId.substringBefore('/', "Unknown"),
+            description = tags.take(4).joinToString(" · ").ifBlank { "Hugging Face model" },
+            downloads = downloads ?: 0,
+            gated = gated?.toString()?.trim('"') !in listOf(null, "false"),
+            license = tags.firstOrNull { it.startsWith("license:") }?.substringAfter(':'),
+            type = taggedType().takeIf { it != ModelType.UNKNOWN } ?: headerType(),
+            artifacts = artifacts,
+        )
+    }
+
+    /**
+     * Type for a repository without task tags, from the headers of its portable artifacts. Only a
+     * container with LLM metadata and a main decoder graph counts as a chat model.
+     */
+    private fun headerType(): ModelType {
+        val portableLlms = artifactHeaders.values.filter { it.isLlm && it.acceleratorRequirement == null }
+        return when {
+            portableLlms.isEmpty() -> ModelType.UNKNOWN
+            portableLlms.any { it.hasVisionEncoder } -> ModelType.VISION
+            else -> ModelType.TEXT_GENERATION
+        }
+    }
+
+    fun taggedType(): ModelType {
         val pipeline = pipeline_tag ?: tags.firstOrNull { it in setOf(
             "text-generation",
             "text2text-generation",
@@ -234,17 +315,7 @@ private data class HfModel(
             "automatic-speech-recognition", "text-to-speech" -> ModelType.AUDIO
             else -> ModelType.UNKNOWN
         }
-        return AiModel(
-            id = repoId,
-            title = repoId.substringAfter('/'),
-            author = author ?: repoId.substringBefore('/', "Unknown"),
-            description = tags.take(4).joinToString(" · ").ifBlank { "Hugging Face model" },
-            downloads = downloads ?: 0,
-            gated = gated?.toString()?.trim('"') !in listOf(null, "false"),
-            license = tags.firstOrNull { it.startsWith("license:") }?.substringAfter(':'),
-            type = type,
-            artifacts = artifacts,
-        )
+        return type
     }
 }
 

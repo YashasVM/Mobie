@@ -109,7 +109,8 @@ internal object AdvancedComputePolicy {
         val sized = compatibilityArtifact(artifact, options, capabilities) ?: return emptyMap()
         val context = contextOverride(options, capabilities)
         return listOf(ComputeBackend.AUTO, ComputeBackend.CPU, ComputeBackend.GPU).associateWith { backend ->
-            resolver.resolveBackend(sized, target, visionEncoderLoaded, backend, contextTokens = context)
+            resolver.resolveBackend(sized, target, visionEncoderLoaded, backend, contextTokens = context,
+                speculativeDecoding = options.speculativeDecoding)
         }
     }
 

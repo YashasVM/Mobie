@@ -370,6 +370,7 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
             setProperty("sourceFileName", sourceFileName)
             setProperty("sha256", expectedSha)
             setProperty("quantization", inputData.getString(KEY_QUANTIZATION).orEmpty())
+            inputData.getString(KEY_SPECULATIVE_DRAFTER)?.let { setProperty(KEY_SPECULATIVE_DRAFTER, it) }
             DownloadSourceIdentity.stamp(this, inputData.getString(KEY_URL).orEmpty())
             ModelFileVerification.stampInstalledLength(this, destination)
             if (!trustedSha.isNullOrBlank()) ModelFileVerification.stamp(this, destination, trustedSha)
@@ -405,6 +406,8 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
         const val KEY_FILE_NAME = "fileName"
         const val KEY_QUANTIZATION = "quantization"
         const val KEY_SHA256 = "sha256"
+        /** "true"/"false" from the inspected container header; absent when it was not inspected. */
+        const val KEY_SPECULATIVE_DRAFTER = "speculativeDrafter"
         const val KEY_SIZE = "size"
         const val KEY_DOWNLOADED = "downloaded"
         const val KEY_SPEED = "speed"

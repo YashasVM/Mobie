@@ -29,17 +29,24 @@ internal object RuntimeLoadMemoryPolicy {
         artifact: ModelArtifact,
         backend: ComputeBackend = ComputeBackend.CPU,
         visionEncoderLoaded: Boolean = false,
+        /** True when this load builds an MTP drafter; see [SpeculativeDecodingPolicy.buildsDrafter]. */
+        speculativeDrafter: Boolean = false,
     ): LiteRtRuntimeMemoryEstimate? {
         val base = estimateLiteRtRuntimeMemory(artifact, backend.privateWeightCopy, visionEncoderLoaded)
             ?: return null
-        if (!backend.privateWeightCopy) return base
-        val graphicsBytesPerToken = max(576L * 1024L, artifact.sizeBytes / 1_024)
-        val graphicsBytes = graphicsBytesPerToken * base.contextWindowTokens.toLong()
+        val graphicsBytes = if (backend.privateWeightCopy) {
+            max(576L * 1024L, artifact.sizeBytes / 1_024) * base.contextWindowTokens.toLong()
+        } else {
+            0L
+        }
+        val drafterBytes = if (speculativeDrafter) SpeculativeDecodingPolicy.DRAFTER_RAM_ALLOWANCE_BYTES else 0L
+        val extra = graphicsBytes + drafterBytes
+        if (extra == 0L) return base
         return base.copy(
-            estimatedRamBytes = base.estimatedRamBytes + graphicsBytes,
-            anonymousBytes = base.anonymousBytes + graphicsBytes,
-            // Include graphics allocation in overhead so the displayed memory breakdown adds up.
-            runtimeOverheadBytes = base.runtimeOverheadBytes + graphicsBytes,
+            estimatedRamBytes = base.estimatedRamBytes + extra,
+            anonymousBytes = base.anonymousBytes + extra,
+            // Include graphics and drafter allocations in overhead so the displayed breakdown adds up.
+            runtimeOverheadBytes = base.runtimeOverheadBytes + extra,
         )
     }
 
@@ -91,6 +98,7 @@ internal object RuntimeLoadMemoryPolicy {
         allowReclaim: Boolean = false,
         backend: ComputeBackend = ComputeBackend.CPU,
         visionEncoderLoaded: Boolean = false,
+        speculativeDrafter: Boolean = false,
         /**
          * RAM held by the runtime this load replaces. A reload is admitted before that runtime is
          * released, so its estimate counts as available here instead of being measured after release.
@@ -106,7 +114,7 @@ internal object RuntimeLoadMemoryPolicy {
         if (modelWeightsBytes <= 0 || totalRamBytes <= 0) return "Model size or device RAM is unknown."
         val estimate = estimate(ModelArtifact("model.litertlm", "", modelWeightsBytes,
             format = ModelFormat.LITERT_LM, contextWindowTokens = contextWindowTokens),
-            backend, visionEncoderLoaded)
+            backend, visionEncoderLoaded, speculativeDrafter)
             ?: return "Model memory could not be estimated."
         val reclaimable = reclaimableBytes.coerceAtLeast(0L)
         if (reclaimable == 0L) {
@@ -127,10 +135,11 @@ internal object RuntimeLoadMemoryPolicy {
         contextWindowTokens: Int,
         backend: ComputeBackend,
         visionEncoderLoaded: Boolean,
+        speculativeDrafter: Boolean = false,
     ): Long = estimate(
         ModelArtifact("model.litertlm", "", modelWeightsBytes,
             format = ModelFormat.LITERT_LM, contextWindowTokens = contextWindowTokens),
-        backend, visionEncoderLoaded,
+        backend, visionEncoderLoaded, speculativeDrafter,
     )?.estimatedRamBytes ?: 0L
 
     fun generationBlockReason(

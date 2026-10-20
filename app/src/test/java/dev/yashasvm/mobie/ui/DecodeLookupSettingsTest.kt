@@ -24,7 +24,7 @@ class DecodeLookupSettingsTest {
     private val recorded = DecodeMeasurement(ComputeBackend.CPU, DecodeRunSettings.fromApplied(applied, running), speed)
 
     @Test fun `recording keeps activation speculation and resolved counts`() {
-        assertEquals(DecodeRunSettings(null, null, ActivationType.FP16, true, 4, 2_048), recorded.settings)
+        assertEquals(DecodeRunSettings(null, null, ActivationType.FP16, true, 4, 2_048, resolvedSpeculativeDecoding = false), recorded.settings)
     }
 
     @Test fun `the loaded settings match their own measurement exactly`() {

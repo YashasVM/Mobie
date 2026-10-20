@@ -81,22 +81,25 @@ class DecodeSpeedHistoryTest {
         val upgraded = DecodeSpeedHistory(store, "device-build-a", "0.19.0")
         assertNull(measured(upgraded, "model", ComputeBackend.CPU))
         upgraded.record("model", ComputeBackend.CPU, auto, 20.0, 32)
-        val newSchema = DecodeSpeedHistory(store, "device-build-a", "0.19.0", schemaVersion = 5)
+        val newSchema = DecodeSpeedHistory(store, "device-build-a", "0.19.0", schemaVersion = 6)
         assertNull(measured(newSchema, "model", ComputeBackend.CPU))
-        assertTrue(values.keys.none { it.startsWith("decode.v4.") })
+        assertTrue(values.keys.none { it.startsWith("decode.v5.") })
         values["decode.legacy-unversioned-hash"] = "30.0"
-        assertNull(measured(DecodeSpeedHistory(store, "device-build-a", "0.19.0", schemaVersion = 5), "model", ComputeBackend.CPU))
+        assertNull(measured(DecodeSpeedHistory(store, "device-build-a", "0.19.0", schemaVersion = 6), "model", ComputeBackend.CPU))
         assertTrue("decode.legacy-unversioned-hash" !in values)
     }
 
     @Test fun `older entries without complete settings are removed, not reused`() {
-        assertEquals(4, DecodeSpeedHistory.SCHEMA_VERSION)
+        assertEquals(5, DecodeSpeedHistory.SCHEMA_VERSION)
         history.record("model", ComputeBackend.CPU, auto, 7.0, 32)
         values["decode.v2.legacy"] = "1.0;auto;30.0"
         values["decode.v3.legacy"] = "4;auto;30.0"
+        // v4 groups were recorded when Auto speculation meant "off" and lack the drafter state.
+        values["decode.v4.legacy"] = "auto;auto;AUTO;auto;auto;auto;30.0"
         DecodeSpeedHistory(store, "device-build-a", "0.18.0")
         assertTrue(values.keys.none { it.startsWith("decode.v2.") })
         assertTrue(values.keys.none { it.startsWith("decode.v3.") })
+        assertTrue(values.keys.none { it.startsWith("decode.v4.") })
         assertEquals(7.0, measured(DecodeSpeedHistory(store, "device-build-a", "0.18.0"), "model", ComputeBackend.CPU)?.lowTokensPerSecond)
     }
 
@@ -166,7 +169,7 @@ class DecodeSpeedHistoryTest {
         history.record("model", ComputeBackend.CPU, auto, 7.0, 32)
         val key = values.keys.single { it != DecodeSpeedHistory.INDEX_KEY }
         val namespace = key.substringBeforeLast('.') + "."
-        repeat(100) { values[namespace + "orphan-$it"] = "1;auto;AUTO;auto;auto;auto;9.0" }
+        repeat(100) { values[namespace + "orphan-$it"] = "1;auto;AUTO;auto;auto;auto;auto;9.0" }
         repeat(100) { values["decode.legacy-$it"] = "99.0" }
         values["unrelated"] = "keep"
         val recreated = DecodeSpeedHistory(store, "device-build-a", "0.18.0")
@@ -238,7 +241,8 @@ class DecodeSpeedHistoryTest {
     @Test fun `applied settings capture actual counts without guessing default activation or speculation`() {
         val actual = ActiveCompute(ComputeBackend.CPU, cpuThreads = 3, contextTokens = 3_072)
         val captured = DecodeRunSettings.fromApplied(ComputeOptions(), actual)
-        assertEquals(auto.copy(resolvedCpuThreads = 3, resolvedContextTokens = 3_072), captured)
+        // The adapter always knows whether the drafter ran; false is a measured state, not a guess.
+        assertEquals(auto.copy(resolvedCpuThreads = 3, resolvedContextTokens = 3_072, resolvedSpeculativeDecoding = false), captured)
         assertEquals(auto, DecodeRunSettings.fromApplied(ComputeOptions(), null))
         val gpu = DecodeRunSettings.fromApplied(
             ComputeOptions(cpuThreads = 8, activationType = ActivationType.FP32, speculativeDecoding = false),
@@ -258,14 +262,31 @@ class DecodeSpeedHistoryTest {
         history.record("model", ComputeBackend.CPU, auto, 10.0, 32)
         val key = values.keys.single { it != DecodeSpeedHistory.INDEX_KEY }
         for (bad in listOf(
-            "auto;auto;unknown;auto;auto;auto;10.0",
-            "auto;auto;AUTO;maybe;auto;auto;10.0",
-            "auto;auto;AUTO;auto;99;auto;10.0",
-            "auto;auto;AUTO;auto;auto;0;10.0",
-            "auto;auto;AUTO;auto;auto;auto;NaN,-2",
+            "auto;auto;unknown;auto;auto;auto;auto;10.0",
+            "auto;auto;AUTO;maybe;auto;auto;auto;10.0",
+            "auto;auto;AUTO;auto;99;auto;auto;10.0",
+            "auto;auto;AUTO;auto;auto;0;auto;10.0",
+            "auto;auto;AUTO;auto;auto;auto;maybe;10.0",
+            "auto;auto;AUTO;auto;auto;auto;auto;NaN,-2",
+            "auto;auto;AUTO;auto;auto;auto;10.0",
         )) {
             values[key] = bad
             assertTrue(history.read("model", ComputeBackend.CPU).isEmpty())
         }
+    }
+
+    @Test fun `Auto runs with and without the drafter are never compared`() {
+        val withDrafter = DecodeRunSettings(null, null, resolvedSpeculativeDecoding = true)
+        val withoutDrafter = DecodeRunSettings(null, null, resolvedSpeculativeDecoding = false)
+        history.record("gemma", ComputeBackend.GPU, withoutDrafter, 50.0, 64)
+        history.record("gemma", ComputeBackend.GPU, withDrafter, 85.0, 64)
+        val recreated = DecodeSpeedHistory(store, "device-build-a", "0.18.0")
+        assertEquals(85.0, measured(recreated, "gemma", ComputeBackend.GPU, withDrafter)?.lowTokensPerSecond)
+        assertEquals(50.0, measured(recreated, "gemma", ComputeBackend.GPU, withoutDrafter)?.lowTokensPerSecond)
+        val match = matchDecodeMeasurement(recreated.read("gemma", ComputeBackend.GPU), ComputeBackend.GPU, withDrafter)
+        assertEquals(true, match?.exactSettings)
+        // A row that is not running has no resolved state; it prefers neither and stays a near match.
+        val pending = matchDecodeMeasurement(recreated.read("gemma", ComputeBackend.GPU), ComputeBackend.GPU, DecodeRunSettings(null, null))
+        assertEquals(false, pending?.exactSettings)
     }
 }

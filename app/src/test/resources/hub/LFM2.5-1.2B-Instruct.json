@@ -1,0 +1,69 @@
+{
+ "id": "litert-community/LFM2.5-1.2B-Instruct",
+ "modelId": "litert-community/LFM2.5-1.2B-Instruct",
+ "author": "litert-community",
+ "downloads": 3013,
+ "gated": false,
+ "pipeline_tag": "text-generation",
+ "tags": [
+  "litert-lm",
+  "litert",
+  "litertlm",
+  "on-device",
+  "edge",
+  "hybrid",
+  "liquid",
+  "text-generation",
+  "base_model:LiquidAI/LFM2.5-1.2B-Instruct",
+  "base_model:quantized:LiquidAI/LFM2.5-1.2B-Instruct",
+  "license:other",
+  "region:us"
+ ],
+ "sha": "73c3cabdcf10ca251c63c9707e52ee0f6a25ea17",
+ "siblings": [
+  {
+   "rfilename": ".gitattributes",
+   "size": 1736
+  },
+  {
+   "rfilename": "LFM2.5-1.2B-Instruct_int4.litertlm",
+   "size": 736015744,
+   "lfs": {
+    "sha256": "e904729a8a8a0160658cb7cd22992e270a0547c05cc45b08c47ece5c0e29425b",
+    "size": 736015744
+   }
+  },
+  {
+   "rfilename": "LFM2.5-1.2B-Instruct_int4_gpu.litertlm",
+   "size": 736220768,
+   "lfs": {
+    "sha256": "8d3a4d73e121166ad377e9c51148d38ee383c223661f4219e01f22a0fe1d4a1a",
+    "size": 736220768
+   }
+  },
+  {
+   "rfilename": "LFM2.5-1.2B-Instruct_int8.litertlm",
+   "size": 1247091440,
+   "lfs": {
+    "sha256": "ed8201f88a1a116218bf03cf7cc5c33accdc2f6f502aa8d682f616beea1ec870",
+    "size": 1247091440
+   }
+  },
+  {
+   "rfilename": "LICENSE",
+   "size": 10644
+  },
+  {
+   "rfilename": "README.md",
+   "size": 17136
+  },
+  {
+   "rfilename": "hfmodels.json",
+   "size": 5009
+  },
+  {
+   "rfilename": "litertlm_manifest.json",
+   "size": 15890
+  }
+ ]
+}
