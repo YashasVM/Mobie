@@ -43,33 +43,6 @@ internal object ConversationHistoryPolicy {
         if (history.isEmpty()) return emptyList()
 
         val budget = replayBudget(contextWindowTokens)
-        val turns = mutableListOf<MutableList<RuntimeMessage>>()
-        for (message in history) {
-            val text = message.text.trim()
-            if (text.isEmpty()) continue
-
-            if (message.fromUser) {
-                turns += mutableListOf(
-                    RuntimeMessage(
-                        fromUser = true,
-                        text = text,
-                        interrupted = message.interrupted,
-                        imagePath = message.imagePath,
-                    ),
-                )
-            } else {
-                // Ignore assistant-only prefixes; LiteRT restoration must always be user-led.
-                turns.lastOrNull()?.add(
-                    RuntimeMessage(
-                        fromUser = false,
-                        text = text,
-                        interrupted = message.interrupted,
-                    ),
-                )
-            }
-        }
-        if (turns.isEmpty()) return emptyList()
-
         val selectedNewestFirst = mutableListOf<List<RuntimeMessage>>()
         var selectedMessages = 0
         var selectedChars = 0
@@ -82,7 +55,7 @@ internal object ConversationHistoryPolicy {
             GenerationContextPolicy.replayTextBudget(contextWindowTokens, hasImage),
         )
 
-        for (turn in turns.asReversed()) {
+        for (turn in newestTurns(history)) {
             // A stopped/failed generation may leave either a user-only turn or a partial assistant
             // response. Keep both forms visible in history, but never seed LiteRT with unfinished
             // output because the next response must continue from the last fully completed turn.
@@ -122,6 +95,29 @@ internal object ConversationHistoryPolicy {
         }
 
         return selectedNewestFirst.asReversed().flatten()
+    }
+
+    /** Scan only the suffix needed by replay; never normalize/copy an unused older prefix. */
+    private fun newestTurns(history: List<RuntimeMessage>): Sequence<List<RuntimeMessage>> = sequence {
+        val iterator = history.listIterator(history.size)
+        var reversedTurn = mutableListOf<RuntimeMessage>()
+        while (iterator.hasPrevious()) {
+            val message = iterator.previous()
+            val text = message.text.trim()
+            if (text.isEmpty()) continue
+            reversedTurn += RuntimeMessage(
+                fromUser = message.fromUser,
+                text = text,
+                interrupted = message.interrupted,
+                imagePath = if (message.fromUser) message.imagePath else null,
+            )
+            if (message.fromUser) {
+                yield(reversedTurn.asReversed())
+                // Do not mutate a yielded list: the selector may retain it in the result.
+                reversedTurn = mutableListOf()
+            }
+        }
+        // Any remaining assistant-only prefix has no user turn and is not replayable.
     }
 
     /**
