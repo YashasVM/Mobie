@@ -1,8 +1,8 @@
 package dev.yashasvm.mobie
 
-import android.app.ActivityManager
 import android.content.Context
 import android.os.Build
+import android.os.Debug
 import android.os.PowerManager
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
@@ -34,6 +34,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -42,8 +43,11 @@ import org.junit.runner.RunWith
 @OptIn(ExperimentalApi::class)
 class LiteRtCpuThreadBenchmarkTest {
     private companion object {
-        const val PROMPT = "Explain in a few concise sentences why local AI inference can be useful on a phone."
-        const val MAX_OUTPUT_TOKENS = 64
+        const val PROMPT = "Write a numbered list of exactly twelve practical tips for keeping a phone running smoothly. " +
+            "For each tip, write two complete sentences that explain what to do and why it helps. " +
+            "Do not add an introduction or a conclusion. /no_think"
+        const val MAX_OUTPUT_TOKENS = 256
+        const val MIN_NATIVE_DECODE_TOKENS = 64
         const val CONTEXT_TOKENS = 1_280
         val THREAD_COUNTS = listOf(1, 2, 4)
     }
@@ -81,7 +85,7 @@ class LiteRtCpuThreadBenchmarkTest {
         ExperimentalFlags.enableBenchmark = true
         // Warm each configuration before measurement so the first candidate cannot win merely
         // because the baseline built LiteRT's optimized cache for it.
-        for (threads in THREAD_COUNTS) runCase(context, path, threads)
+        val warmups = THREAD_COUNTS.map { threads -> runCase(context, path, threads) }
         val results = mutableListOf<Pair<Int, BenchmarkResult>>()
         // Every permutation occurs once. Each thread count appears in each position twice.
         val orders = listOf(
@@ -91,10 +95,13 @@ class LiteRtCpuThreadBenchmarkTest {
         for ((round, order) in orders.withIndex()) {
             for (threads in order) results += round to runCase(context, path, threads)
         }
+        val comparable = comparisonIsValid(warmups + results.map { it.second })
         val metricsFile = File(checkNotNull(context.getExternalFilesDir(null)), "mobie-cpu-thread-benchmark.txt")
         metricsFile.writeText(
             buildString {
                 appendLine("model=${artifact.fileName}")
+                appendLine("protocol=mobie-cpu-thread-sustained-v2;prompt_id=phone-care-twelve-tips-v1")
+                appendLine("minimum_native_decode_tokens=$MIN_NATIVE_DECODE_TOKENS;comparison_valid=$comparable")
                 appendLine("model_sha256=${artifact.sha256}")
                 appendLine("model_revision=6aa2daf8aba4aa456797fb8040b36a3948bcfda7")
                 appendLine("quantization=INT4;backend=CPU;context_tokens=$CONTEXT_TOKENS;output_budget=$MAX_OUTPUT_TOKENS")
@@ -104,7 +111,12 @@ class LiteRtCpuThreadBenchmarkTest {
                 appendLine("prompt=$PROMPT")
                 appendLine("sampler=top_k_1,top_p_1,temperature_0,seed_0;warmup_runs_per_configuration=1;measured_runs_per_configuration=6")
                 appendLine("latency_milestones=nonempty_SDK_chunks_not_exact_token_indices;pss_sampling_interval_ms=100")
+                warmups.forEach { result -> appendLine("warmup=true;${result.toLine()}") }
                 results.forEach { (round, result) -> appendLine("round=$round;${result.toLine()}") }
+                if (!comparable) {
+                    appendLine("comparison_error=short_output_or_mismatched_native_token_counts_or_output;no_speedup_summary")
+                    return@buildString
+                }
                 val baseline = results.filter { it.second.threadCount == 2 }.map { it.second.decodeTokensPerSecond }.median()
                 for (threads in THREAD_COUNTS) {
                     val runs = results.filter { it.second.threadCount == threads }.map { it.second }
@@ -120,28 +132,21 @@ class LiteRtCpuThreadBenchmarkTest {
                 "cp ${metricsFile.absolutePath} /sdcard/mobie-cpu-thread-benchmark.txt",
             ),
         ).use { it.readBytes() }
+        assertTrue("CPU comparison requires sustained native output and identical token counts/output; raw rows were retained.", comparable)
         Unit
     }
 
     private suspend fun runCase(context: Context, modelPath: String, threadCount: Int): BenchmarkResult =
         withContext(Dispatchers.Default) {
             coroutineScope {
-                val manager = context.getSystemService(ActivityManager::class.java)
-                fun pssBytes(): Long = manager.getProcessMemoryInfo(intArrayOf(android.os.Process.myPid()))
-                    .firstOrNull()?.totalPss?.toLong()?.times(1024L) ?: 0L
+                // ActivityManager's process PSS can be rate-limited and stale at this cadence.
+                fun pssBytes(): Long = Debug.getPss() * 1024L
                 fun thermalStatus(): Int = if (Build.VERSION.SDK_INT >= 29) {
                     context.getSystemService(PowerManager::class.java).currentThermalStatus
                 } else 0
                 val thermalStart = thermalStatus()
                 val thermalMax = AtomicInteger(thermalStart)
                 val sampledPeakPss = AtomicLong(pssBytes())
-                val monitor = launch {
-                    while (isActive) {
-                        sampledPeakPss.accumulateAndGet(pssBytes(), ::maxOf)
-                        thermalMax.accumulateAndGet(thermalStatus(), ::maxOf)
-                        delay(100)
-                    }
-                }
                 val modelFile = File(modelPath)
                 val engine = Engine(
                     EngineConfig(
@@ -151,6 +156,13 @@ class LiteRtCpuThreadBenchmarkTest {
                         cacheDir = File(checkNotNull(modelFile.parentFile), ".litert-cache").absolutePath,
                     ),
                 )
+                val monitor = launch {
+                    while (isActive) {
+                        sampledPeakPss.accumulateAndGet(pssBytes(), ::maxOf)
+                        thermalMax.accumulateAndGet(thermalStatus(), ::maxOf)
+                        delay(100)
+                    }
+                }
                 try {
                     val loadStarted = SystemClock.elapsedRealtime()
                     engine.initialize()
@@ -182,8 +194,10 @@ class LiteRtCpuThreadBenchmarkTest {
                         val generationMs = SystemClock.elapsedRealtime() - started
                         assertTrue("LiteRT produced no visible output for threadCount=$threadCount", firstVisibleMs != null)
                         val benchmark = conversation.getBenchmarkInfo()
-                        assertTrue("Invalid decode throughput for threadCount=$threadCount", benchmark.lastDecodeTokensPerSecond > 0.0)
-                        assertTrue("Invalid prefill throughput for threadCount=$threadCount", benchmark.lastPrefillTokensPerSecond > 0.0)
+                        assertTrue("Invalid decode throughput for threadCount=$threadCount",
+                            benchmark.lastDecodeTokensPerSecond.isFinite() && benchmark.lastDecodeTokensPerSecond > 0.0)
+                        assertTrue("Invalid prefill throughput for threadCount=$threadCount",
+                            benchmark.lastPrefillTokensPerSecond.isFinite() && benchmark.lastPrefillTokensPerSecond > 0.0)
                         sampledPeakPss.accumulateAndGet(pssBytes(), ::maxOf)
                         BenchmarkResult(
                             threadCount, benchmark.lastDecodeTokensPerSecond, benchmark.lastPrefillTokensPerSecond,
@@ -203,6 +217,30 @@ class LiteRtCpuThreadBenchmarkTest {
         }
 
     private fun List<Double>.median(): Double = sorted().let { (it[(size - 1) / 2] + it[size / 2]) / 2 }
+
+    private fun comparisonIsValid(results: List<BenchmarkResult>): Boolean {
+        val reference = results.firstOrNull() ?: return false
+        return results.all { result ->
+            result.decodeTokenCount >= MIN_NATIVE_DECODE_TOKENS &&
+                result.decodeTokenCount == reference.decodeTokenCount &&
+                result.prefillTokenCount == reference.prefillTokenCount &&
+                result.output.isNotBlank() && result.output == reference.output
+        }
+    }
+
+    /** Pure fixture validation also runs when the physical-device probe is skipped. */
+    @Test
+    fun refusesShortOrMismatchedCpuComparisons() {
+        val reference = BenchmarkResult(1, 10.0, 20.0, 64, 40, 100, 120, 100,
+            200, 1000, 1000L, 0, 0, 0, "identical generated answer")
+        assertTrue(comparisonIsValid(listOf(reference, reference.copy(threadCount = 4))))
+        assertFalse(comparisonIsValid(emptyList()))
+        assertFalse(comparisonIsValid(listOf(reference.copy(decodeTokenCount = 2))))
+        assertFalse(comparisonIsValid(listOf(reference, reference.copy(decodeTokenCount = 65))))
+        assertFalse(comparisonIsValid(listOf(reference, reference.copy(prefillTokenCount = 41))))
+        assertFalse(comparisonIsValid(listOf(reference, reference.copy(output = "different answer"))))
+        assertFalse(comparisonIsValid(listOf(reference.copy(output = ""))))
+    }
 
     private data class BenchmarkResult(
         val threadCount: Int,

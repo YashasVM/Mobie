@@ -27,8 +27,8 @@ jobs:
         run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
       - name: Verify release JNI names
         run: |
-          python3 scripts/test_verify_litert_release.py
-          python3 scripts/perf/test_summarize_gpu_results.py
+          python3 -m unittest discover -s scripts -p 'test_*.py'
+          python3 -m unittest discover -s scripts/perf -p 'test_*.py'
           ./gradlew --no-daemon assembleRelease 2>&1 | tee release-build.log
           if grep -q 'An error occurred when parsing kotlin metadata' release-build.log; then
             echo "::error::R8 cannot parse dependency Kotlin metadata; use a compatible optimizer."
@@ -67,7 +67,7 @@ jobs:
           profile: pixel_7_pro
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: ./gradlew --no-daemon connectedDebugAndroidTest
+          script: bash scripts/run-ui-smoke.sh
       - name: Upload emulator smoke diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -76,6 +76,7 @@ jobs:
           path: |
             app/build/reports/androidTests/connected/
             app/build/outputs/androidTest-results/connected/
+            app/build/ui-smoke-evidence/
           if-no-files-found: warn
 
   runtime-e2e:
@@ -103,7 +104,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -memory 4096
           disable-animations: true
           script: |
-            ./gradlew --no-daemon connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=dev.yashasvm.mobie.LiteRtEndToEndTest,dev.yashasvm.mobie.LiteRtCpuThreadBenchmarkTest,dev.yashasvm.mobie.LiteRtConversationReconfigurationTest,dev.yashasvm.mobie.LiteRtConversationReconfigureBenchmarkTest,dev.yashasvm.mobie.core.runtime.LiteRtMessageTextTest -Pandroid.testInstrumentationRunnerArguments.litertE2E=true -Pandroid.testInstrumentationRunnerArguments.litertReconfigureBenchmark=true -Pandroid.testInstrumentationRunnerArguments.buildRevision=${{ github.event.pull_request.head.sha || github.sha }}
+            ./gradlew --no-daemon connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=dev.yashasvm.mobie.LiteRtEndToEndTest,dev.yashasvm.mobie.LiteRtCpuThreadBenchmarkTest,dev.yashasvm.mobie.LiteRtGpuBenchmarkTest,dev.yashasvm.mobie.LiteRtConversationReconfigurationTest,dev.yashasvm.mobie.LiteRtConversationReconfigureBenchmarkTest,dev.yashasvm.mobie.core.runtime.LiteRtMessageTextTest -Pandroid.testInstrumentationRunnerArguments.litertE2E=true -Pandroid.testInstrumentationRunnerArguments.litertReconfigureBenchmark=true -Pandroid.testInstrumentationRunnerArguments.buildRevision=${{ github.event.pull_request.head.sha || github.sha }}
             adb pull /sdcard/mobie-qwen-e2e.png mobie-qwen-e2e.png || echo "::warning::Runtime passed without screenshot evidence"
             adb pull /sdcard/mobie-qwen-e2e-metrics.txt mobie-qwen-e2e-metrics.txt || echo "::warning::Runtime passed without metrics evidence"
             adb pull /sdcard/mobie-cpu-thread-benchmark.txt mobie-cpu-thread-benchmark.txt || echo "::warning::CPU thread benchmark passed without metrics evidence"
