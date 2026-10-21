@@ -97,8 +97,28 @@ internal object ConversationHistoryPolicy {
         return selectedNewestFirst.asReversed().flatten()
     }
 
+    /** Avoid coroutine-iterator setup for ordinary short chats; scan long histories lazily. */
+    private fun newestTurns(history: List<RuntimeMessage>): Iterable<List<RuntimeMessage>> {
+        if (history.size <= MAX_SCALED_MESSAGES) {
+            // Preserve the original eager grouping path for short chats. Lazy traversal pays off
+            // only when it can avoid an older prefix; tiny inputs need no sequence state machine.
+            val turns = mutableListOf<MutableList<RuntimeMessage>>()
+            for (message in history) {
+                val text = message.text.trim()
+                if (text.isEmpty()) continue
+                if (message.fromUser) {
+                    turns += mutableListOf(RuntimeMessage(true, text, message.interrupted, message.imagePath))
+                } else {
+                    turns.lastOrNull()?.add(RuntimeMessage(false, text, message.interrupted))
+                }
+            }
+            return turns.asReversed()
+        }
+        return newestLongHistoryTurns(history).asIterable()
+    }
+
     /** Scan only the suffix needed by replay; never normalize/copy an unused older prefix. */
-    private fun newestTurns(history: List<RuntimeMessage>): Sequence<List<RuntimeMessage>> = sequence {
+    private fun newestLongHistoryTurns(history: List<RuntimeMessage>): Sequence<List<RuntimeMessage>> = sequence {
         val iterator = history.listIterator(history.size)
         var reversedTurn = mutableListOf<RuntimeMessage>()
         while (iterator.hasPrevious()) {

@@ -57,6 +57,21 @@ class ConversationHistorySelectionTest {
     }
 
     @Test
+    fun `eager and lazy paths agree at the short history boundary`() {
+        for (size in listOf(63, 64, 65, 66)) {
+            val complete = List(size) { RuntimeMessage(it % 2 == 0, "message-$it") }
+            val interrupted = complete.mapIndexed { index, message ->
+                if (index >= size - 2) message.copy(interrupted = true) else message
+            }
+            for (history in listOf(complete, interrupted)) for (context in listOf(1024, 4096, 32768)) {
+                val expected = EagerReplayReference.select(history, context)
+                assertEquals(expected, ConversationHistoryPolicy.select(history, context))
+                assertEquals(expected, ConversationHistoryPolicy.select(java.util.LinkedList(history), context))
+            }
+        }
+    }
+
+    @Test
     fun `long transcript reads only the bounded newest suffix`() {
         var reads = 0
         val history = object : AbstractList<RuntimeMessage>() {
