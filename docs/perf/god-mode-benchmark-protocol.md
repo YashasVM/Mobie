@@ -83,6 +83,18 @@ With `SUSTAINED_SECONDS` greater than zero, each outer repetition loads an engin
 
 Short outputs remain in raw rows with their native token count and eligibility reason. An ineligible generation makes the sustained fixture fail and prevents a success-only summary. The summary rejects missing, failed, short, and nonfinite measured samples and mixed prompt or configuration identities. It reports individual token counts through their range, median, standard deviation, and total, alongside decode-rate dispersion. These checks establish workload eligibility, not answer quality, physical-phone superiority, or a 2× speedup. Review outputs against the same task checks in both apps.
 
+Sustained raw samples also separate conversation reset from generation: `reset_ms` times the reset
+call, `reset_peak_pss_bytes` and `reset_thermal_start/max/end` cover its own monitoring window, and
+`reset_to_first_visible_ms` measures from reset start to the first visible callback (not displayed
+pixels). Generation-only `first_visible_ms` remains unchanged. Reset timing excludes endpoint PSS
+sampling, while reset-to-visible includes that intervening observation overhead. One existing monitor
+feeds both windows; endpoint samples catch short resets. Failed resets remain in raw samples with
+`reset_succeeded=false`/`reset_error`, and fail the entire row. Endpoint observation failures are recorded as `reset_observation_error`
+and fail the row without replacing an earlier native reset error. An initial PSS/thermal read failure
+before reset begins instead surfaces as an outer-row error; no reset duration is then available. These are sampled process-memory
+observations, not isolated GPU allocation or complete cold-load/compilation timings. Older rows lack
+these fields and cannot retrospectively establish reset latency or reset-window memory.
+
 The benchmark uses one 100 ms PSS/thermal monitor feeding both whole-run and per-generation peaks, with endpoint samples for short generations. This avoids two simultaneous page-map scans. PSS is still a sampled process-memory metric: it is not an exact peak, all device memory, or a complete GPU allocation accounting. The monitor itself can perturb the workload; keep its cadence matched and assess observer overhead separately.
 
 The separate `LiteRtCpuThreadBenchmarkTest` now uses `phone-care-twelve-tips-v1` with a 256-token output cap and a 64-native-token floor (`mobie-cpu-thread-sustained-v2`). It retains warm-up and measured raw rows and emits thread-speedup summaries only if all runs have identical output and native prefill/decode token counts. Non-equivalent results or outputs below the 64-token floor fail after evidence export. It uses fresh `Debug.getPss()` rather than rate-limited ActivityManager process samples. Do not combine its new workload with older CPU sweep results, or mistake its direct-SDK thread comparison for a Gallery comparison or production-adapter measurement.

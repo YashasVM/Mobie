@@ -209,7 +209,7 @@ class LiteRtGpuBenchmarkTest {
                     result.put("dynamic_context", adapter.computeCapabilities?.dynamicContext)
                     result.put("supports_speculative", adapter.computeCapabilities?.supportsSpeculativeDecoding)
                     val samples = JSONArray()
-                    suspend fun generateSample(): JSONObject {
+                    suspend fun generateSample(resetStartedAt: Long? = null): JSONObject {
                         var chunks = 0
                         var thinkingChunks = 0
                         var visibleChunks = 0
@@ -225,7 +225,13 @@ class LiteRtGpuBenchmarkTest {
                             when (event) {
                                 is InferenceEvent.Token -> {
                                     chunks++
-                                    if (event.thinking) thinkingChunks++ else { visibleChunks++; visible.append(event.text) }
+                                    if (event.thinking) thinkingChunks++ else {
+                                        if (visibleChunks == 0 && resetStartedAt != null) {
+                                            sample.put("reset_to_first_visible_ms", SystemClock.elapsedRealtime() - resetStartedAt)
+                                        }
+                                        visibleChunks++
+                                        visible.append(event.text)
+                                    }
                                 }
                                 is InferenceEvent.Error -> sample.put("generation_error", event.message)
                                 is InferenceEvent.Stats -> {
@@ -275,10 +281,22 @@ class LiteRtGpuBenchmarkTest {
                     if (sustainedSeconds > 0) {
                         result.put("warmup", first)
                         val sustainedStart = SystemClock.elapsedRealtime()
+                        // Keep an incomplete/reset-failed sample in raw evidence as well.
+                        result.put("samples", samples)
                         do {
-                            adapter.resetConversation().getOrThrow()
-                            val sample = generateSample().put("elapsed_ms", SystemClock.elapsedRealtime() - sustainedStart)
-                            samples.put(sample)
+                            val reset = JSONObject()
+                            samples.put(reset)
+                            val resetStartedAt = try {
+                                recordReset(reset, activeWindow, { adapter.resetConversation().getOrThrow() },
+                                    { Debug.getPss() * 1024L }, ::thermal, SystemClock::elapsedRealtime)
+                            } finally {
+                                peakPss.accumulateAndGet(reset.optLong("reset_peak_pss_bytes"), ::maxOf)
+                                thermalMax.accumulateAndGet(reset.optInt("reset_thermal_max"), ::maxOf)
+                            }
+                            val sample = generateSample(resetStartedAt)
+                                .put("elapsed_ms", SystemClock.elapsedRealtime() - sustainedStart)
+                            for (key in reset.keys()) sample.put(key, reset.get(key))
+                            samples.put(samples.length() - 1, sample)
                             allEligible = allEligible && sample.getBoolean("throughput_eligible")
                             android.util.Log.i("MobieGpuSustained", sample.toString())
                         } while (SystemClock.elapsedRealtime() - sustainedStart < sustainedSeconds * 1000L)
@@ -297,6 +315,107 @@ class LiteRtGpuBenchmarkTest {
                 result
             }
         }
+
+    /** Uses the existing monitor's active window; no second periodic PSS scan is launched. */
+    private suspend fun recordReset(
+        result: JSONObject,
+        activeWindow: AtomicReference<MeasurementWindow?>,
+        reset: suspend () -> Unit,
+        readPss: () -> Long,
+        thermal: () -> Int,
+        clock: () -> Long,
+    ): Long {
+        val initialThermal = thermal()
+        val window = MeasurementWindow(readPss(), initialThermal)
+        activeWindow.set(window)
+        val started = clock()
+        var resetFailure: Exception? = null
+        try {
+            reset()
+            result.put("reset_succeeded", true)
+        } catch (failure: Exception) {
+            resetFailure = failure
+            result.put("reset_succeeded", false)
+                .put("reset_error", failure.message ?: failure.javaClass.simpleName)
+            throw failure
+        } finally {
+            // Time the native reset independently from the endpoint page-map scan.
+            result.put("reset_ms", clock() - started)
+            try {
+                val finalThermal = thermal()
+                window.record(readPss(), finalThermal)
+                result.put("reset_thermal_end", finalThermal)
+            } catch (observationFailure: Exception) {
+                result.put("reset_observation_error", observationFailure.message ?: observationFailure.javaClass.simpleName)
+                // Diagnostic failure must not replace the original native reset failure.
+                if (resetFailure == null) throw observationFailure
+            } finally {
+                activeWindow.compareAndSet(window, null)
+                result.put("reset_peak_pss_bytes", window.peakPss.get())
+                    .put("reset_thermal_start", initialThermal)
+                    .put("reset_thermal_max", window.thermalMax.get())
+            }
+        }
+        return started
+    }
+
+    @Test
+    fun resetMeasurementsSeparateTimeAndRetainSampledAndEndpointPeaks(): Unit = runBlocking {
+        for (failReset in listOf(false, true)) for (endpointPss in listOf(20L, 40L)) {
+            val result = JSONObject()
+            val window = AtomicReference<MeasurementWindow?>(null)
+            var time = 100L
+            var pss = 10L
+            var pssReads = 0
+            var returnedStart: Long? = null
+            var thermal = 0
+            var failure: Exception? = null
+            try {
+                returnedStart = recordReset(result, window, reset = {
+                    checkNotNull(window.get()).record(30L, 2)
+                    time = 140L
+                    pss = endpointPss
+                    thermal = 1
+                    if (failReset) error("reset failed")
+                }, readPss = {
+                    if (pssReads++ > 0) time += 500L
+                    pss
+                }, thermal = { thermal }, clock = { time })
+            } catch (caught: Exception) {
+                failure = caught
+            }
+            assertEquals(!failReset, result.getBoolean("reset_succeeded"))
+            assertEquals(if (failReset) "reset failed" else null, failure?.message)
+            assertEquals(40L, result.getLong("reset_ms"))
+            assertEquals(640L, time)
+            assertEquals(if (failReset) null else 100L, returnedStart)
+            assertEquals(maxOf(30L, endpointPss), result.getLong("reset_peak_pss_bytes"))
+            assertEquals(0, result.getInt("reset_thermal_start"))
+            assertEquals(2, result.getInt("reset_thermal_max"))
+            assertEquals(1, result.getInt("reset_thermal_end"))
+            assertEquals(null, window.get())
+        }
+    }
+
+    @Test
+    fun resetObservationFailureClearsWindowWithoutMaskingNativeFailure(): Unit = runBlocking {
+        for (failReset in listOf(false, true)) {
+            val result = JSONObject()
+            val window = AtomicReference<MeasurementWindow?>(null)
+            var reads = 0
+            var failure: Exception? = null
+            try {
+                recordReset(result, window, reset = { if (failReset) error("native reset failed") },
+                    readPss = { if (reads++ == 0) 10L else error("PSS failed") },
+                    thermal = { 0 }, clock = { 100L })
+            } catch (caught: Exception) {
+                failure = caught
+            }
+            assertEquals(if (failReset) "native reset failed" else "PSS failed", failure?.message)
+            assertEquals("PSS failed", result.getString("reset_observation_error"))
+            assertEquals(null, window.get())
+        }
+    }
 
     private suspend fun recordCleanup(result: JSONObject, unload: suspend () -> Unit, stopMonitor: () -> Unit) {
         try {
