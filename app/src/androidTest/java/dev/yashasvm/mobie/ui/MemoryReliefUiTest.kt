@@ -119,6 +119,11 @@ class MemoryReliefUiTest {
         val deadline = android.os.SystemClock.elapsedRealtime() + 10_000
         var resumedActivity = ""
         var settingsVisible = false
+        var pollCount = 0
+        var lastPollAt = 0L
+        var lastRoot: AccessibilityNodeInfo? = null
+        var lastRootPackage: String? = null
+        var lastRootHasVisibleText: Boolean? = null
         while (!settingsVisible && android.os.SystemClock.elapsedRealtime() < deadline) {
             resumedActivity = ParcelFileDescriptor.AutoCloseInputStream(
                 instrumentation.uiAutomation.executeShellCommand("dumpsys activity activities"),
@@ -129,12 +134,19 @@ class MemoryReliefUiTest {
                 }.orEmpty()
             }
             val root = instrumentation.uiAutomation.rootInActiveWindow
+            lastRoot = root
+            lastRootPackage = root?.packageName?.toString()
+            lastRootHasVisibleText = if (resumedActivity.contains(" com.android.settings/") &&
+                lastRootPackage == "com.android.settings") root?.let(::hasVisibleText) else null
+            lastPollAt = android.os.SystemClock.elapsedRealtime()
+            pollCount++
             settingsVisible = resumedActivity.contains(" com.android.settings/") &&
-                root?.packageName?.toString() == "com.android.settings" && hasVisibleText(root)
+                lastRootPackage == "com.android.settings" && lastRootHasVisibleText == true
             if (!settingsVisible) android.os.SystemClock.sleep(100)
         }
         try {
-            recordSettingsDiagnostics(resumedActivity)
+            recordSettingsDiagnostics(resumedActivity, lastRoot, lastRootPackage, lastRootHasVisibleText,
+                settingsVisible, pollCount, lastPollAt)
             assertTrue("A Settings activity must be resumed on this emulator: $resumedActivity",
                 resumedActivity.contains(" com.android.settings/"))
             assertTrue("The resumed Settings activity must display content", settingsVisible)
@@ -145,14 +157,26 @@ class MemoryReliefUiTest {
         }
     }
 
-    private fun recordSettingsDiagnostics(resumedActivity: String) {
-        runCatching { capture("memory-system-apps.png") }
-            .onFailure { android.util.Log.w("MobieSettingsDiag", "Could not capture Settings screenshot", it) }
+    private fun recordSettingsDiagnostics(
+        resumedActivity: String,
+        pollingRoot: AccessibilityNodeInfo?,
+        pollingRootPackage: String?,
+        rootHasVisibleText: Boolean?,
+        settingsVisible: Boolean,
+        pollCount: Int,
+        lastPollAt: Long,
+    ) {
+        // Preserve final-poll predicate values before capture() waits for idle. Node children may
+        // resolve later, so label the hierarchy traversal separately from those stable values.
         runCatching {
             val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
             var nodes = 0
             val hierarchy = buildString {
+                appendLine("FINAL POLL elapsedRealtimeMs=$lastPollAt attempts=$pollCount")
                 appendLine(resumedActivity)
+                appendLine("resumedSettings=${resumedActivity.contains(" com.android.settings/")} " +
+                    "rootPresent=${pollingRoot != null} rootPackage=$pollingRootPackage " +
+                    "rootHasVisibleText=$rootHasVisibleText (null=not evaluated) settingsVisible=$settingsVisible")
                 fun describe(node: AccessibilityNodeInfo?, depth: Int) {
                     if (node == null || depth > 24 || nodes++ >= 500) return
                     val bounds = android.graphics.Rect().also { node.getBoundsInScreen(it) }
@@ -161,8 +185,9 @@ class MemoryReliefUiTest {
                         "description=${node.contentDescription?.take(160)}")
                     for (index in 0 until node.childCount) describe(node.getChild(index), depth + 1)
                 }
-                appendLine("ACTIVE WINDOW")
-                describe(automation.rootInActiveWindow, 0)
+                appendLine("ROOT FROM FINAL POLL; hierarchy traversed at elapsedRealtimeMs=${android.os.SystemClock.elapsedRealtime()}")
+                describe(pollingRoot, 0)
+                appendLine("ADDITIONAL WINDOWS elapsedRealtimeMs=${android.os.SystemClock.elapsedRealtime()}")
                 automation.windows.forEach { window ->
                     appendLine("WINDOW id=${window.id} type=${window.type} " +
                         "active=${window.isActive} focused=${window.isFocused}")
@@ -177,6 +202,10 @@ class MemoryReliefUiTest {
                 "cp ${output.absolutePath} /sdcard/${output.name}",
             )).use { it.readBytes() }
         }.onFailure { android.util.Log.w("MobieSettingsDiag", "Could not capture Settings hierarchy", it) }
+        runCatching {
+            android.util.Log.i("MobieSettingsDiag", "Screenshot requested at elapsedRealtimeMs=${android.os.SystemClock.elapsedRealtime()}")
+            capture("memory-system-apps.png")
+        }.onFailure { android.util.Log.w("MobieSettingsDiag", "Could not capture Settings screenshot", it) }
     }
 
     private fun hasVisibleText(node: AccessibilityNodeInfo): Boolean {
