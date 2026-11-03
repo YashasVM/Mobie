@@ -30,11 +30,12 @@ internal class InferenceHintTracker(
     private val session: InferenceHintSession,
     private val nowNanos: () -> Long = System::nanoTime,
 ) : AutoCloseable {
-    private var lastReportAt = nowNanos()
+    private val enabled = session !== InferenceHintSessions.noOp
+    private var lastReportAt = if (enabled) nowNanos() else 0L
     private val closed = AtomicBoolean(false)
 
     fun onOutput() {
-        if (closed.get()) return
+        if (!enabled || closed.get()) return
         val now = nowNanos()
         val elapsed = now - lastReportAt
         if (elapsed > 0) session.reportActualDuration(elapsed)
