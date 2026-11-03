@@ -1,6 +1,7 @@
 package dev.yashasvm.mobie.ui
 
 import android.graphics.Bitmap
+import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.activity.ComponentActivity
@@ -108,13 +109,14 @@ class MemoryReliefUiTest {
 
     @Test
     fun systemNavigationOpensTheEmulatorsAvailableSettingsFallback() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val automation = instrumentation.uiAutomation
         composeRule.setContent {
             MobieTheme { MemoryReliefControls(MemoryReliefDecision.from(resolver.resolve(artifact, shortMemory), shortMemory),
                 busy = false, onFreeMemory = { it() }) }
         }
         composeRule.onNodeWithTag("free_up_memory").performClick()
         composeRule.onNodeWithText("Open system screen").performClick()
-        val instrumentation = InstrumentationRegistry.getInstrumentation()
         instrumentation.waitForIdleSync()
         val deadline = android.os.SystemClock.elapsedRealtime() + 10_000
         var resumedActivity = ""
@@ -130,10 +132,12 @@ class MemoryReliefUiTest {
                         it.contains("mResumedActivity=")
                 }.orEmpty()
             }
-            val root = instrumentation.uiAutomation.rootInActiveWindow
+            // Window transitions can leave a cached framework root after Settings has rendered.
+            if (Build.VERSION.SDK_INT >= 34) automation.clearCache()
+            val root = automation.rootInActiveWindow
             accessibilityRoot = "package=${root?.packageName}, children=${root?.childCount}, visible=${root?.isVisibleToUser}"
             settingsVisible = resumedActivity.contains(" com.android.settings/") &&
-                root?.packageName?.toString() == "com.android.settings" && hasVisibleText(root)
+                root?.let(::hasVisibleSettingsText) == true
             if (!settingsVisible) android.os.SystemClock.sleep(100)
         }
         assertTrue("A Settings activity must be resumed on this emulator: $resumedActivity",
@@ -143,10 +147,11 @@ class MemoryReliefUiTest {
         instrumentation.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
     }
 
-    private fun hasVisibleText(node: AccessibilityNodeInfo): Boolean {
-        if (node.isVisibleToUser && !node.text.isNullOrBlank()) return true
+    private fun hasVisibleSettingsText(node: AccessibilityNodeInfo): Boolean {
+        if (node.packageName?.toString() == "com.android.settings" &&
+            node.isVisibleToUser && !node.text.isNullOrBlank()) return true
         return (0 until node.childCount).any { index ->
-            node.getChild(index)?.let(::hasVisibleText) == true
+            node.getChild(index)?.let(::hasVisibleSettingsText) == true
         }
     }
 
