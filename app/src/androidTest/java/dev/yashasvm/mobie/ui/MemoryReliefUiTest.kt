@@ -119,23 +119,26 @@ class MemoryReliefUiTest {
         val deadline = android.os.SystemClock.elapsedRealtime() + 10_000
         var resumedActivity = ""
         var settingsVisible = false
+        var accessibilityRoot = "not queried"
         while (!settingsVisible && android.os.SystemClock.elapsedRealtime() < deadline) {
             resumedActivity = ParcelFileDescriptor.AutoCloseInputStream(
                 instrumentation.uiAutomation.executeShellCommand("dumpsys activity activities"),
             ).bufferedReader().use { reader ->
-                reader.lineSequence().firstOrNull {
+                // Drain the command before closing its pipe; early close floods system_server with EPIPE.
+                reader.readText().lineSequence().firstOrNull {
                     it.contains("topResumedActivity=") || it.contains("mResumedActivity:") ||
                         it.contains("mResumedActivity=")
                 }.orEmpty()
             }
             val root = instrumentation.uiAutomation.rootInActiveWindow
+            accessibilityRoot = "package=${root?.packageName}, children=${root?.childCount}, visible=${root?.isVisibleToUser}"
             settingsVisible = resumedActivity.contains(" com.android.settings/") &&
                 root?.packageName?.toString() == "com.android.settings" && hasVisibleText(root)
             if (!settingsVisible) android.os.SystemClock.sleep(100)
         }
         assertTrue("A Settings activity must be resumed on this emulator: $resumedActivity",
             resumedActivity.contains(" com.android.settings/"))
-        assertTrue("The resumed Settings activity must display content", settingsVisible)
+        assertTrue("The resumed Settings activity must display content: $accessibilityRoot", settingsVisible)
         capture("memory-system-apps.png")
         instrumentation.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
     }
