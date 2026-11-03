@@ -28,7 +28,7 @@ jobs:
       - name: Verify release JNI names
         run: |
           python3 scripts/test_verify_litert_release.py
-          python3 scripts/perf/test_summarize_gpu_results.py
+          python3 -m unittest discover -s scripts/perf -p 'test_*.py'
           ./gradlew --no-daemon assembleRelease 2>&1 | tee release-build.log
           if grep -q 'An error occurred when parsing kotlin metadata' release-build.log; then
             echo "::error::R8 cannot parse dependency Kotlin metadata; use a compatible optimizer."

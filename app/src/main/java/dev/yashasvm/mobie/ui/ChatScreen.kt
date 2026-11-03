@@ -1093,6 +1093,8 @@ internal fun parseChatMarkdown(text: String): List<MdBlock> {
 private fun listDepth(indent: String): Int = (indent.replace("\t", "    ").length / 2).coerceAtMost(3)
 
 internal fun parseInlineMarkdown(text: String): List<MdSpan> {
+    if (text.isEmpty()) return emptyList()
+    if ('`' !in text && "**" !in text) return listOf(MdSpan(text))
     val spans = mutableListOf<MdSpan>()
     val plain = StringBuilder()
     fun flushPlain() {

@@ -14,6 +14,13 @@ class ChatMarkdownTest {
     }
 
     @Test
+    fun `plain inline output preserves literal characters and empty output`() {
+        assertEquals(emptyList<MdSpan>(), parseInlineMarkdown(""))
+        val text = "Local inference * keeps _symbols_ and 🚀\n".repeat(100)
+        assertEquals(listOf(MdSpan(text)), parseInlineMarkdown(text))
+    }
+
+    @Test
     fun `blank lines split paragraphs`() {
         val blocks = parseChatMarkdown("One.\n\n\nTwo.")
 
