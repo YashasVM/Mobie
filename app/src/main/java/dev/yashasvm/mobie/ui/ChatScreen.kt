@@ -49,6 +49,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -73,14 +74,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
@@ -153,13 +154,17 @@ internal fun ChatScreen(
     state: MobieUiState,
     onSend: (String, String?) -> Boolean,
     onStop: () -> Unit = {},
-    onBack: () -> Unit = {},
-    onHistory: () -> Unit = {},
+    onOpenDrawer: () -> Unit = {},
+    onOpenModelPicker: () -> Unit = {},
     onNewChat: () -> Unit = {},
     onSamplerChange: (SamplerSettings) -> String? = { null },
     onLoadAnyway: () -> Unit = {},
+    onGetModel: (String) -> Unit = {},
 ) {
-    val model = state.selected ?: return
+    val readOnly = state.readOnlyChat
+    val model = state.selected
+    if (model == null && readOnly == null) return
+    val modelTitle = model?.title ?: readOnly?.modelTitle.orEmpty()
     val context = LocalContext.current
     var prompt by rememberSaveable { mutableStateOf("") }
     var imagePath by rememberSaveable { mutableStateOf<String?>(null) }
@@ -201,8 +206,8 @@ internal fun ChatScreen(
     val ready = state.runtimeState == RuntimeState.READY
     val generating = state.runtimeState == RuntimeState.GENERATING
     val runtimeLabel = state.selectedArtifact?.runtimeLabel ?: "LiteRT-LM"
-    val canSubmit = ready && !imageCopying && prompt.isNotBlank()
-    val imageAllowed = model.supportsVision && state.imageInputReady
+    val canSubmit = readOnly == null && ready && !imageCopying && prompt.isNotBlank()
+    val imageAllowed = readOnly == null && model?.supportsVision == true && state.imageInputReady
     // Capability can be lost mid-draft (reload, or stop after uncertain cancellation). Drop the photo
     // here so submit never sends a stale attachment that the ViewModel would reject.
     LaunchedEffect(imageAllowed) {
@@ -228,15 +233,23 @@ internal fun ChatScreen(
             .testTag("chat_screen"),
     ) {
         ChatHeader(
-            title = model.title,
-            runtimeLabel = runtimeLabel,
-            runtimeState = state.runtimeState,
-            onBack = onBack,
-            onHistory = onHistory,
+            title = modelTitle,
+            status = if (readOnly != null) "Model not on this phone" else engineStatus(state.runtimeState, runtimeLabel).text,
+            statusColor = if (readOnly != null) Mobie.signals.caution else state.runtimeState.signal(),
+            statusPulsing = readOnly == null && engineStatus(state.runtimeState, runtimeLabel).pulsing,
+            onOpenDrawer = onOpenDrawer,
+            onOpenModelPicker = onOpenModelPicker,
             onNewChat = onNewChat,
         )
         AnimatedVisibility(
-            visible = state.runtimeState != RuntimeState.LOADING && state.runtimeState != RuntimeState.ERROR,
+            visible = readOnly == null && state.runtimeState == RuntimeState.LOADING,
+            enter = fadeIn(tween(MotionMedium)) + expandVertically(tween(MotionMedium, easing = EmphasizedEase)),
+            exit = fadeOut(tween(MotionShort)) + shrinkVertically(tween(MotionShort)),
+        ) {
+            LoadingBanner(modelTitle)
+        }
+        AnimatedVisibility(
+            visible = readOnly == null && state.runtimeState != RuntimeState.LOADING && state.runtimeState != RuntimeState.ERROR,
             enter = fadeIn(tween(MotionMedium)) + expandVertically(tween(MotionMedium, easing = EmphasizedEase)),
             exit = fadeOut(tween(MotionShort)) + shrinkVertically(tween(MotionShort)),
         ) {
@@ -253,21 +266,21 @@ internal fun ChatScreen(
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
-                state.runtimeState == RuntimeState.LOADING -> LoadingPanel(model.title)
-                state.runtimeState == RuntimeState.ERROR -> ErrorPanel(
+                readOnly == null && state.runtimeState == RuntimeState.ERROR -> ErrorPanel(
                     state.error ?: "The model could not run on this phone.",
-                    onBack = onBack,
+                    onChooseModel = onOpenModelPicker,
                     onLoadAnyway = onLoadAnyway.takeIf {
                         state.compatibility?.memoryTier == MemoryAdmissionTier.FITS_AFTER_RECLAIM &&
                             state.compatibility.status != Compatibility.INCOMPATIBLE
                     },
                 )
-                state.messages.isEmpty() -> EmptyChat(
+                state.messages.isEmpty() && model != null -> EmptyChat(
                     model = model,
+                    loaded = ready || generating,
                     imageInputReady = state.imageInputReady,
                     onStarter = { starter ->
                         prompt = starter
-                        if (ready) inputFocus.requestFocus()
+                        if (ready || state.runtimeState == RuntimeState.LOADING) inputFocus.requestFocus()
                     },
                 )
                 else -> LazyColumn(
@@ -291,7 +304,7 @@ internal fun ChatScreen(
                         } else {
                             AssistantMessage(
                                 message = message,
-                                modelTitle = model.title,
+                                modelTitle = modelTitle,
                                 streaming = generating && index == state.messages.lastIndex,
                                 modifier = itemModifier,
                             )
@@ -301,7 +314,9 @@ internal fun ChatScreen(
                 }
             }
         }
-        ComposerDock(
+        if (readOnly != null) {
+            ReadOnlyBanner(readOnly.modelTitle, onGetModel = { onGetModel(readOnly.modelId) })
+        } else ComposerDock(
             prompt = prompt,
             onPromptChange = { prompt = it },
             runtimeState = state.runtimeState,
@@ -404,68 +419,82 @@ private fun RuntimeState.signal() = when (this) {
     RuntimeState.IDLE -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
+/**
+ * Chat top bar in the shape people know from other chat apps: the chats menu on the left, the
+ * current model as a tappable title with a ▾ that opens the model picker, and a new-chat button.
+ */
 @Composable
-private fun ChatHeader(
+internal fun ChatHeader(
     title: String,
-    runtimeLabel: String,
-    runtimeState: RuntimeState,
-    onBack: () -> Unit,
-    onHistory: () -> Unit,
+    status: String?,
+    statusColor: Color,
+    statusPulsing: Boolean,
+    onOpenDrawer: () -> Unit,
+    onOpenModelPicker: () -> Unit,
     onNewChat: () -> Unit,
+    newChatEnabled: Boolean = true,
 ) {
-    val status = engineStatus(runtimeState, runtimeLabel)
-    val dotColor by animateColorAsState(runtimeState.signal(), tween(MotionMedium), label = "engine dot")
-    Column(Modifier.fillMaxWidth().statusBarsPadding()) {
-        // tmux-style top bar: the app and the window in view, plus the runtime doing the work.
-        StatusLine(
-            segments = listOf(StatusSegment("mobie"), StatusSegment("chat")),
-            selected = 1,
-            trailing = runtimeLabel,
-        )
+    val dotColor by animateColorAsState(statusColor, tween(MotionMedium), label = "engine dot")
+    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).statusBarsPadding()) {
         Row(
             Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) {
-                LucideIcon(LucideR.drawable.lucide_ic_arrow_left, "Back", Modifier.size(22.dp))
+            IconButton(onClick = onOpenDrawer, modifier = Modifier.testTag("open_chats")) {
+                LucideIcon(LucideR.drawable.lucide_ic_menu, "Open chats", Modifier.size(22.dp))
             }
-            Column(Modifier.weight(1f).padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.semantics { heading() },
-                )
-                Row(
-                    Modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(7.dp),
-                ) {
-                    StatusDot(dotColor, pulsing = status.pulsing, size = 7.dp)
-                    AnimatedContent(
-                        targetState = status.text,
-                        transitionSpec = {
-                            fadeIn(tween(MotionMedium, delayMillis = 60)) togetherWith fadeOut(tween(MotionShort)) using
-                                SizeTransform(clip = false)
-                        },
-                        label = "engine status",
-                    ) { text ->
-                        Text(
-                            text,
-                            style = Mobie.numeric.tiny,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+            Column(
+                Modifier
+                    .weight(1f)
+                    .heightIn(min = 48.dp)
+                    .clickable(role = Role.Button, onClickLabel = "Choose a model", onClick = onOpenModelPicker)
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .testTag("model_picker_button"),
+                verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false).semantics { heading() },
+                    )
+                    LucideIcon(
+                        LucideR.drawable.lucide_ic_chevron_down,
+                        null,
+                        Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (status != null) {
+                    Row(
+                        Modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    ) {
+                        StatusDot(dotColor, pulsing = statusPulsing, size = 7.dp)
+                        AnimatedContent(
+                            targetState = status,
+                            transitionSpec = {
+                                fadeIn(tween(MotionMedium, delayMillis = 60)) togetherWith fadeOut(tween(MotionShort)) using
+                                    SizeTransform(clip = false)
+                            },
+                            label = "engine status",
+                        ) { text ->
+                            Text(
+                                text,
+                                style = Mobie.numeric.tiny,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                 }
             }
-            IconButton(onClick = onHistory) {
-                LucideIcon(LucideR.drawable.lucide_ic_history, "Chat history", Modifier.size(22.dp))
-            }
-            IconButton(onClick = onNewChat) {
-                LucideIcon(LucideR.drawable.lucide_ic_plus, "Start a new chat", Modifier.size(22.dp))
+            IconButton(onClick = onNewChat, enabled = newChatEnabled, modifier = Modifier.testTag("new_chat")) {
+                LucideIcon(LucideR.drawable.lucide_ic_square_pen, "New chat", Modifier.size(22.dp))
             }
         }
         Hairline()
@@ -612,29 +641,55 @@ private fun TelemetryValue(label: String?, value: String, unit: String? = null) 
 // ---------------------------------------------------------------------------------------------
 // Non-conversation states
 
+/** Slim notice under the top bar while the model loads; the conversation stays visible below it. */
 @Composable
-private fun LoadingPanel(modelTitle: String) {
-    Box(Modifier.fillMaxSize().padding(20.dp), contentAlignment = Alignment.Center) {
-        TuiWindow(
-            title = "loading weights",
-            meta = "wait",
-            borderColor = Mobie.signals.caution.copy(alpha = .45f),
-            modifier = Modifier.fillMaxWidth().widthIn(max = 420.dp).appear(),
+private fun LoadingBanner(modelTitle: String) {
+    Column(Modifier.fillMaxWidth()) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Column(
-                Modifier
-                    .padding(16.dp)
-                    .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text("[~] Loading $modelTitle into memory", style = Mobie.numeric.small, color = Mobie.signals.caution)
-                IndeterminateTrack(Mobie.signals.caution)
-                Text(
-                    "The first load can take a while. Later loads are usually faster.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            Text(
+                "Loading $modelTitle. The first load can take a while.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            IndeterminateTrack(Mobie.signals.caution)
+        }
+        Hairline()
+    }
+}
+
+/** Replaces the composer for a saved chat whose model was removed from this phone. */
+@Composable
+private fun ReadOnlyBanner(modelTitle: String, onGetModel: () -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .navigationBarsPadding()
+            .testTag("read_only_banner"),
+    ) {
+        Hairline()
+        Column(
+            Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                "$modelTitle is no longer on this phone, so this chat is read-only. Download it again to keep chatting.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            TermButton(
+                "Get the model",
+                onClick = onGetModel,
+                icon = LucideR.drawable.lucide_ic_download,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }
@@ -664,10 +719,10 @@ private fun IndeterminateTrack(color: Color) {
 }
 
 @Composable
-private fun ErrorPanel(message: String, onBack: () -> Unit, onLoadAnyway: (() -> Unit)? = null) {
+private fun ErrorPanel(message: String, onChooseModel: () -> Unit, onLoadAnyway: (() -> Unit)? = null) {
     Box(Modifier.fillMaxSize().padding(20.dp), contentAlignment = Alignment.Center) {
         TuiWindow(
-            title = "engine error",
+            title = "Couldn't load the model",
             meta = "failed",
             borderColor = Mobie.signals.blocked.copy(alpha = .5f),
             modifier = Modifier.fillMaxWidth().widthIn(max = 420.dp).appear(),
@@ -686,7 +741,7 @@ private fun ErrorPanel(message: String, onBack: () -> Unit, onLoadAnyway: (() ->
                 Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
             ) {
-                TermButton("back", onClick = onBack, style = TermButtonStyle.Ghost)
+                TermButton("Choose another model", onClick = onChooseModel, style = TermButtonStyle.Ghost)
                 // Only offered when the model fits once Android frees memory, matching the model
                 // screen's "Load anyway"; models that can never fit get no override.
                 if (onLoadAnyway != null) TermButton("load anyway", onClick = onLoadAnyway)
@@ -695,8 +750,12 @@ private fun ErrorPanel(message: String, onBack: () -> Unit, onLoadAnyway: (() ->
     }
 }
 
+/**
+ * A new chat: a short greeting, what this model can do here, and a few starters. Shown while the
+ * model is still loading too, so the home is usable straight away.
+ */
 @Composable
-private fun EmptyChat(model: AiModel, imageInputReady: Boolean, onStarter: (String) -> Unit) {
+private fun EmptyChat(model: AiModel, loaded: Boolean, imageInputReady: Boolean, onStarter: (String) -> Unit) {
     val starters = remember(model.supportsVision, imageInputReady) {
         buildList {
             add("Explain how on-device AI works")
@@ -709,65 +768,58 @@ private fun EmptyChat(model: AiModel, imageInputReady: Boolean, onStarter: (Stri
         Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 18.dp, vertical = 22.dp),
-        verticalArrangement = Arrangement.spacedBy(22.dp, Alignment.CenterVertically),
+            .padding(horizontal = 20.dp, vertical = 24.dp)
+            .testTag("new_chat_greeting"),
+        verticalArrangement = Arrangement.spacedBy(24.dp, Alignment.CenterVertically),
     ) {
-        // Boot-log intro: each line reads like a command or a check finishing.
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            PromptLine("mobie chat --load", Modifier.appear())
             Text(
-                model.title,
+                "What can I help with?",
                 style = MaterialTheme.typography.headlineSmall,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(start = 20.dp).appear(delayMillis = 60),
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.appear().semantics { heading() },
             )
-            Column(Modifier.padding(start = 20.dp).appear(delayMillis = 120), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                CheckLine("Model in memory", "✓", Mobie.signals.ready)
+            Text(
+                "You're chatting with ${model.title}, right on this phone. Nothing you type leaves it.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.appear(delayMillis = 60),
+            )
+            // Photo support is only known once the model has loaded.
+            if (loaded && model.supportsVision) {
                 CheckLine(
-                    if (model.supportsVision && imageInputReady) {
+                    if (imageInputReady) {
                         "Chat about text or an attached photo on this phone. Image generation isn't available."
-                    } else if (model.supportsVision) {
-                        "This phone loaded text chat only. Photo input is unavailable for this session."
                     } else {
-                        "Chat about text on this phone. Nothing you type leaves it."
+                        "This phone loaded text chat only. Photo input is unavailable for this session."
                     },
-                    if (model.supportsVision && !imageInputReady) "!" else "i",
-                    if (model.supportsVision && !imageInputReady) Mobie.signals.caution else MaterialTheme.colorScheme.onSurfaceVariant,
+                    if (imageInputReady) "i" else "!",
+                    if (imageInputReady) MaterialTheme.colorScheme.onSurfaceVariant else Mobie.signals.caution,
+                    Modifier.appear(delayMillis = 100),
                 )
             }
         }
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            SectionLabel("Try", Modifier.appear(delayMillis = 160))
             starters.forEachIndexed { index, starter ->
                 val vision = starter == "Describe an image"
                 Panel(
-                    Modifier.fillMaxWidth().appear(delayMillis = 200 + index * 60),
+                    Modifier.fillMaxWidth().appear(delayMillis = 140 + index * 50),
                     color = MaterialTheme.colorScheme.surfaceContainer,
                     borderColor = MaterialTheme.colorScheme.outline.copy(alpha = .55f),
                     onClick = { onStarter(if (vision) "Describe this image in detail." else starter) },
                 ) {
-                    Row(
-                        Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    Column(
+                        Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically),
                     ) {
-                        Text("›", style = Mobie.numeric.medium, color = MaterialTheme.colorScheme.primary)
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(starter, style = MaterialTheme.typography.bodyLarge)
-                            if (vision) {
-                                Text(
-                                    "Attach a photo with the image button first",
-                                    style = Mobie.numeric.tiny,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
+                        Text(starter, style = MaterialTheme.typography.bodyLarge)
+                        if (vision) {
+                            Text(
+                                "Attach a photo with the image button first",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
-                        Text(
-                            if (vision) "[img]" else "[run]",
-                            style = Mobie.numeric.tiny,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
                     }
                 }
             }
@@ -1329,7 +1381,7 @@ private fun ComposerDock(
     val generating = runtimeState == RuntimeState.GENERATING
     val placeholder = when (runtimeState) {
         RuntimeState.READY -> "Ask anything"
-        RuntimeState.LOADING -> "Loading model…"
+        RuntimeState.LOADING -> "Ask anything (model is loading)"
         RuntimeState.GENERATING -> "Generating…"
         RuntimeState.STOPPING -> "Stopping…"
         RuntimeState.ERROR -> "Model unavailable"
@@ -1436,7 +1488,8 @@ private fun ComposerDock(
                     BasicTextField(
                         value = prompt,
                         onValueChange = onPromptChange,
-                        enabled = ready,
+                        // Typing is allowed while the model loads; sending waits until it is ready.
+                        enabled = ready || runtimeState == RuntimeState.LOADING,
                         textStyle = MaterialTheme.typography.bodyLarge.copy(
                             color = if (ready) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                         ),
