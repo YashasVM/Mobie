@@ -1,0 +1,16 @@
+[Unit]
+Description=Mobie chat bridge to isolated OpenCode
+After=network-online.target docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/mobie-cloud
+ExecStart=/usr/bin/python3 %h/mobie-cloud/bridge.py
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target

@@ -1,5 +1,7 @@
 package dev.yashasvm.mobie.core
 
+import dev.yashasvm.mobie.data.cloud.OpenCodeCloudProvider
+import dev.yashasvm.mobie.core.runtime.CloudChatProvider
 import android.content.Context
 import android.os.Build
 import android.os.PowerManager
@@ -13,6 +15,7 @@ import dev.yashasvm.mobie.core.runtime.RuntimeComputeSettings
 import dev.yashasvm.mobie.core.runtime.RuntimeRegistry
 import dev.yashasvm.mobie.core.runtime.ThermalGuardRuntimeAdapter
 import dev.yashasvm.mobie.core.security.HuggingFaceTokenStore
+import dev.yashasvm.mobie.core.security.CloudConnectionStore
 import dev.yashasvm.mobie.data.catalog.HuggingFaceCatalogRepository
 import dev.yashasvm.mobie.data.conversion.ConversionRepository
 import dev.yashasvm.mobie.data.download.ModelDownloadManager
@@ -20,7 +23,7 @@ import dev.yashasvm.mobie.data.history.ChatHistoryStore
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
-class AppContainer(context: Context) {
+class AppContainer(context: Context, cloudProvider: CloudChatProvider? = null) {
     val appContext: Context = context.applicationContext
     private val http by lazy {
         OkHttpClient.Builder()
@@ -30,7 +33,9 @@ class AppContainer(context: Context) {
     }
     // Heavy members are created on first use so cold start only pays for what the first screen needs.
     // EncryptedSharedPreferences and Keystore master-key setup are the most expensive of these.
+    val cloud by lazy { cloudProvider ?: OpenCodeCloudProvider(http) { cloudConnectionStore.read() } }
     val tokenStore by lazy { HuggingFaceTokenStore(appContext) }
+    val cloudConnectionStore by lazy { CloudConnectionStore(appContext) }
     val catalog by lazy { HuggingFaceCatalogRepository(http, tokenStore) }
     val conversion by lazy { ConversionRepository(http) }
     val downloads by lazy { ModelDownloadManager(appContext) }

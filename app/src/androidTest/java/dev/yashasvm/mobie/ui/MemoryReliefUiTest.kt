@@ -138,6 +138,9 @@ class MemoryReliefUiTest {
         assertTrue("The resumed Settings activity must display content", settingsVisible)
         capture("memory-system-apps.png")
         instrumentation.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            instrumentation.uiAutomation.rootInActiveWindow?.packageName?.toString() == "dev.yashasvm.mobie"
+        }
     }
 
     private fun hasVisibleText(node: AccessibilityNodeInfo): Boolean {

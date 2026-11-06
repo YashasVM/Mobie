@@ -75,6 +75,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -125,6 +126,7 @@ import com.composables.icons.lucide.R as LucideR
 import dev.yashasvm.mobie.core.model.AiModel
 import dev.yashasvm.mobie.core.model.Compatibility
 import dev.yashasvm.mobie.core.model.MemoryAdmissionTier
+import dev.yashasvm.mobie.core.runtime.ComputeBackend
 import dev.yashasvm.mobie.core.runtime.ActiveCompute
 import dev.yashasvm.mobie.core.runtime.InferenceStats
 import dev.yashasvm.mobie.core.device.RunTelemetry
@@ -144,9 +146,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Local inference chat: header with engine status, live telemetry from the last measured reply,
- * the conversation, and a composer dock. Nothing here talks to the network; prompts go to [onSend],
- * which hands them to the on-device runtime.
+ * Chat presentation. The ViewModel routes [onSend] to the explicitly selected local or cloud provider.
  */
 @Composable
 internal fun ChatScreen(
@@ -159,11 +159,19 @@ internal fun ChatScreen(
     onNewChat: () -> Unit = {},
     onComputeSettings: () -> Unit = {},
     onLoadAnyway: () -> Unit = {},
+    onModelPicker: () -> Unit = {},
+    onBackendChange: (ComputeBackend) -> Unit = {},
+    onApplyCompute: () -> Unit = {},
+    onReplySpeedChange: (Int?) -> Unit = {},
 ) {
     val model = state.selected ?: return
+    var controlsOpen by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
-    var prompt by rememberSaveable { mutableStateOf("") }
-    var imagePath by rememberSaveable { mutableStateOf<String?>(null) }
+    val reader = rememberOfflineReader()
+    LaunchedEffect(model.id, state.sessionId) { reader.stop() }
+    var speechError by remember { mutableStateOf<String?>(null) }
+    var prompt by rememberSaveable(model.id) { mutableStateOf("") }
+    var imagePath by rememberSaveable(model.id) { mutableStateOf<String?>(null) }
     var imageError by remember { mutableStateOf<String?>(null) }
     var imageCopying by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -201,9 +209,21 @@ internal fun ChatScreen(
     }
     val ready = state.runtimeState == RuntimeState.READY
     val generating = state.runtimeState == RuntimeState.GENERATING
-    val runtimeLabel = state.selectedArtifact?.runtimeLabel ?: "LiteRT-LM"
+    val cloud = model.cloudModel != null
+    val runtimeLabel = if (cloud) "OpenCode cloud" else state.selectedArtifact?.runtimeLabel ?: "LiteRT-LM"
     val canSubmit = ready && !imageCopying && prompt.isNotBlank()
     val imageAllowed = model.supportsVision && state.imageInputReady
+    val capturePhoto = rememberCameraCapture(
+        enabled = ready && imageAllowed,
+        identity = "${model.id}:${state.sessionId}",
+        onImage = { captured ->
+            val previous = imagePath
+            imagePath = captured
+            scope.launch { previous?.let { deleteImageFile(it) } }
+        },
+        onBusy = { imageCopying = it },
+        onError = { imageError = it },
+    )
     // Capability can be lost mid-draft (reload, or stop after uncertain cancellation). Drop the photo
     // here so submit never sends a stale attachment that the ViewModel would reject.
     LaunchedEffect(imageAllowed) {
@@ -232,12 +252,16 @@ internal fun ChatScreen(
             title = model.title,
             runtimeLabel = runtimeLabel,
             runtimeState = state.runtimeState,
+            cloud = cloud,
             onMenu = onMenu,
             onHistory = onHistory,
             onNewChat = onNewChat,
+            onModelPicker = onModelPicker,
+            statsForNerds = state.statsForNerds,
         )
+        ChatControlsRow(state, onClick = { if (cloud) controlsOpen = true else onComputeSettings() })
         AnimatedVisibility(
-            visible = state.runtimeState != RuntimeState.LOADING && state.runtimeState != RuntimeState.ERROR,
+            visible = state.statsForNerds && !cloud && state.runtimeState != RuntimeState.LOADING && state.runtimeState != RuntimeState.ERROR,
             enter = fadeIn(tween(MotionMedium)) + expandVertically(tween(MotionMedium, easing = EmphasizedEase)),
             exit = fadeOut(tween(MotionShort)) + shrinkVertically(tween(MotionShort)),
         ) {
@@ -286,6 +310,8 @@ internal fun ChatScreen(
                                 message = message,
                                 modelTitle = model.title,
                                 streaming = generating && index == state.messages.lastIndex,
+                                statsForNerds = state.statsForNerds,
+                                reader = reader,
                                 modifier = itemModifier,
                             )
                         }
@@ -299,14 +325,16 @@ internal fun ChatScreen(
             onPromptChange = { prompt = it },
             runtimeState = state.runtimeState,
             runtimeLabel = runtimeLabel,
+            cloud = cloud,
             supportsVision = imageAllowed,
             imagePath = imagePath,
             imageCopying = imageCopying,
             canSubmit = canSubmit,
-            error = state.error.takeIf { state.runtimeState != RuntimeState.ERROR },
+            error = state.error.takeIf { state.runtimeState != RuntimeState.ERROR } ?: speechError ?: reader.error,
             imageError = imageError,
             focusRequester = inputFocus,
             onAttach = { imagePicker.launch("image/*") },
+            onAttachCamera = capturePhoto,
             onRemoveImage = {
                 val stale = imagePath
                 imagePath = null
@@ -314,6 +342,24 @@ internal fun ChatScreen(
             },
             onSubmit = submit,
             onStop = onStop,
+            dictation = {
+                key(model.id, state.sessionId) {
+                    OfflineDictationButton(
+                        enabled = ready && !imageCopying,
+                        onText = { prompt = appendDictation(prompt, it) },
+                        onError = { speechError = it },
+                    )
+                }
+            },
+        )
+    }
+    if (controlsOpen) {
+        SimpleChatControlsSheet(
+            state = state,
+            onBackendChange = onBackendChange,
+            onApply = onApplyCompute,
+            onReplySpeedChange = onReplySpeedChange,
+            onClose = { controlsOpen = false },
         )
     }
 }
@@ -402,18 +448,22 @@ private fun ChatHeader(
     title: String,
     runtimeLabel: String,
     runtimeState: RuntimeState,
+    cloud: Boolean,
     onMenu: () -> Unit,
     onHistory: () -> Unit,
     onNewChat: () -> Unit,
+    onModelPicker: () -> Unit,
+    statsForNerds: Boolean,
 ) {
-    val status = engineStatus(runtimeState, runtimeLabel)
+    val status = if (cloud && runtimeState in listOf(RuntimeState.READY, RuntimeState.GENERATING)) {
+        EngineStatus(if (runtimeState == RuntimeState.GENERATING) "Replying · OpenCode" else "Ready · OpenCode", runtimeState == RuntimeState.GENERATING)
+    } else engineStatus(runtimeState, runtimeLabel)
     val dotColor by animateColorAsState(runtimeState.signal(), tween(MotionMedium), label = "engine dot")
     Column(Modifier.fillMaxWidth().statusBarsPadding()) {
-        // tmux-style top bar: the app and the window in view, plus the runtime doing the work.
-        StatusLine(
+        if (statsForNerds) StatusLine(
             segments = listOf(StatusSegment("mobie"), StatusSegment("chat")),
             selected = 1,
-            trailing = "offline · on this phone",
+            trailing = if (cloud) "cloud · OpenCode" else "offline · on this phone",
         )
         Row(
             Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(horizontal = 4.dp),
@@ -422,15 +472,22 @@ private fun ChatHeader(
             IconButton(onClick = onMenu, modifier = Modifier.testTag("open_menu")) {
                 LucideIcon(LucideR.drawable.lucide_ic_menu, "Open menu", Modifier.size(22.dp))
             }
-            Column(Modifier.weight(1f).padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.semantics { heading() },
-                )
-                Row(
+            Column(
+                Modifier.weight(1f).clickable(onClickLabel = "Change model", onClick = onModelPicker)
+                    .padding(horizontal = 4.dp, vertical = 8.dp).testTag("chat_model_picker"),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false).semantics { heading() },
+                    )
+                    LucideIcon(LucideR.drawable.lucide_ic_chevron_down, null, Modifier.size(16.dp))
+                }
+                if (statsForNerds || runtimeState !in listOf(RuntimeState.READY, RuntimeState.GENERATING)) Row(
                     Modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(7.dp),
@@ -510,14 +567,6 @@ private fun RunDetails(
                 )
                 Text(if (expanded) "▾" else "▸", style = Mobie.numeric.small, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-        }
-        activeCompute?.fallbackReason?.let { reason ->
-            Text(
-                reason,
-                style = Mobie.numeric.tiny,
-                color = Mobie.signals.caution,
-                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp).testTag("chat_compute_fallback"),
-            )
         }
         if (expanded) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -709,36 +758,18 @@ private fun ErrorPanel(message: String, onBack: () -> Unit, onLoadAnyway: (() ->
 @Composable
 private fun EmptyChat(model: AiModel, imageInputReady: Boolean) {
     Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 18.dp, vertical = 22.dp),
-        verticalArrangement = Arrangement.spacedBy(22.dp, Alignment.CenterVertically),
+        Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        // A quiet greeting; the message box below is the only call to action.
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            PromptLine("Ready to chat", Modifier.appear())
+        Text("What’s on your mind?", style = MaterialTheme.typography.headlineSmall)
+        if (model.supportsVision && !imageInputReady) {
             Text(
-                model.title,
-                style = MaterialTheme.typography.headlineSmall,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(start = 20.dp).appear(delayMillis = 60),
+                "Photos are unavailable for this session.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 12.dp),
             )
-            Column(Modifier.padding(start = 20.dp).appear(delayMillis = 120), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                CheckLine("Model loaded. Type a message below to begin.", "✓", Mobie.signals.ready)
-                CheckLine(
-                    if (model.supportsVision && imageInputReady) {
-                        "Chat about text or an attached photo on this phone. Image generation isn't available."
-                    } else if (model.supportsVision) {
-                        "This phone loaded text chat only. Photo input is unavailable for this session."
-                    } else {
-                        "Chat about text on this phone. Nothing you type leaves it."
-                    },
-                    if (model.supportsVision && !imageInputReady) "!" else "i",
-                    if (model.supportsVision && !imageInputReady) Mobie.signals.caution else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
         }
     }
 }
@@ -793,7 +824,7 @@ private fun AttachedImage(path: String) {
 }
 
 @Composable
-private fun AssistantMessage(message: ChatMessage, modelTitle: String, streaming: Boolean, modifier: Modifier = Modifier) {
+private fun AssistantMessage(message: ChatMessage, modelTitle: String, streaming: Boolean, statsForNerds: Boolean, reader: OfflineReader, modifier: Modifier = Modifier) {
     val waitingForAnswer = streaming && message.text.isBlank()
     val gutter = MaterialTheme.colorScheme.outline.copy(alpha = .5f)
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -837,20 +868,20 @@ private fun AssistantMessage(message: ChatMessage, modelTitle: String, streaming
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         TypingIndicator(MaterialTheme.colorScheme.primary)
-                        Text("Waiting for the first token", style = Mobie.numeric.small, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Thinking…", style = Mobie.numeric.small, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 } else if (message.text.isNotBlank()) {
                     StreamingCaret()
                 }
             } else if (message.text.isNotBlank()) {
-                ReplyFooter(message)
+                ReplyFooter(message, statsForNerds, reader)
             }
         }
     }
 }
 
 @Composable
-private fun ReplyFooter(message: ChatMessage) {
+private fun ReplyFooter(message: ChatMessage, statsForNerds: Boolean, reader: OfflineReader) {
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     var copied by remember { mutableStateOf(false) }
@@ -860,7 +891,7 @@ private fun ReplyFooter(message: ChatMessage) {
             copied = false
         }
     }
-    val footer = message.stats?.let(::replyStatsLine).orEmpty()
+    val footer = if (statsForNerds) message.stats?.let(::replyStatsLine).orEmpty() else ""
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.appear(offsetDp = 6f)) {
         Text(
             footer,
@@ -870,6 +901,13 @@ private fun ReplyFooter(message: ChatMessage) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
+        IconButton(onClick = { reader.toggle(message.text) }) {
+            LucideIcon(
+                if (reader.speakingText == message.text) LucideR.drawable.lucide_ic_square else LucideR.drawable.lucide_ic_volume_2,
+                if (reader.speakingText == message.text) "Stop reading reply" else "Read reply aloud on device",
+                Modifier.size(18.dp),
+            )
+        }
         // A light inline action: a full bordered button would crowd the stats it sits beside.
         Text(
             if (copied) "[copied]" else "[copy]",
@@ -1281,6 +1319,7 @@ private fun ComposerDock(
     onPromptChange: (String) -> Unit,
     runtimeState: RuntimeState,
     runtimeLabel: String,
+    cloud: Boolean,
     supportsVision: Boolean,
     imagePath: String?,
     imageCopying: Boolean,
@@ -1289,9 +1328,11 @@ private fun ComposerDock(
     imageError: String?,
     focusRequester: FocusRequester,
     onAttach: () -> Unit,
+    onAttachCamera: () -> Unit,
     onRemoveImage: () -> Unit,
     onSubmit: () -> Unit,
     onStop: () -> Unit,
+    dictation: @Composable () -> Unit,
 ) {
     val ready = runtimeState == RuntimeState.READY
     val generating = runtimeState == RuntimeState.GENERATING
@@ -1392,6 +1433,9 @@ private fun ComposerDock(
                         IconButton(onClick = onAttach, enabled = ready && !imageCopying) {
                             LucideIcon(LucideR.drawable.lucide_ic_image, "Attach image", Modifier.size(20.dp))
                         }
+                        IconButton(onClick = onAttachCamera, enabled = ready && !imageCopying) {
+                            LucideIcon(LucideR.drawable.lucide_ic_camera, "Take a photo", Modifier.size(20.dp))
+                        }
                     }
                     // The terminal prompt glyph. Amber when the engine can take input.
                     Text(
@@ -1434,6 +1478,7 @@ private fun ComposerDock(
                         },
                     )
                 }
+                dictation()
                 SendStopButton(generating = generating, canSubmit = canSubmit, onSubmit = onSubmit, onStop = onStop)
             }
             Row(
@@ -1441,9 +1486,9 @@ private fun ComposerDock(
                 horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                LucideIcon(LucideR.drawable.lucide_ic_lock, null, Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                LucideIcon(if (cloud) LucideR.drawable.lucide_ic_cloud else LucideR.drawable.lucide_ic_lock, null, Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
-                    "Stays on this phone · $runtimeLabel",
+                    if (cloud) "Cloud · OpenCode" else "On this phone",
                     style = Mobie.numeric.tiny,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

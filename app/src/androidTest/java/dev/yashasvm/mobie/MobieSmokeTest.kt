@@ -1,10 +1,14 @@
 package dev.yashasvm.mobie
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import org.junit.Rule
@@ -15,38 +19,51 @@ class MobieSmokeTest {
     val composeRule = createAndroidComposeRule<MainActivity>()
 
     @Test
-    fun appInstallsLaunchesAndStoresTokenSecurely() {
-        // The first-run welcome waits for the user; continue past it when present.
+    fun exploreOpensPromptLabAndSavedGenerationSettings() {
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("continue").fetchSemanticsNodes().isNotEmpty() ||
-                composeRule.onAllNodesWithText("Connect Hugging Face").fetchSemanticsNodes().isNotEmpty() ||
-                composeRule.onAllNodesWithText("Models for this phone").fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithTag("open_menu").fetchSemanticsNodes().isNotEmpty()
         }
-        if (composeRule.onAllNodesWithText("continue").fetchSemanticsNodes().isNotEmpty()) {
-            composeRule.onNodeWithText("continue").performClick()
-        }
-        composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("Connect Hugging Face").fetchSemanticsNodes().isNotEmpty() ||
-                composeRule.onAllNodesWithText("Models for this phone").fetchSemanticsNodes().isNotEmpty()
-        }
-        if (composeRule.onAllNodesWithText("Connect Hugging Face").fetchSemanticsNodes().isNotEmpty()) {
-            composeRule.onNodeWithText("Connect Hugging Face").assertIsDisplayed()
-            composeRule.onNodeWithText("Use public models without a token").performClick()
-        }
-        composeRule.onNodeWithText("Models for this phone").assertIsDisplayed()
+        composeRule.onNodeWithTag("open_menu").performClick()
+        composeRule.onNodeWithTag("drawer_explore").performClick()
+        composeRule.onNodeWithTag("explore_LAB").performScrollTo().performClick()
+        composeRule.onNodeWithTag("lab_input").performScrollTo().performTextInput("Explain a rainbow")
+        composeRule.onNodeWithText("Generation settings").performScrollTo().performClick()
+        composeRule.onNodeWithTag("compute_advanced").performScrollTo().performClick()
+        composeRule.onNodeWithTag("sampler_temperature").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("close_compute_settings").performClick()
+        composeRule.onNodeWithTag("lab_input").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Back to Explore").performClick()
+        composeRule.onNodeWithTag("explore_LAB").performScrollTo().performClick()
+        composeRule.onNodeWithTag("lab_input").performScrollTo().assertTextContains("Explain a rainbow")
+    }
 
-        composeRule.onNodeWithTag("bottom_nav_settings").performClick()
-        composeRule.onNodeWithText("Hugging Face access").assertIsDisplayed()
+    @Test
+    fun appInstallsLaunchesAndStoresTokenSecurely() {
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithTag("open_menu").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("open_menu").performClick()
+        composeRule.onNodeWithTag("drawer_settings").performClick()
+        composeRule.onNodeWithTag("catalog_title").assertIsDisplayed()
+        composeRule.onNodeWithText("Hugging Face access").performScrollTo().assertIsDisplayed()
         val tokenAction = if (composeRule.onAllNodesWithText("Add token").fetchSemanticsNodes().isNotEmpty()) {
             "Add token"
         } else {
             "Change token"
         }
-        composeRule.onNodeWithText(tokenAction).performClick()
-        composeRule.onNodeWithTag("hf_token_input").performTextInput("hf_test_only_not_a_real_token")
-        composeRule.onNodeWithText("Save").performClick()
+        composeRule.onNodeWithText(tokenAction).performScrollTo().performClick()
+        composeRule.onNodeWithTag("hf_token_input").performScrollTo().performTextInput("hf_test_only_not_a_real_token")
+        composeRule.onNodeWithText("Save").performScrollTo().performClick()
+        composeRule.onNodeWithText("Saved securely on this phone.").performScrollTo().assertIsDisplayed()
 
-        composeRule.onNodeWithTag("bottom_nav_settings").performClick()
-        composeRule.onNodeWithText("A token is securely stored on this device.", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("open_menu").performClick()
+        composeRule.onNodeWithText("Chat history").assertIsDisplayed()
+        composeRule.onNodeWithTag("drawer_chat").assertDoesNotExist()
+        composeRule.onNodeWithTag("drawer_library").assertDoesNotExist()
+        composeRule.onNodeWithTag("drawer_models").performClick()
+        composeRule.onNodeWithTag("catalog_title").assertIsDisplayed()
+        composeRule.onNodeWithTag("open_menu").performClick()
+        composeRule.onNodeWithTag("drawer_settings").performClick()
+        composeRule.onNodeWithText("Saved securely on this phone.").performScrollTo().assertIsDisplayed()
     }
 }

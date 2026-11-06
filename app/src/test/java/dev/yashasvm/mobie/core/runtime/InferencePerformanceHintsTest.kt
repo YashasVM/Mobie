@@ -15,6 +15,15 @@ class InferencePerformanceHintsTest {
         assertEquals(0, creations)
     }
 
+    @Test fun unavailableHintsDoNotReadClockForAnyOutput() {
+        var clockReads = 0
+        val tracker = InferenceHintTracker(InferenceHintSessions.noOp) { clockReads++; clockReads.toLong() }
+        repeat(1_000) { tracker.onOutput() }
+        tracker.close()
+        tracker.onOutput()
+        assertEquals(0, clockReads)
+    }
+
     @Test fun reportsMeasuredPrefillAndDecodeIntervalsAndCloses() {
         val durations = mutableListOf<Long>()
         var closed = false

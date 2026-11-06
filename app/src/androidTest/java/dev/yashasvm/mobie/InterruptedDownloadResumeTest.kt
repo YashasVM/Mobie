@@ -38,33 +38,38 @@ class InterruptedDownloadResumeTest {
         val observedSecondRange = AtomicReference<String?>("not-observed")
 
         ServerSocket(0).use { server ->
+            val serverFailure = AtomicReference<Throwable?>(null)
             val serving = Thread {
-                repeat(2) { attempt ->
-                    server.accept().use { socket ->
-                        val headers = readRequestHeaders(socket)
-                        val range = headers.firstOrNull { it.startsWith("Range:", ignoreCase = true) }
-                            ?.substringAfter(':')?.trim()
-                        if (attempt == 0) {
-                            assertNull(range)
-                            writeResponseHeaders(socket, 200, payload.size, null)
-                            socket.getOutputStream().apply {
-                                write(payload, 0, splitAt)
-                                flush()
-                            }
-                            // Closing before Content-Length bytes are sent simulates a dropped connection.
-                        } else {
-                            observedSecondRange.set(range)
-                            assertNull(
-                                "Mutable checksum-less sources must restart instead of appending bytes from a later response",
-                                range,
-                            )
-                            writeResponseHeaders(socket, 200, payload.size, null)
-                            socket.getOutputStream().apply {
-                                write(payload)
-                                flush()
+                try {
+                    repeat(2) { attempt ->
+                        server.accept().use { socket ->
+                            val headers = readRequestHeaders(socket)
+                            val range = headers.firstOrNull { it.startsWith("Range:", ignoreCase = true) }
+                                ?.substringAfter(':')?.trim()
+                            if (attempt == 0) {
+                                assertNull(range)
+                                writeResponseHeaders(socket, 200, payload.size, null)
+                                socket.getOutputStream().apply {
+                                    write(payload, 0, splitAt)
+                                    flush()
+                                }
+                                // Closing before Content-Length bytes are sent simulates a dropped connection.
+                            } else {
+                                observedSecondRange.set(range)
+                                assertNull(
+                                    "Mutable checksum-less sources must restart instead of appending bytes from a later response",
+                                    range,
+                                )
+                                writeResponseHeaders(socket, 200, payload.size, null)
+                                socket.getOutputStream().apply {
+                                    write(payload)
+                                    flush()
+                                }
                             }
                         }
                     }
+                } catch (error: Throwable) {
+                    if (!server.isClosed) serverFailure.set(error)
                 }
             }.apply { start() }
 
@@ -76,23 +81,32 @@ class InterruptedDownloadResumeTest {
             )
             val downloads = ModelDownloadManager(context)
             val requestId = downloads.enqueue("mobie-test/interrupted-resume", artifact)
-            val result = withTimeout(60_000L) {
-                downloads.observe(requestId).first { it.state.isFinished }
+            try {
+                // Android background scheduling must not consume the dropped-transfer retry budget.
+                withTimeout(60_000L) {
+                    downloads.observe(requestId).first { it.state == WorkInfo.State.RUNNING || it.state.isFinished }
+                }
+                val result = withTimeout(60_000L) {
+                    downloads.observe(requestId).first { it.state.isFinished }
+                }
+                serving.join(5_000)
+                serverFailure.get()?.let { throw AssertionError("Resume fixture server failed", it) }
+                assertTrue("Download failed: ${result.error}", result.state == WorkInfo.State.SUCCEEDED)
+                assertNull(observedSecondRange.get())
+                val downloaded = File(checkNotNull(result.localPath))
+                assertArrayEquals(payload, downloaded.readBytes())
+
+                val metadata = Properties().apply {
+                    File(downloaded.parentFile, DownloadFilePolicy.METADATA_FILE).inputStream().use(::load)
+                }
+                assertEquals(downloaded.length().toString(), metadata.getProperty("verifiedLength"))
+                assertEquals(downloaded.lastModified().toString(), metadata.getProperty("verifiedLastModified"))
+            } finally {
+                downloads.cancel("mobie-test/interrupted-resume", artifact)
+                server.close()
+                serving.join(5_000)
+                File(File(context.filesDir, "models"), DownloadFilePolicy.storageKey("mobie-test/interrupted-resume")).deleteRecursively()
             }
-
-            serving.join(5_000)
-            assertTrue("Download failed: ${result.error}", result.state == WorkInfo.State.SUCCEEDED)
-            assertNull(observedSecondRange.get())
-            val downloaded = File(checkNotNull(result.localPath))
-            assertArrayEquals(payload, downloaded.readBytes())
-
-            val metadata = Properties().apply {
-                File(downloaded.parentFile, DownloadFilePolicy.METADATA_FILE).inputStream().use(::load)
-            }
-            assertEquals(downloaded.length().toString(), metadata.getProperty("verifiedLength"))
-            assertEquals(downloaded.lastModified().toString(), metadata.getProperty("verifiedLastModified"))
-
-            downloaded.parentFile?.deleteRecursively()
         }
         Unit
     }

@@ -37,6 +37,7 @@ data class AiModel(
     val type: ModelType = ModelType.TEXT_GENERATION,
     val artifacts: List<ModelArtifact> = emptyList(),
     val preferredArtifactFileName: String? = null,
+    val cloudModel: CloudModel? = null,
 ) {
     val supportsVision: Boolean get() = type == ModelType.VISION
 

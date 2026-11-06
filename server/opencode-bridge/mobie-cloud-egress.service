@@ -1,0 +1,13 @@
+[Unit]
+Description=Mobie inference allowlisted HTTPS egress
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /home/yvm/mobie-cloud/egress-proxy.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+[Install]
+WantedBy=default.target

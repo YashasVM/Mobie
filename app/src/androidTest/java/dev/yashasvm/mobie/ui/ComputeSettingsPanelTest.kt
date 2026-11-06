@@ -73,6 +73,11 @@ class ComputeSettingsPanelTest {
                 }
             }
         }
+        composeRule.onNodeWithTag("decode_speed_CPU", useUnmergedTree = true).assertDoesNotExist()
+        composeRule.onNodeWithTag("backend_GPU").performClick().assertIsSelected()
+        composeRule.runOnIdle { assertEquals(ComputeBackend.GPU, selected) }
+        composeRule.onNodeWithTag("backend_CPU").performClick().assertIsSelected()
+        composeRule.onNodeWithTag("compute_details").performClick()
         composeRule.onNodeWithText("Snapdragon 8 Gen 3 · Adreno 750 GPU · 8 CPU cores").assertIsDisplayed()
         composeRule.onNodeWithTag("backend_CPU").assertIsSelected()
         composeRule.onNodeWithText("estimate").assertIsDisplayed()
@@ -97,12 +102,13 @@ class ComputeSettingsPanelTest {
                 }
             }
         }
+        composeRule.onNodeWithTag("compute_details").performClick()
         composeRule.onNodeWithTag("decode_speed_GPU", useUnmergedTree = true).assertIsDisplayed()
         composeRule.onNodeWithText("Speed unavailable").assertIsDisplayed()
         composeRule.onNodeWithText("OpenCL driver was not found. Run GPU to measure support and speed.").assertIsDisplayed()
         composeRule.onNodeWithTag("backend_GPU").performClick()
         composeRule.runOnIdle { assertEquals(ComputeBackend.GPU, selected) }
-        composeRule.onNodeWithText("Saved. Used next time you load a model.").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Saved for next load.").performScrollTo().assertIsDisplayed()
     }
 
     @Test fun savedNonDefaultChoicesWithNothingLoadedNeverOfferAReload() {
@@ -119,7 +125,7 @@ class ComputeSettingsPanelTest {
             }
         }
         composeRule.onNodeWithTag("saved_settings").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Saved. Used next time you load a model.").assertIsDisplayed()
+        composeRule.onNodeWithText("Saved for next load.").assertIsDisplayed()
         composeRule.onNodeWithTag("reload_prompt").assertDoesNotExist()
         composeRule.onNodeWithTag("apply_compute").assertDoesNotExist()
         composeRule.runOnIdle { assertEquals(0, applyCount) }
@@ -140,6 +146,7 @@ class ComputeSettingsPanelTest {
                 }
             }
         }
+        composeRule.onNodeWithTag("compute_details").performClick()
         composeRule.onNodeWithTag("decode_speed_CPU", useUnmergedTree = true).assertIsDisplayed()
         composeRule.onNodeWithText("measured at different settings · last run").assertIsDisplayed()
         composeRule.onNodeWithText("measured on this phone · last run").assertDoesNotExist()
@@ -154,11 +161,12 @@ class ComputeSettingsPanelTest {
                         backend = ComputeBackend.CPU, cpuThreads = 8,
                         onBackendChange = {}, onCpuThreadsChange = { chosen = it },
                         hardware = hardware.copy(cpuCoreCount = 4), artifactSizeBytes = 344_671_744,
+                        options = ComputeOptions(backend = ComputeBackend.CPU, cpuThreads = 8),
                     )
                 }
             }
         }
-        composeRule.onNodeWithTag("advanced_toggle").performScrollTo().performClick()
+        composeRule.onNodeWithTag("compute_advanced").performScrollTo().performClick()
         composeRule.onNodeWithText("4").performScrollTo().assertIsSelected().performClick()
         composeRule.runOnIdle { assertEquals(4, chosen) }
         for (count in 5..8) composeRule.onNodeWithText(count.toString()).assertDoesNotExist()
@@ -173,11 +181,12 @@ class ComputeSettingsPanelTest {
                         backend = ComputeBackend.CPU, cpuThreads = 8,
                         onBackendChange = {}, onCpuThreadsChange = { chosen = it },
                         hardware = hardware.copy(cpuCoreCount = 1), artifactSizeBytes = 344_671_744,
+                        options = ComputeOptions(backend = ComputeBackend.CPU, cpuThreads = 8),
                     )
                 }
             }
         }
-        composeRule.onNodeWithTag("advanced_toggle").performScrollTo().performClick()
+        composeRule.onNodeWithTag("compute_advanced").performScrollTo().performClick()
         composeRule.onNodeWithText("1").performScrollTo().assertIsSelected().performClick()
         composeRule.runOnIdle { assertEquals(1, chosen) }
         for (count in 2..8) composeRule.onNodeWithText(count.toString()).assertDoesNotExist()
@@ -197,13 +206,14 @@ class ComputeSettingsPanelTest {
                 }
             }
         }
+        composeRule.onNodeWithTag("compute_details").performClick()
         composeRule.onNodeWithText("estimate · lower confidence").assertIsDisplayed()
         composeRule.onNodeWithText("≈30 tokens/s").assertIsDisplayed()
         composeRule.onNodeWithText("measured on this phone · last run").assertIsDisplayed()
         captureUiFixture("compute-speed-lower-confidence-fixture.png")
     }
 
-    @Test fun advancedStartsCollapsedAndUnsupportedControlsStayHidden() {
+    @Test fun advancedControlsExpandOnDemandAndUnsupportedControlsStayHidden() {
         composeRule.setContent {
             MobieTheme {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
@@ -213,14 +223,16 @@ class ComputeSettingsPanelTest {
             }
         }
         composeRule.onNodeWithTag("advanced_controls").assertDoesNotExist()
-        composeRule.onNodeWithTag("advanced_toggle").performScrollTo().performClick()
+        captureUiFixture("compute-compact-fixture.png")
+        composeRule.onNodeWithTag("compute_advanced").performScrollTo().performClick()
+        composeRule.onNodeWithTag("advanced_controls").assertExists()
         composeRule.onNodeWithTag("advanced_threads").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("advanced_thinking").assertDoesNotExist()
         composeRule.onNodeWithTag("advanced_speculative").assertDoesNotExist()
         composeRule.onNode(hasText("4096") and hasAnyAncestor(hasTestTag("advanced_context"))).assertDoesNotExist()
         composeRule.onNodeWithTag("advanced_context").performScrollTo().assertIsDisplayed()
         captureUiFixture("advanced-context-fixture.png")
-        composeRule.onNodeWithTag("advanced_toggle").performScrollTo().performClick()
+        composeRule.onNodeWithTag("compute_advanced").performScrollTo().performClick()
         composeRule.onNodeWithTag("advanced_controls").assertDoesNotExist()
         captureUiFixture("advanced-collapsed-fixture.png")
     }
@@ -234,12 +246,12 @@ class ComputeSettingsPanelTest {
                 }
             }
         }
-        composeRule.onNodeWithTag("advanced_toggle").performScrollTo().performClick()
+        composeRule.onNodeWithTag("compute_advanced").performScrollTo().performClick()
         composeRule.onNodeWithTag("advanced_thinking").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("advanced_speculative").performScrollTo().assertIsDisplayed()
-        composeRule.onNode(hasText("Experimental — not yet tested on this phone") and
+        composeRule.onNode(hasText("Experimental. Not yet tested on this phone.") and
             hasAnyAncestor(hasTestTag("advanced_speculative"))).assertIsDisplayed()
-        composeRule.onNode(hasText("Experimental — not yet tested on this phone") and
+        composeRule.onNode(hasText("Experimental. Not yet tested on this phone.") and
             hasAnyAncestor(hasTestTag("advanced_preface"))).performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("activation_hint").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("FP16 was 7% slower than Auto in one S24 Ultra test.")
@@ -298,7 +310,7 @@ class ComputeSettingsPanelTest {
                 }
             }
         }
-        composeRule.onNodeWithTag("advanced_toggle").performScrollTo().performClick()
+        composeRule.onNodeWithTag("compute_advanced").performScrollTo().performClick()
         composeRule.onNodeWithTag("sampler_top_k").performScrollTo().performTextReplacement("65")
         composeRule.onNodeWithTag("apply_compute").performScrollTo().assertIsNotEnabled()
         composeRule.runOnIdle { assertEquals(1, sampler.topK); assertEquals(0, applyCount) }
@@ -359,6 +371,7 @@ class ComputeSettingsPanelTest {
             }
         }
         composeRule.onNodeWithTag("backend_AUTO").assertIsSelected()
+        composeRule.onNodeWithTag("compute_details").performClick()
         composeRule.onNode(hasText("Uses GPU · needs ~3.0 GB RAM") and hasAnyAncestor(hasTestTag("auto_admission")), useUnmergedTree = true)
             .assertIsDisplayed()
         composeRule.onNodeWithTag("ram_CPU", useUnmergedTree = true).assertTextEquals("needs ~1.0 GB RAM · Runs here")
@@ -381,7 +394,7 @@ class ComputeSettingsPanelTest {
                 }
             }
         }
-        composeRule.onNodeWithText("These settings are in use.").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Settings in use.").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("running · GPU").assertIsDisplayed()
         composeRule.onNodeWithTag("apply_compute").assertDoesNotExist()
     }

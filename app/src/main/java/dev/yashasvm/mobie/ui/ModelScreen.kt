@@ -134,12 +134,16 @@ internal fun ModelScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp),
             contentPadding = PaddingValues(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 24.dp),
         ) {
-            item(key = "identity") { ModelIdentity(model, artifact, Modifier.entrance(entrance, "identity", 0)) }
+            item(key = "identity") { ModelIdentity(model, artifact, Modifier.entrance(entrance, "identity", 0), showAdvanced = true) }
             item(key = "verdict") { VerdictPanel(state.compatibility, Modifier.entrance(entrance, "verdict", 1)) }
             item(key = "memory") {
                 MemoryPanel(state.compatibility, state.device, Modifier.entrance(entrance, "memory", 2),
-                    state.memoryReliefInProgress, onFreeMemory)
+                    state.memoryReliefInProgress, onFreeMemory, showAdvanced = true)
             }
+            item(key = "storage") {
+                StoragePanel(artifact, state.compatibility, state.device, Modifier.entrance(entrance, "storage", 4), showAdvanced = true)
+            }
+            item(key = "artifact") { ArtifactPanel(artifact, model, Modifier.entrance(entrance, "artifact", 5), showAdvanced = true) }
             item(key = "compute") {
                 ComputeSettingsPanel(
                     backend = state.computeBackend,
@@ -163,12 +167,9 @@ internal fun ModelScreen(
                     onApply = onApplyCompute,
                     onReset = onResetCompute,
                     modifier = Modifier.entrance(entrance, "compute", 3),
+                    showAdvanced = true,
                 )
             }
-            item(key = "storage") {
-                StoragePanel(artifact, state.compatibility, state.device, Modifier.entrance(entrance, "storage", 4))
-            }
-            item(key = "artifact") { ArtifactPanel(artifact, model, Modifier.entrance(entrance, "artifact", 5)) }
         }
         ActionDock(
             state = state,
@@ -216,7 +217,7 @@ internal fun ModelScreen(
 }
 
 /** Position of the run settings window in the model page list; the dock's "change" link scrolls to it. */
-private const val COMPUTE_ITEM_INDEX = 3
+private const val COMPUTE_ITEM_INDEX = 5
 
 /** Top bar: back, the model as a path (`model/<id>`), and the runtime tag. */
 @Composable
@@ -249,21 +250,21 @@ private fun ModelTopBar(path: String, runtime: String, onBack: () -> Unit) {
 /** Repo id as the large heading, author above it, and the facts that matter as tags. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ModelIdentity(model: AiModel, artifact: ModelArtifact, modifier: Modifier = Modifier) {
+private fun ModelIdentity(model: AiModel, artifact: ModelArtifact, modifier: Modifier = Modifier, showAdvanced: Boolean = true) {
     Column(modifier.padding(top = 14.dp, bottom = 2.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (model.author.isNotBlank()) {
             Text("by ${model.author}", style = Mobie.numeric.small, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Text(
-            model.id,
+            if (showAdvanced) model.id else model.title.ifBlank { model.id.substringAfter('/') },
             style = Mobie.numeric.large,
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.semantics { heading() },
         )
-        if (model.title.isNotBlank() && model.title != model.id.substringAfter('/')) {
+        if (showAdvanced && model.title.isNotBlank() && model.title != model.id.substringAfter('/')) {
             Text(model.title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
         }
-        if (model.description.isNotBlank()) {
+        if (showAdvanced && model.description.isNotBlank()) {
             Text(
                 model.description,
                 style = MaterialTheme.typography.bodyMedium,
@@ -284,8 +285,10 @@ private fun ModelIdentity(model: AiModel, artifact: ModelArtifact, modifier: Mod
                 color = if (model.gated) Mobie.signals.caution else null,
             )
             if (model.supportsVision) Tag("Photos", icon = LucideR.drawable.lucide_ic_eye)
-            artifact.quantization?.let { Tag(it) }
-            model.license?.let { Tag("License: $it") }
+            if (showAdvanced) {
+                artifact.quantization?.let { Tag(it) }
+                model.license?.let { Tag("License: $it") }
+            }
         }
     }
 }
@@ -340,7 +343,17 @@ private fun MemoryPanel(
     modifier: Modifier = Modifier,
     memoryReliefInProgress: Boolean = false,
     onFreeMemory: (() -> Unit) -> Unit = { it() },
+    showAdvanced: Boolean = true,
 ) {
+    if (!showAdvanced) {
+        TuiWindow("Memory", modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                KvRow("Estimated RAM", result?.estimatedRamBytes?.takeIf { it > 0 }?.let(::formatBytes) ?: "Unknown")
+                MemoryReliefControls(MemoryReliefDecision.from(result, device), memoryReliefInProgress, onFreeMemory)
+            }
+        }
+        return
+    }
     val weightsColor = MaterialTheme.colorScheme.primary
     val kvColor = Mobie.signals.thinking
     val overheadColor = MaterialTheme.colorScheme.outline
@@ -466,6 +479,7 @@ private fun StoragePanel(
     result: CompatibilityResult?,
     device: DeviceProfile?,
     modifier: Modifier = Modifier,
+    showAdvanced: Boolean = true,
 ) {
     val needed = result?.requiredStorageBytes?.takeIf { it > 0 } ?: artifact.sizeBytes
     val free = device?.availableStorageBytes ?: 0L
@@ -481,13 +495,13 @@ private fun StoragePanel(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 KvRow("Needs", formatBytes(needed))
                 KvRow("Free", formatBytes(free))
-                KvRow(
+                if (showAdvanced) KvRow(
                     "After",
                     if (after < 0) "Short by ${formatBytes(-after)}" else formatBytes(after),
                     valueColor = if (after < 0) Mobie.signals.blocked else null,
                 )
             }
-            ProgressTrack(
+            if (showAdvanced) ProgressTrack(
                 progress = if (needed > 0 && free > 0) needed.toFloat() / free else 0f,
                 color = barColor,
             )
@@ -496,24 +510,24 @@ private fun StoragePanel(
 }
 
 @Composable
-private fun ArtifactPanel(artifact: ModelArtifact, model: AiModel, modifier: Modifier = Modifier) {
+private fun ArtifactPanel(artifact: ModelArtifact, model: AiModel, modifier: Modifier = Modifier, showAdvanced: Boolean = true) {
     val rows = buildList {
         add(SpecLine("Runtime", artifact.runtimeLabel))
-        add(SpecLine("File", middleEllipsis(artifact.fileName.substringAfterLast('/'))))
+        if (showAdvanced) add(SpecLine("File", middleEllipsis(artifact.fileName.substringAfterLast('/'))))
         add(SpecLine("Download size", formatBytes(artifact.sizeBytes)))
         add(SpecLine("Quantization", artifact.quantization ?: "Publisher default"))
-        add(
+        if (showAdvanced) add(
             if (artifact.sha256.isNullOrBlank()) {
                 SpecLine("Integrity", "Size check only")
             } else {
                 SpecLine("Integrity", "SHA-256 verified on download", highlight = true)
             },
         )
-        add(SpecLine("Input", if (model.supportsVision) "Vision" else "Text only"))
+        if (showAdvanced) add(SpecLine("Input", if (model.supportsVision) "Vision" else "Text only"))
         add(SpecLine("License", model.license ?: "Check model card"))
         add(SpecLine("Access", if (model.gated) "Hugging Face approval required" else "Public"))
     }
-    TuiWindow("artifact", modifier.fillMaxWidth()) {
+    TuiWindow(if (showAdvanced) "artifact" else "Model details", modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             rows.forEach { line ->
                 KvRow(
@@ -574,16 +588,31 @@ internal fun ComputeSettingsPanel(
     onApply: () -> Unit = {},
     onReset: () -> Unit = { onOptionsChange(ComputeOptions()); onSamplerChange(SamplerSettings()) },
     framed: Boolean = true,
+    showAdvanced: Boolean = true,
 ) {
     val coreCount = hardware?.cpuCoreCount?.takeIf { it > 0 } ?: Runtime.getRuntime().availableProcessors()
     // Speeds match the settings the next load would use, after this artifact's limits.
     val effective = AdvancedComputePolicy.forArtifact(options, coreCount, capabilities)
     val runSettings = DecodeRunSettings(cpuThreads = effective.cpuThreads, contextTokens = effective.contextTokens)
     var inputsValid by remember { mutableStateOf(true) }
+    var showDetails by remember { mutableStateOf(false) }
+    var advancedExpanded by remember { mutableStateOf(false) }
     val body: @Composable () -> Unit = {
         Column(Modifier.padding(if (framed) 12.dp else 0.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                FlagHeader("Run on", "speed and memory for this model")
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Run on", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                if (showAdvanced) TextButton(onClick = { showDetails = !showDetails }, modifier = Modifier.testTag("compute_details")) {
+                    Text(if (showDetails) "Hide details" else "Details")
+                }
+            }
+            if (!showDetails) {
+                Row(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(ComputeBackend.AUTO, ComputeBackend.CPU, ComputeBackend.GPU).forEach { choice ->
+                        FlagChoice(if (choice == ComputeBackend.AUTO) "Auto" else choice.name,
+                            backend == choice, { onBackendChange(choice) }, Modifier.weight(1f).testTag("backend_${choice.name}"))
+                    }
+                }
+            } else Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     BackendOption(
                         label = "Auto",
@@ -622,6 +651,10 @@ internal fun ComputeSettingsPanel(
                                     ?: prediction.unavailableReason.orEmpty(),
                                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 backendAdmissions[choice]?.result?.let { result ->
+                                    if (result.status == Compatibility.INCOMPATIBLE) {
+                                        Text(result.reason, style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.error)
+                                    }
                                     backendRamLabel(result)?.let { ram ->
                                         Text(ram, modifier = Modifier.testTag("ram_${choice.name}"), style = Mobie.numeric.tiny,
                                             color = if (result.status == Compatibility.COMPATIBLE) MaterialTheme.colorScheme.onSurfaceVariant
@@ -637,21 +670,37 @@ internal fun ComputeSettingsPanel(
                 Text(reason, modifier = Modifier.testTag("compute_fallback"), style = MaterialTheme.typography.bodySmall,
                     color = Mobie.signals.caution)
             }
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            if (!showDetails) backendAdmissions[backend]?.result?.takeIf { it.status == Compatibility.INCOMPATIBLE }?.let { result ->
+                Text(result.reason, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
+            if (showDetails) Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(hardwareSummary(hardware), style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 val details = hardware?.let(::hardwareDetails).orEmpty()
                 Text(listOf(details, "GPU support is checked when loading.").filter { it.isNotEmpty() }.joinToString(" · "),
                     style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            AdvancedComputePanel(options, sampler, coreCount, capabilities, onOptionsChange, onSamplerChange, onReset) { inputsValid = it }
-            ComputeApplyStatus(needsApply, loaded, inputsValid, runtimeState, downloaded, onApply)
+            if (showAdvanced || loaded && needsApply) {
+                ComputeApplyStatus(needsApply, loaded, (!showAdvanced || inputsValid) &&
+                    backendAdmissions[backend]?.result?.status != Compatibility.INCOMPATIBLE, runtimeState, downloaded, onApply)
+            }
+            if (showAdvanced) {
+                TextButton(
+                    onClick = { advancedExpanded = !advancedExpanded },
+                    modifier = Modifier.testTag("compute_advanced"),
+                ) {
+                    Text(if (advancedExpanded) "Hide advanced settings" else "Advanced settings")
+                }
+                if (advancedExpanded) {
+                    AdvancedComputePanel(options, sampler, coreCount, capabilities, onOptionsChange, onSamplerChange, onReset) { inputsValid = it }
+                }
+            }
         }
     }
     if (framed) {
         TuiWindow(
-            "run settings",
+            "Chat settings",
             modifier.fillMaxWidth().testTag("compute_settings"),
-            meta = activeCompute?.let { "running · ${it.label}" },
+            meta = activeCompute?.let { "running · ${if (showAdvanced) it.label else it.backend.name}" },
             metaColor = Mobie.signals.ready,
         ) { body() }
     } else {
@@ -672,7 +721,7 @@ private fun ComputeApplyStatus(
     val dim = MaterialTheme.colorScheme.onSurfaceVariant
     if (!loaded) {
         // Nothing is loaded, so there is no reload to ask for; the choices simply wait for the next load.
-        Text("Saved. Used next time you load a model.", modifier = Modifier.testTag("saved_settings"),
+        Text("Saved for next load.", modifier = Modifier.testTag("saved_settings"),
             style = MaterialTheme.typography.bodySmall, color = dim)
     } else if (needsApply) {
         Column(
@@ -683,10 +732,10 @@ private fun ComputeApplyStatus(
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("Changes need a reload. Your saved conversation will be kept.", modifier = Modifier.testTag("reload_prompt"),
+            Text("Reload to apply. Your chat is saved.", modifier = Modifier.testTag("reload_prompt"),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
             when {
-                !inputsValid -> Text("Fix the highlighted fields before applying.", style = MaterialTheme.typography.bodySmall,
+                !inputsValid -> Text("Check the selected processing option and highlighted fields before applying.", style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error)
                 runtimeState == RuntimeState.GENERATING || runtimeState == RuntimeState.STOPPING ->
                     Text("Wait for the reply to finish, or stop it before applying changes.", style = MaterialTheme.typography.bodySmall, color = dim)
@@ -700,7 +749,7 @@ private fun ComputeApplyStatus(
     } else {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatusDot(Mobie.signals.ready, size = 6.dp)
-            Text("These settings are in use.", style = MaterialTheme.typography.bodySmall, color = dim)
+            Text("Settings in use.", style = MaterialTheme.typography.bodySmall, color = dim)
         }
     }
 }

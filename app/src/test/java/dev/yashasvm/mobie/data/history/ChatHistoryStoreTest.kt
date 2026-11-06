@@ -21,6 +21,38 @@ class ChatHistoryStoreTest {
     private val modelId = "litert-community/test-model"
 
     @Test
+    fun aggregateHistoryRetainsOwningModelsAcrossReopening() = runBlocking {
+        val prefs = MemoryPreferences()
+        val store = ChatHistoryStore(prefs)
+        val cloudId = "opencode/provider/model"
+        store.writeSession(modelId, "same-session", listOf(HistoryMessage(true, "Local prompt")))
+        store.writeSession(cloudId, "same-session", listOf(HistoryMessage(true, "Cloud prompt")))
+        store.startNewSession("litert-community/empty", "empty")
+
+        val sessions = ChatHistoryStore(prefs.reopened()).allSessions()
+
+        assertEquals(2, sessions.size)
+        assertEquals(setOf(modelId, cloudId), sessions.map { it.modelId }.toSet())
+        assertEquals("Local prompt", sessions.single { it.modelId == modelId }.messages.single().text)
+        assertEquals("Cloud prompt", sessions.single { it.modelId == cloudId }.messages.single().text)
+        assertTrue(sessions.zipWithNext().all { (first, second) -> first.updatedAt >= second.updatedAt })
+        assertEquals("same-session", store.currentSessionId(modelId))
+        assertEquals("same-session", store.currentSessionId(cloudId))
+    }
+
+    @Test
+    fun aggregateHistoryIncludesLegacyChatsAndExcludesMetadata() = runBlocking {
+        val prefs = MemoryPreferences()
+        prefs.edit().putString(modelId, "[{\"fromUser\":true,\"text\":\"Legacy prompt\"}]")
+            .putString("meta:last_model", modelId).commit()
+
+        val session = ChatHistoryStore(prefs).allSessions().single()
+
+        assertEquals(modelId, session.modelId)
+        assertEquals("Legacy prompt", session.messages.single().text)
+    }
+
+    @Test
     fun writeIsReadableFromANewStoreOverTheSamePreferences() = runBlocking {
         val prefs = MemoryPreferences()
         val messages = listOf(HistoryMessage(true, "Hello"), HistoryMessage(false, "Hi", thinking = "think"))

@@ -10,6 +10,8 @@ LiteRT-LM 0.16.1 fails this artifact's GPU initialization at `STABLEHLO_COMPOSIT
 
 ## Matched visible-output measurements before resuming
 
+For new app-level TPS and first-token latency measurements, disable reply pacing. `paceReplies` delays text delivery and propagates backpressure to the runtime collector. Record native decode tokens/second separately from runtime first-chunk latency and on-screen first visible answer latency; runtime timestamps do not measure rendering time. Keep paced runs separate from unrestricted performance comparisons.
+
 The prompt is `Explain in a few concise sentences why local AI inference can be useful on a phone. /no_think`. Each case uses empty history, temperature 0, topK 1, topP 1, seed 0, thinking explicitly off, 64 output tokens, persistent app-private compiled cache, and native benchmark counters. A warm-up precedes three measured repetitions. TTFT is the observed first nonempty SDK chunk, also the first visible output in these thinking-off cases. Chunks are not counted as tokenizer tokens. PSS is sampled every 100 ms and includes graphics mtrack.
 
 | Configuration | Decode tok/s | TTFT ms | Load ms | Peak PSS GiB | Thermal start/max/end | Mobie vs Gallery |
