@@ -89,8 +89,10 @@ internal object AdvancedComputePolicy {
 
     /** Change the RAM estimate only when this exact artifact's metadata permits the override. */
     fun compatibilityArtifact(artifact: ModelArtifact?, options: ComputeOptions, capabilities: ComputeCapabilities?): ModelArtifact? {
-        val context = contextOverride(options, capabilities) ?: return artifact
-        return artifact?.copy(contextWindowTokens = context)
+        // The loaded artifact's ModelInfo is exact; installs made before header inspection lack the drafter fact.
+        val known = artifact?.let { it.copy(speculativeDrafter = capabilities?.supportsSpeculativeDecoding ?: it.speculativeDrafter) }
+        val context = contextOverride(options, capabilities) ?: return known
+        return known?.copy(contextWindowTokens = context)
     }
 
     /**

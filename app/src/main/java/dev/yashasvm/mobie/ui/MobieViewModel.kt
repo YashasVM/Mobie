@@ -259,7 +259,8 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 compatibility = current.selectedArtifact?.let { artifact ->
                     container.compatibility.resolve(admissionArtifact(artifact), device,
                         current.selected?.supportsVision == true, current.computeBackend,
-                        contextTokens = admissionContextTokens(artifact))
+                        contextTokens = admissionContextTokens(artifact),
+                        speculativeDecoding = current.computeOptions.speculativeDecoding)
                 },
             )
         }
@@ -336,7 +337,8 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             if (device == null || artifact == null) updated else updated.copy(
                 compatibility = container.compatibility.resolve(admissionArtifact(artifact, saved), device,
                     latest.selected?.supportsVision == true, saved.backend,
-                    contextTokens = admissionContextTokens(artifact, saved)),
+                    contextTokens = admissionContextTokens(artifact, saved),
+                    speculativeDecoding = saved.speculativeDecoding),
             )
         }
     }
@@ -364,7 +366,8 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             val device = readDeviceProfile()
             if (!isCurrentRuntimeOperation(operation) || selectionRevision.get() != revision || state.value.selectedArtifact != artifact) return@launch
             val compatibility = container.compatibility.resolve(admissionArtifact(artifact), device,
-                model.supportsVision, state.value.computeBackend, contextTokens = admissionContextTokens(artifact))
+                model.supportsVision, state.value.computeBackend, contextTokens = admissionContextTokens(artifact),
+                speculativeDecoding = state.value.computeOptions.speculativeDecoding)
             mutableState.update { it.copy(device = device, compatibility = compatibility) }
             if (compatibility.status == Compatibility.INCOMPATIBLE || compatibility.memoryTier == MemoryAdmissionTier.FITS_AFTER_RECLAIM) {
                 // Nothing was unloaded, so the previous engine (if any) is still the one answering.
@@ -568,7 +571,8 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                     val options = state.value.computeOptions
                     container.compatibility.resolve(AdvancedComputePolicy.compatibilityArtifact(candidate, options, capabilities),
                         device, model?.supportsVision == true, state.value.computeBackend,
-                        contextTokens = AdvancedComputePolicy.contextOverride(options, capabilities))
+                        contextTokens = AdvancedComputePolicy.contextOverride(options, capabilities),
+                        speculativeDecoding = options.speculativeDecoding)
                 },
                 download = null,
                 downloadedPath = null,
@@ -618,7 +622,8 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         val artifact = current.selectedArtifact ?: return
         viewModelScope.launch {
             val device = readDeviceProfile()
-            val compatibility = container.compatibility.resolve(admissionArtifact(artifact), device, model.supportsVision, state.value.computeBackend)
+            val compatibility = container.compatibility.resolve(admissionArtifact(artifact), device, model.supportsVision,
+                state.value.computeBackend, speculativeDecoding = state.value.computeOptions.speculativeDecoding)
             mutableState.update { it.copy(device = device, compatibility = compatibility, error = null) }
             if (model.gated && !state.value.tokenConfigured) {
                 mutableState.update { it.copy(error = "This gated model requires a Hugging Face token.") }
@@ -654,7 +659,8 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 ) return@launch
                 val compatibility = container.compatibility.resolve(admissionArtifact(current.selectedArtifact), device,
                     current.selected?.supportsVision == true, current.computeBackend, allowReclaim = allowReclaim,
-                    contextTokens = admissionContextTokens(current.selectedArtifact))
+                    contextTokens = admissionContextTokens(current.selectedArtifact),
+                    speculativeDecoding = current.computeOptions.speculativeDecoding)
                 mutableState.update { it.copy(device = device, compatibility = compatibility) }
                 if (compatibility.status == Compatibility.INCOMPATIBLE) {
                     mutableState.update { it.copy(error = compatibility.reason) }

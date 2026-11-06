@@ -82,8 +82,13 @@ class LiteRtLmRuntimeAdapter(
     @Volatile private var conversation: Conversation? = null
     /** Estimated RAM of the loaded engine; credited as reclaimable when a reload is admitted. */
     private var loadedRamEstimateBytes = 0L
-    /** Whether the loaded engine built the model's MTP drafter during initialization. */
-    private var engineDrafterBuilt = false
+    /**
+     * Whether the loaded engine holds the model's MTP drafter, built at initialization or loaded
+     * lazily by a conversation that asked for it. The SDK keeps a lazily loaded drafter until unload.
+     */
+    private var drafterAllocated = false
+    /** Auto's drafter failed during initialization; Auto must not ask the SDK to load it lazily. */
+    private var autoDrafterFailed = false
     @Volatile private var visionReady = false
     @Volatile private var computeOptions = ComputeOptions()
     @Volatile private var selectedCompute: ActiveCompute? = null
@@ -133,7 +138,6 @@ class LiteRtLmRuntimeAdapter(
                         )
                         val options = admitted.options
                         val capabilities = admitted.capabilities
-                        ExperimentalFlags.enableBenchmark = true
                         val loadedEngine = initializeTextBackend(
                             modelPath = modelPath,
                             vision = vision,
@@ -147,10 +151,11 @@ class LiteRtLmRuntimeAdapter(
                             val sampler = configuredSampler
                             engine = loadedEngine.engine
                             visionReady = loadedEngine.visionReady
-                            engineDrafterBuilt = loadedEngine.drafterBuilt
-                            val usesDrafter = SpeculativeDecodingPolicy.conversationUses(options.speculativeDecoding, loadedEngine.drafterBuilt)
-                            selectedCompute = loadedEngine.compute.copy(speculativeDecoding = usesDrafter)
+                            drafterAllocated = loadedEngine.drafterBuilt
+                            autoDrafterFailed = loadedEngine.drafterNote != null
                             selectedCapabilities = capabilities
+                            val usesDrafter = conversationUsesDrafter(options, loadedEngine.compute.backend)
+                            selectedCompute = loadedEngine.compute.copy(speculativeDecoding = usesDrafter)
                             activeOptions = options
                             conversation = loadedEngine.engine.createConversation(
                                 conversationConfig(restored, sampler = sampler),
@@ -176,8 +181,9 @@ class LiteRtLmRuntimeAdapter(
                                 contextWindowTokens = loadedEngine.contextWindowTokens,
                                 backend = loadedEngine.compute.backend,
                                 visionEncoderLoaded = loadedEngine.visionReady,
-                                speculativeDrafter = usesDrafter,
+                                speculativeDrafter = drafterAllocated || usesDrafter,
                             )
+                            if (usesDrafter) drafterAllocated = true
                             Unit
                         } catch (error: Throwable) {
                             if (options.artifactIdentity.isNotBlank()) {
@@ -192,7 +198,8 @@ class LiteRtLmRuntimeAdapter(
                             }
                             engine = null
                             visionReady = false
-                            engineDrafterBuilt = false
+                            drafterAllocated = false
+                            autoDrafterFailed = false
                             selectedCompute = null
                             selectedCapabilities = null
                             activeOptions = ComputeOptions()
@@ -290,6 +297,10 @@ class LiteRtLmRuntimeAdapter(
             val restored = ConversationHistoryPolicy.select(history, contextWindowTokens)
             // Construct with the proposed settings, but publish them only after native creation
             // succeeds. Closing first avoids overlapping KV caches on memory-constrained devices.
+            val backend = checkNotNull(selectedCompute) { "Reload the model to inspect its backend." }.backend
+            val usesDrafter = conversationUsesDrafter(effective, backend)
+            // Asking for the drafter on an engine without one makes the SDK load it on the next reply.
+            if (usesDrafter && !drafterAllocated) ensureDrafterHeadroom()
             val config = conversationConfig(restored, sampler = validatedSampler, options = effective)
             val restoredHasImage = hasRestorableHistoryImage(restored)
             replaceRuntimeResourceAfterClosingPrevious(
@@ -303,9 +314,11 @@ class LiteRtLmRuntimeAdapter(
                 installReplacement = { replacement ->
                     conversation = replacement
                     activeOptions = effective
-                    selectedCompute = selectedCompute?.copy(
-                        speculativeDecoding = SpeculativeDecodingPolicy.conversationUses(effective.speculativeDecoding, engineDrafterBuilt),
-                    )
+                    selectedCompute = selectedCompute?.copy(speculativeDecoding = usesDrafter)
+                    if (usesDrafter && !drafterAllocated) {
+                        drafterAllocated = true
+                        loadedRamEstimateBytes += SpeculativeDecodingPolicy.DRAFTER_RAM_ALLOWANCE_BYTES
+                    }
                     computeOptions = requested
                     activeSampler = validatedSampler
                     configuredSampler = validatedSampler
@@ -712,14 +725,15 @@ class LiteRtLmRuntimeAdapter(
             ),
         )
         try {
-            // The SDK reads this process-wide flag inside initialize(). Loads are serialized by the
-            // lifecycle lock, and the flag is restored so no later engine inherits the request.
-            ExperimentalFlags.enableSpeculativeDecoding = speculation
-            try {
-                createdEngine.initialize()
-            } finally {
-                ExperimentalFlags.enableSpeculativeDecoding = null
-            }
+            // Benchmark mode only records the timings reported in InferenceStats.
+            LiteRtEngineInitialization.withFlags(
+                speculation = speculation,
+                benchmark = true,
+                readSpeculation = { ExperimentalFlags.enableSpeculativeDecoding },
+                writeSpeculation = { ExperimentalFlags.enableSpeculativeDecoding = it },
+                readBenchmark = { ExperimentalFlags.enableBenchmark },
+                writeBenchmark = { ExperimentalFlags.enableBenchmark = it },
+            ) { createdEngine.initialize() }
             return createdEngine
         } catch (error: Throwable) {
             runRuntimeCleanupUnlessFatal(error) { createdEngine.close() }
@@ -840,9 +854,27 @@ class LiteRtLmRuntimeAdapter(
                 seed = sampler.seed,
             ),
             maxOutputToken = options.maxOutputTokens,
-            enableSpeculativeDecoding = options.speculativeDecoding,
+            enableSpeculativeDecoding = SpeculativeDecodingPolicy.conversationRequest(
+                options.speculativeDecoding, drafterAvailableFor(options), selectedCompute?.backend ?: ComputeBackend.CPU,
+            ),
             prefillPrefaceOnInit = options.prefillPrefaceOnInit && restored.isNotEmpty(),
         )
+    }
+
+    /** The artifact has a drafter, and Auto's attempt to build it has not already failed on this engine. */
+    private fun drafterAvailableFor(options: ComputeOptions): Boolean =
+        selectedCapabilities?.supportsSpeculativeDecoding == true && !(options.speculativeDecoding == null && autoDrafterFailed)
+
+    private fun conversationUsesDrafter(options: ComputeOptions, backend: ComputeBackend): Boolean =
+        SpeculativeDecodingPolicy.conversationUses(options.speculativeDecoding, drafterAvailableFor(options), backend)
+
+    private fun ensureDrafterHeadroom() {
+        val memory = MemorySnapshotReader(appContext.getSystemService(ActivityManager::class.java)).read()
+        if (memory.isLowMemory || memory.availableNowBytes - memory.thresholdBytes < SpeculativeDecodingPolicy.DRAFTER_RAM_ALLOWANCE_BYTES) {
+            throw IllegalStateException(
+                "There is not enough free memory to start the draft model. Close other apps or turn speculative decoding Off.",
+            )
+        }
     }
 
     private fun gpuPlausibleOnDevice(): Boolean = LiteRtVisionBackendPolicy.shouldAttemptGpu(
@@ -954,7 +986,8 @@ class LiteRtLmRuntimeAdapter(
         conversation = null
         engine = null
         visionReady = false
-        engineDrafterBuilt = false
+        drafterAllocated = false
+        autoDrafterFailed = false
         selectedCompute = null
         selectedCapabilities = null
         activeOptions = ComputeOptions()

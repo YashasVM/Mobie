@@ -134,6 +134,10 @@ internal fun AdvancedComputePanel(
             }
         }
         AdvancedField("Sampler", "Controls how varied replies are. Keep it the same when comparing speeds.", "advanced_sampler") {
+            if (capabilities?.supportsSpeculativeDecoding == true && effective.speculativeDecoding != false) {
+                Hint("While the draft model runs (Auto on GPU, or On), replies follow the model's most likely words. " +
+                    "These settings then shape only the first word.", Modifier.testTag("sampler_draft_model_note"))
+            }
             NumberOption(sampler.temperature.toString(), "Temperature · 0–2", "sampler_temperature", validate,
                 hint = "0 picks the most likely token; higher values add variation.") { text ->
                 val value = text.toDoubleOrNull()?.takeIf { it.isFinite() && it in 0.0..2.0 }
@@ -159,8 +163,9 @@ internal fun AdvancedComputePanel(
         }
         SectionLabel("Experimental")
         if (capabilities?.supportsSpeculativeDecoding == true) {
-            AdvancedField("Speculative decoding", "Uses the model's built-in draft model to guess tokens ahead. The model checks every guess, " +
-                "so replies are its own; only the speed changes. Auto turns it on for GPU, where it is faster. Needs extra memory.",
+            AdvancedField("Speculative decoding", "Uses the model's built-in draft model to guess several words ahead; Google measured " +
+                "faster GPU replies with it. While it runs, replies follow the model's most likely words instead of your sampler. " +
+                "Auto turns it on for GPU only. Needs extra memory.",
                 "advanced_speculative", experimental = true) {
                 AdvancedChoices(listOf<Boolean?>(null, false, true), effective.speculativeDecoding,
                     { when (it) { null -> "Auto"; true -> "On"; false -> "Off" } }) {

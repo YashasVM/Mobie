@@ -4,6 +4,10 @@
 
 One open PR: #36, titled GOD MODE. Existing terminal UI/GPU work is preserved. Main 67ed794's download cancellation, empty-draft retention and release JNI fixes were integrated with a real merge parent rather than discarded or duplicated. No branch was deleted.
 
+## Iteration 2026-10-20: drafter and artifact selection
+
+See `god-mode-mtp.md`. Gallery's headline model (Gemma 4 E2B) was hidden from Mobie's catalog for lack of a task tag. Its `-gpu` sibling is a GPU-only artisan build that the filename rules would have recommended. Container headers are now range-read where names cannot be trusted. Auto speculative decoding builds the MTP drafter at engine initialization on GPU, which Gallery leaves off by default. Google's published S26 Ultra GPU effect is 1.29x to 1.78x decode, so 2x is not assumed. The phone benchmark (`gallery_default`, `gallery_mtp`, `mobie_default`, `mobie_gallery_sampler`) decides. An emulator CI job exercises the CPU drafter path with the real artifact; it is plumbing evidence, not speed evidence.
+
 ## Current implementation
 
 - A conservative runtime conversation-reconfiguration API can retain initialized model weights when only sampler/output/thinking/conversation controls change. Backend, threads, context, activation and artifact identity remain engine-level gates. The API closes the old conversation before allocating a replacement; failure blocks generation until recovery.
