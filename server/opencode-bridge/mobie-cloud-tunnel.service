@@ -1,0 +1,13 @@
+[Unit]
+Description=Mobie Cloud public HTTPS tunnel
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=simple
+ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel --config /home/yvm/mobie-cloud/cloudflared.yml run
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+[Install]
+WantedBy=default.target

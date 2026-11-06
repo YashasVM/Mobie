@@ -81,10 +81,14 @@ The service should own license review, conversion, quantization, reproducibility
 
 ## Privacy and safety
 
-- Model inference must be completely local after download.
+- Downloaded models run locally. The optional cloud models on the Models page use OpenCode free chat models after an explicit privacy disclosure.
+- Cloud conversations and photos go through a paired Linux gateway running genuine OpenCode, then to OpenCode and its model providers. Public HTTPS also passes through Cloudflare. Hosting, retention and training policies vary by model. Free access may be limited or removed.
+- Mobie never switches a local chat to cloud automatically. Cloud models require no model download or Hugging Face token. Pair the server in Settings → Cloud using its HTTPS address and a separate key stored with Android Keystore-backed encryption.
 - The Hugging Face token is encrypted with Android Keystore-backed storage and is sent only to Hugging Face.
 - Gated models require the user to accept the upstream terms and authenticate.
 - Compatibility warnings must not be bypassed silently.
 - Model files stay in app-private storage.
 
 See [AGENTS.md](AGENTS.md) before making changes.
+
+The chat-only Linux gateway and its container configuration are documented in [server/opencode-bridge/README.md](server/opencode-bridge/README.md).

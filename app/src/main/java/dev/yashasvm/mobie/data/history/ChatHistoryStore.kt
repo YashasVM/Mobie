@@ -28,6 +28,7 @@ data class ChatHistorySession(
     val title: String,
     val updatedAt: Long,
     val messages: List<HistoryMessage> = emptyList(),
+    val modelId: String? = null,
 )
 
 /**
@@ -129,6 +130,20 @@ class ChatHistoryStore private constructor(openPreferences: () -> SharedPreferen
     }
 
     suspend fun sessions(modelId: String): List<ChatHistorySession> = locked { sessionsLocked(modelId) }
+
+    /** Includes the owning model so callers can restore a chat without mixing model histories. */
+    suspend fun allSessions(): List<ChatHistorySession> = locked {
+        val modelIds = preferences.all.keys.mapNotNull { key ->
+            when {
+                key.startsWith("sessions:") -> key.removePrefix("sessions:")
+                !key.contains(':') && key.contains('/') -> key
+                else -> null
+            }
+        }.toSet()
+        modelIds.flatMap { modelId ->
+            sessionsLocked(modelId).filter { it.messages.isNotEmpty() }.map { it.copy(modelId = modelId) }
+        }.sortedByDescending { it.updatedAt }
+    }
 
     suspend fun clear(modelId: String): Unit = mutate {
         commit(

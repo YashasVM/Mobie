@@ -1,5 +1,6 @@
 package dev.yashasvm.mobie.ui
 
+import dev.yashasvm.mobie.core.model.CloudModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -29,6 +30,8 @@ import dev.yashasvm.mobie.core.runtime.ComputeCapabilities
 import dev.yashasvm.mobie.core.runtime.InferenceStats
 import dev.yashasvm.mobie.core.runtime.RuntimeMessage
 import dev.yashasvm.mobie.core.runtime.RuntimeModelOwnership
+import dev.yashasvm.mobie.core.runtime.paceReplies
+import dev.yashasvm.mobie.data.settings.ChatDisplayPreferences
 import dev.yashasvm.mobie.core.runtime.SamplerSettings
 import dev.yashasvm.mobie.data.download.DownloadProgress
 import dev.yashasvm.mobie.data.download.InstalledModelEntry
@@ -70,6 +73,10 @@ data class ChatMessage(
 
 data class MobieUiState(
     val models: List<AiModel> = emptyList(),
+    val cloudModels: List<CloudModel> = emptyList(),
+    val cloudLoading: Boolean = false,
+    val cloudError: String? = null,
+    val cloudConnectionUrl: String? = null,
     val recentModels: List<AiModel> = emptyList(),
     val installedModels: List<InstalledModelEntry> = emptyList(),
     val selected: AiModel? = null,
@@ -95,6 +102,7 @@ data class MobieUiState(
     val runtimeState: RuntimeState = RuntimeState.IDLE,
     val messages: List<ChatMessage> = emptyList(),
     val history: List<ChatHistorySession> = emptyList(),
+    val allHistory: List<ChatHistorySession> = emptyList(),
     val sessionId: String? = null,
     val stats: InferenceStats? = null,
     val telemetry: RunTelemetry = RunTelemetry(),
@@ -110,6 +118,8 @@ data class MobieUiState(
     val hardware: HardwareProfile? = null,
     val decodeMeasurements: List<DecodeMeasurement> = emptyList(),
     val memoryReliefInProgress: Boolean = false,
+    val statsForNerds: Boolean = false,
+    val replyTokensPerSecond: Int? = null,
 ) {
     val computeBackend: ComputeBackend get() = computeOptions.backend
     val cpuThreads: Int? get() = computeOptions.cpuThreads
@@ -133,9 +143,13 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     )
     /** Set on the main thread by an explicit edit, so a slower preference read cannot overwrite it. */
     private var computeOptionsEdited = false
+    private var statsForNerdsEdited = false
+    private var replySpeedEdited = false
+    private val chatDisplayPreferences = ChatDisplayPreferences(container.appContext)
     /** Also read by the IO preference load, which skips its sanitizing write-back after an edit. */
     @Volatile private var samplerEdited = false
     val state: StateFlow<MobieUiState> = mutableState.asStateFlow()
+    private var cloudCatalogJob: Job? = null
     private var catalogJob: Job? = null
     private var downloadObserverJob: Job? = null
     private var inferenceJob: Job? = null
@@ -172,6 +186,31 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     init {
+        viewModelScope.launch {
+            try {
+                val saved = withContext(preferenceIo) { chatDisplayPreferences.read() }
+                mutableState.update {
+                    it.copy(
+                        statsForNerds = if (statsForNerdsEdited) it.statsForNerds else saved.statsForNerds,
+                        replyTokensPerSecond = if (replySpeedEdited) it.replyTokensPerSecond else saved.replyTokensPerSecond,
+                    )
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                mutableState.update { it.copy(error = "Couldn't read display settings. Choose them again in Settings.") }
+            }
+        }
+        viewModelScope.launch {
+            try {
+                val connection = withContext(preferenceIo) { container.cloudConnectionStore.read() }
+                mutableState.update { it.copy(cloudConnectionUrl = connection?.baseUrl) }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                mutableState.update { it.copy(cloudError = "Couldn't read the saved Linux box connection. Save it again.") }
+            }
+        }
         viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
             // Opening the Keystore-backed store is slow on first use, so it never runs on the main thread.
             credentialAccess.withLock {
@@ -186,9 +225,39 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
             loadFeatured()
         }
         openLastChat()
+        refreshAllHistory()
         viewModelScope.launch {
             val device = readDeviceProfile()
             mutableState.update { it.copy(device = it.device ?: device) }
+        }
+    }
+
+    fun setStatsForNerds(enabled: Boolean) {
+        statsForNerdsEdited = true
+        mutableState.update { it.copy(statsForNerds = enabled) }
+        viewModelScope.launch {
+            try {
+                withContext(preferenceIo) { chatDisplayPreferences.writeStatsForNerds(enabled) }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                mutableState.update { it.copy(error = "Couldn't save the detail setting. Try again.") }
+            }
+        }
+    }
+
+    fun setReplyTokensPerSecond(limit: Int?) {
+        val saved = limit?.coerceIn(5, 100)
+        replySpeedEdited = true
+        mutableState.update { it.copy(replyTokensPerSecond = saved) }
+        viewModelScope.launch {
+            try {
+                withContext(preferenceIo) { chatDisplayPreferences.writeReplyTokensPerSecond(saved) }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                mutableState.update { it.copy(error = "Couldn't save the reply speed. Try again.") }
+            }
         }
     }
 
@@ -379,6 +448,76 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
 
     fun loadFeatured() = loadCatalog { container.catalog.featured() }
 
+    fun saveCloudConnection(baseUrl: String, token: String) {
+        val connection = try {
+            dev.yashasvm.mobie.core.security.CloudConnectionStore.validatedConnection(baseUrl, token)
+        } catch (error: IllegalArgumentException) {
+            mutableState.update { it.copy(cloudError = error.message) }
+            return
+        }
+        resetCloudSelection()
+        viewModelScope.launch {
+            try {
+                withContext(preferenceIo) { container.cloudConnectionStore.save(connection.baseUrl, connection.token) }
+                mutableState.update { it.copy(cloudConnectionUrl = connection.baseUrl, cloudError = null) }
+                loadCloudModels()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                mutableState.update { it.copy(cloudError = "Couldn't save the Linux box connection.") }
+            }
+        }
+    }
+
+    fun disconnectCloud() {
+        resetCloudSelection()
+        viewModelScope.launch {
+            try {
+                withContext(preferenceIo) { container.cloudConnectionStore.clear() }
+                mutableState.update { it.copy(cloudConnectionUrl = null, cloudError = null) }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                mutableState.update { it.copy(cloudError = "Couldn't remove the Linux box connection.") }
+            }
+        }
+    }
+
+    private fun resetCloudSelection() {
+        cloudCatalogJob?.cancel()
+        if (state.value.selected?.cloudModel != null) {
+            leaveChat()
+            select(null)
+        }
+        mutableState.update { it.copy(cloudModels = emptyList(), cloudLoading = false) }
+    }
+
+    fun loadCloudModels() {
+        cloudCatalogJob?.cancel()
+        if (state.value.cloudConnectionUrl == null) {
+            mutableState.update { it.copy(cloudLoading = false, cloudModels = emptyList()) }
+            return
+        }
+        cloudCatalogJob = viewModelScope.launch {
+            mutableState.update { it.copy(cloudLoading = true, cloudError = null) }
+            try {
+                val models = container.cloud.models()
+                mutableState.update { it.copy(cloudModels = models, cloudLoading = false) }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                mutableState.update { it.copy(cloudLoading = false, cloudModels = emptyList(),
+                    cloudError = "Couldn't load models from your Linux box. Check the server address, pairing key and connection.") }
+            }
+        }
+    }
+
+    /** Called only from the cloud disclosure's explicit confirmation. */
+    fun selectCloud(model: CloudModel) {
+        if (model !in state.value.cloudModels) return
+        beginSelection(model.asAiModel())
+    }
+
     fun setQuery(value: String) {
         if (state.value.query != value) catalogJob?.cancel()
         mutableState.update { it.copy(query = value, loading = false, error = null) }
@@ -427,7 +566,9 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    fun select(model: AiModel?) = beginSelection(model)
+    fun select(model: AiModel?) {
+        if (model?.cloudModel == null) beginSelection(model)
+    }
 
     /**
      * Stops the previous model's work now, then applies the new selection once the device profile
@@ -491,14 +632,14 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 },
                 download = null,
                 downloadedPath = null,
-                chatting = false,
-                runtimeState = RuntimeState.IDLE,
+                chatting = presentedModel?.cloudModel != null,
+                runtimeState = if (presentedModel?.cloudModel != null) RuntimeState.READY else RuntimeState.IDLE,
                 messages = restored,
                 history = sessions,
-                sessionId = currentSessionId,
+                sessionId = currentSessionId ?: if (presentedModel?.cloudModel != null) UUID.randomUUID().toString() else null,
                 stats = null,
                 decodeMeasurements = emptyList(),
-                imageInputReady = false,
+                imageInputReady = presentedModel?.cloudModel?.supportsImages == true,
                 activeCompute = null,
                 computeCapabilities = capabilities,
                 appliedComputeOptions = null,
@@ -731,6 +872,7 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     fun sendMessage(prompt: String, imagePath: String? = null): Boolean {
         val current = state.value
         val model = current.selected ?: return false
+        if (model.cloudModel != null) return sendCloudMessage(prompt, imagePath)
         val artifact = current.selectedArtifact ?: return false
         if (prompt.isBlank() || current.runtimeState != RuntimeState.READY) return false
         if (imagePath != null && (!model.supportsVision || !current.imageInputReady)) return false
@@ -750,7 +892,8 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         telemetryJob = startTelemetrySampling()
         val operation = runtimeOperation.get()
         inferenceJob = viewModelScope.launch {
-            adapter.generate(prompt.trim(), imagePath, GenerationConfig(sampler = current.appliedSampler ?: current.sampler)).collectBatchedTokens { event ->
+            adapter.generate(prompt.trim(), imagePath, GenerationConfig(sampler = current.appliedSampler ?: current.sampler))
+                .paceReplies(current.replyTokensPerSecond).collectBatchedTokens { event ->
                 if (!isCurrentRuntimeOperation(operation) ||
                     state.value.selected?.id != model.id || state.value.sessionId != sessionId
                 ) return@collectBatchedTokens
@@ -824,6 +967,42 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         return true
     }
 
+    private fun sendCloudMessage(prompt: String, imagePath: String?): Boolean {
+        val current = state.value
+        val model = current.selected ?: return false
+        val cloud = model.cloudModel ?: return false
+        val sessionId = current.sessionId ?: return false
+        if (prompt.isBlank() || current.runtimeState != RuntimeState.READY) return false
+        if (imagePath != null && !cloud.supportsImages) return false
+        val messages = current.messages + ChatMessage(true, prompt.trim(), imagePath)
+        cancelInference()
+        mutableState.update { it.copy(runtimeState = RuntimeState.GENERATING,
+            messages = messages + ChatMessage(false, ""), stats = null, error = null) }
+        val operation = runtimeOperation.get()
+        inferenceJob = viewModelScope.launch {
+            container.cloud.generate(cloud, messages.map {
+                RuntimeMessage(it.fromUser, it.text, it.interrupted, it.imagePath)
+            }).paceReplies(current.replyTokensPerSecond).collectBatchedTokens { event ->
+                if (!isCurrentRuntimeOperation(operation) || state.value.selected?.id != model.id ||
+                    state.value.sessionId != sessionId) return@collectBatchedTokens
+                when (event) {
+                    is InferenceEvent.Token -> mutableState.update {
+                        it.copy(messages = it.messages.updateLastAssistant(event.text, event.thinking))
+                    }
+                    is InferenceEvent.Error, InferenceEvent.Complete -> {
+                        val saved = if (event is InferenceEvent.Error) state.value.messages.finishInterruptedReply()
+                            else state.value.messages.finishReply()
+                        persistHistory(model.id, sessionId, saved)
+                        mutableState.update { it.copy(runtimeState = RuntimeState.READY, messages = saved,
+                            error = (event as? InferenceEvent.Error)?.message) }
+                    }
+                    else -> Unit
+                }
+            }
+        }
+        return true
+    }
+
     fun stopGeneration() {
         val current = state.value
         if (current.runtimeState != RuntimeState.GENERATING) return
@@ -858,8 +1037,8 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
                 ) {
                     latest.copy(
                         runtimeState = RuntimeState.READY,
-                        imageInputReady = latest.selectedArtifact
-                            ?.let { container.runtimes.adapterFor(it.format)?.supportsImageInput } == true,
+                        imageInputReady = latest.selected?.cloudModel?.supportsImages
+                            ?: (latest.selectedArtifact?.let { container.runtimes.adapterFor(it.format)?.supportsImageInput } == true),
                     )
                 } else {
                     latest
@@ -907,6 +1086,15 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
     fun newChat() {
         val current = state.value
         val model = current.selected ?: return
+        if (model.cloudModel != null) {
+            cancelInference()
+            nextRuntimeOperation()
+            val sessionId = UUID.randomUUID().toString()
+            launchHistoryWrite(model.id) { container.chatHistory.startNewSession(model.id, sessionId) }
+            mutableState.update { it.copy(messages = emptyList(), sessionId = sessionId,
+                runtimeState = RuntimeState.READY, stats = null, error = null) }
+            return
+        }
         val artifact = current.selectedArtifact ?: return
         val path = current.downloadedPath ?: return
         val canReuseLoadedModel = current.runtimeState == RuntimeState.READY
@@ -926,6 +1114,11 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         inferenceJob = viewModelScope.launch {
             loadRuntimeConversation(model, artifact, path, emptyList(), preferReset = canReuseLoadedModel, operation = operation)
         }
+    }
+
+    /** Opens this model's saved chat without copying the previous model's conversation. */
+    fun switchInstalledChat(entry: InstalledModelEntry) {
+        beginSelection(entry.model) { openChat(entry.localPath) }
     }
 
     fun startInstalledChat(entry: InstalledModelEntry) {
@@ -1021,9 +1214,62 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    fun refreshAllHistory() {
+        viewModelScope.launch {
+            try {
+                val sessions = container.chatHistory.allSessions()
+                mutableState.update { it.copy(allHistory = sessions) }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                mutableState.update { it.copy(error = "Couldn't read saved chats. Try opening the menu again.") }
+            }
+        }
+    }
+
+    /** The caller confirms the cloud disclosure before opening a cloud session. */
+    fun openSavedChat(session: ChatHistorySession) {
+        val modelId = session.modelId ?: return
+        val current = state.value
+        val cloud = current.cloudModels.firstOrNull { it.asAiModel().id == modelId }
+        val installed = current.installedModels.firstOrNull { it.model.id == modelId }
+        if (cloud != null) {
+            beginSelection(cloud.asAiModel()) {
+                selectHistory(session.id)
+            }
+        } else if (installed != null) {
+            beginSelection(installed.model) {
+                if (awaitHistoryWrite { container.chatHistory.activate(modelId, session.id) } &&
+                    state.value.selected?.id == modelId) {
+                    openChat(installed.localPath)
+                }
+            }
+        } else {
+            mutableState.update { it.copy(error = if (modelId.startsWith("opencode/"))
+                "Connect to OpenCode and refresh its models to reopen this cloud chat."
+                else "Download this chat's model again to reopen it.") }
+        }
+    }
+
     fun selectHistory(sessionId: String) {
         val current = state.value
         val model = current.selected ?: return
+        if (model.cloudModel != null) {
+            cancelInference()
+            val operation = nextRuntimeOperation()
+            mutableState.update { it.copy(runtimeState = RuntimeState.LOADING, error = null) }
+            inferenceJob = viewModelScope.launch {
+                if (!awaitHistoryWrite { container.chatHistory.activate(model.id, sessionId) }) {
+                    if (isCurrentRuntimeOperation(operation)) mutableState.update { it.copy(runtimeState = RuntimeState.READY) }
+                    return@launch
+                }
+                val messages = readHistory(model)
+                if (isCurrentRuntimeOperation(operation)) mutableState.update {
+                    it.copy(messages = messages, sessionId = sessionId, runtimeState = RuntimeState.READY, stats = null)
+                }
+            }
+            return
+        }
         val artifact = current.selectedArtifact ?: return
         val path = current.downloadedPath ?: return
         val canReuseLoadedModel = current.runtimeState == RuntimeState.READY
@@ -1116,7 +1362,11 @@ class MobieViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch(historyWrites + NonCancellable) {
             if (!historyWriteSucceeded(write)) return@launch
             val sessions = container.chatHistory.sessions(modelId)
-            mutableState.update { if (it.selected?.id == modelId) it.copy(history = sessions) else it }
+            val allSessions = container.chatHistory.allSessions()
+            mutableState.update {
+                if (it.selected?.id == modelId) it.copy(history = sessions, allHistory = allSessions)
+                else it.copy(allHistory = allSessions)
+            }
         }
     }
 

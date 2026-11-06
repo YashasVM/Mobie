@@ -154,7 +154,7 @@ private val MobieTypography = Typography(
     bodyMedium = TextStyle(fontFamily = TerminalFace, fontSize = 14.sp, lineHeight = 21.sp),
     bodySmall = TextStyle(fontFamily = TerminalFace, fontSize = 13.sp, lineHeight = 19.sp),
     labelLarge = TextStyle(fontFamily = TerminalFace, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium),
-    labelMedium = TextStyle(fontFamily = TerminalFace, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp),
+    labelMedium = TextStyle(fontFamily = TerminalFace, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp),
     labelSmall = TextStyle(fontFamily = TerminalFace, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium),
 )
 

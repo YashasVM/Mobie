@@ -8,7 +8,7 @@ Build a fast, consumer-friendly Android app that discovers compatible Hugging Fa
 
 ## Non-negotiable product rules
 
-1. Inference is local after a model has downloaded. Do not send prompts, outputs, embeddings, or model contents to a remote inference API.
+1. Downloaded models run locally. Only an explicitly selected OpenCode cloud model may send its conversation and attached images through the user's authenticated HTTPS Linux gateway to OpenCode and its providers, after the cloud disclosure. Never switch providers automatically or send local chat history to cloud.
 2. Never claim a model or runtime works unless the exact artifact was loaded and tested on Android.
 3. Before download, show artifact size, estimated RAM, free storage, runtime, quantization, license/gated state, and compatibility.
 4. Block clearly impossible downloads. A warning may be user-overridable only when the model can plausibly run after memory is freed.
@@ -29,7 +29,7 @@ ui → core interfaces/models ← data implementations
 
 - `core/model`: platform-independent model metadata and status types.
 - `core/device`: device facts and a conservative compatibility policy.
-- `core/runtime`: the only interface UI/domain code may use for inference.
+- `core/runtime`: inference contracts. `RuntimeAdapter` owns local engines; `CloudChatProvider` owns explicitly selected remote chat through a paired gateway. Pairing credentials use Android Keystore-backed encrypted storage; never embed them in the APK or URLs. Cloud models have no local artifact or `ModelFormat`.
 - `data/catalog`: Hugging Face API access and strict mapping into domain models.
 - `data/download`: WorkManager-based transfer, resume, progress, validation, and atomic finalization.
 - `data/conversion`: conversion-service contract only.
@@ -39,7 +39,7 @@ Keep the app as one Gradle module until build time, ownership, or test isolation
 
 ## Runtime contract
 
-Every engine implements `RuntimeAdapter`:
+Every local engine implements `RuntimeAdapter`:
 
 - declare one `ModelFormat`;
 - load only an artifact it understands;
@@ -106,6 +106,6 @@ Native runtime changes also require at least one physical `arm64-v8a` device tes
 - Note any new network destination, permission, native library, or credential handling.
 - Include tests and the exact commands/results.
 - Attach UI evidence for visual changes.
-- Confirm no prompts or inference data leave the device.
+- Confirm local model prompts stay on the device, and cloud traffic occurs only for an explicitly selected cloud model. Document cloud destinations and privacy disclosures.
 - Confirm unsupported models remain clearly labeled and cannot reach the wrong runtime.
 - Keep generated model files, tokens, keystores, APKs, and local configuration out of Git.

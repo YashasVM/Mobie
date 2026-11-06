@@ -9,9 +9,15 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.hasScrollToIndexAction
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasTestTag
 import dev.yashasvm.mobie.core.model.AiModel
 import dev.yashasvm.mobie.core.model.Compatibility
 import dev.yashasvm.mobie.core.model.CompatibilityResult
@@ -51,9 +57,28 @@ class ModelScreensTest {
             }
         }
 
-        composeRule.onNodeWithText("Recommended").assertIsDisplayed()
+        composeRule.onNodeWithText("Models").assertIsDisplayed()
+        composeRule.onNodeWithText("Download models").assertIsDisplayed()
         composeRule.onNodeWithText("Test Model").assertIsDisplayed().performClick()
         assertTrue(selected)
+    }
+
+    @Test
+    fun modelsShowDeviceMemoryAndModelEstimateWithoutStats() {
+        composeRule.setContent {
+            ScreenTheme {
+                CatalogScreen(
+                    state = MobieUiState(models = listOf(testModel()), loading = false,
+                        device = DeviceProfile(totalRamBytes = 8L * GIB, availableRamBytes = 6L * GIB,
+                            availableStorageBytes = 20L * GIB, supportedAbis = listOf("arm64-v8a"), sdkInt = 35)),
+                    onQuery = {}, onSearch = {}, onSelect = {}, onFeatured = {},
+                )
+            }
+        }
+        composeRule.onNodeWithText("Available RAM").assertIsDisplayed()
+        composeRule.onNodeWithText("Free storage").assertIsDisplayed()
+        composeRule.onNodeWithText("Estimated RAM", substring = true).performScrollTo().assertIsDisplayed()
+        captureEvidence("mobie-models-memory.png")
     }
 
     @Test
@@ -84,6 +109,16 @@ class ModelScreensTest {
         }
 
         composeRule.onNodeWithText("Text generation").assertIsDisplayed()
+        composeRule.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Model needs"))
+        composeRule.onNodeWithText("Model needs").assertIsDisplayed()
+        composeRule.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Download size"))
+        composeRule.onNodeWithText("Download size").assertIsDisplayed()
+        composeRule.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Quantization"))
+        composeRule.onNodeWithText("Quantization").assertIsDisplayed()
+        composeRule.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("License"))
+        composeRule.onNodeWithText("License").assertIsDisplayed()
+        composeRule.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Access"))
+        composeRule.onNodeWithText("Access").assertIsDisplayed()
         composeRule.onNodeWithTag("model_primary_action").assertIsDisplayed().performClick()
         assertTrue(downloadRequested)
     }
@@ -165,6 +200,7 @@ class ModelScreensTest {
                         selected = testModel(),
                         runtimeState = RuntimeState.READY,
                         activeCompute = ActiveCompute(backend = ComputeBackend.GPU),
+                        statsForNerds = true,
                         messages = listOf(
                             ChatMessage(fromUser = true, text = "Where do my messages go?"),
                             ChatMessage(fromUser = false, text = "This is a UI fixture. Inference runs locally on your phone."),
@@ -186,7 +222,7 @@ class ModelScreensTest {
     }
 
     @Test
-    fun textOnlyFallbackExplainsAndDisablesPhotoInput() {
+    fun textOnlyFallbackDisablesPhotoInput() {
         composeRule.setContent {
             ScreenTheme {
                 ChatScreen(
@@ -196,12 +232,12 @@ class ModelScreensTest {
             }
         }
         composeRule.onNodeWithContentDescription("Attach image").assertDoesNotExist()
-        composeRule.onNodeWithText("This phone loaded text chat only. Photo input is unavailable for this session.").assertIsDisplayed()
+        composeRule.onNodeWithTag("chat_input").assertIsDisplayed()
         captureEvidence("mobie-text-only-fallback.png")
     }
 
     @Test
-    fun activeVisionEnablesPhotoInputAndExplainsImageGenerationLimit() {
+    fun activeVisionEnablesPhotoInput() {
         composeRule.setContent {
             ScreenTheme {
                 ChatScreen(
@@ -215,7 +251,7 @@ class ModelScreensTest {
             }
         }
         composeRule.onNodeWithContentDescription("Attach image").assertIsDisplayed()
-        composeRule.onNodeWithText("Chat about text or an attached photo on this phone. Image generation isn't available.").assertIsDisplayed()
+        composeRule.onNodeWithTag("chat_input").assertIsDisplayed()
         captureEvidence("mobie-image-input.png")
     }
 
@@ -234,16 +270,143 @@ class ModelScreensTest {
                     onFeatured = {},
                     onOpenInstalled = { opened = it == entry },
                     onDeleteInstalled = { deleted = it == entry },
+                    page = CatalogPage.MODELS,
                 )
             }
         }
 
-        composeRule.onNodeWithTag("bottom_nav_installed").performClick()
+        composeRule.onNodeWithText("Models").assertIsDisplayed()
         composeRule.onNodeWithText("Test Model").performClick()
         composeRule.runOnIdle { assertTrue(opened) }
         composeRule.onNodeWithContentDescription("Delete Test Model").performClick()
         composeRule.onNodeWithText("Delete").performClick()
         composeRule.runOnIdle { assertTrue(deleted) }
+    }
+
+    @Test
+    fun cloudStoreRequiresDisclosureConfirmationAndShowsPrivacyTerms() {
+        val cloud = dev.yashasvm.mobie.core.model.CloudModel("fixture-vision", "Vision fixture", true, "Fixture privacy")
+        var selected = false
+        composeRule.setContent {
+            ScreenTheme {
+                CatalogScreen(
+                    state = MobieUiState(cloudModels = listOf(cloud), cloudConnectionUrl = "https://fixture.invalid"),
+                    onQuery = {}, onSearch = {}, onSelect = {}, onFeatured = {},
+                    onSelectCloud = { selected = it == cloud },
+                )
+            }
+        }
+        composeRule.onNodeWithText("Cloud").assertIsDisplayed()
+        composeRule.onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("cloud_model_${cloud.id}"))
+        composeRule.onNodeWithTag("cloud_model_${cloud.id}").performClick()
+        composeRule.runOnIdle { assertTrue(!selected) }
+        composeRule.onNodeWithText("Privacy terms").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Cancel").performClick()
+        composeRule.runOnIdle { assertTrue(!selected) }
+        composeRule.onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("cloud_model_${cloud.id}"))
+        composeRule.onNodeWithTag("cloud_model_${cloud.id}").performClick()
+        composeRule.onNodeWithTag("confirm_cloud_model").performClick()
+        composeRule.runOnIdle { assertTrue(selected) }
+        captureEvidence("mobie-cloud-store.png")
+    }
+
+    @Test
+    fun cloudChatLabelsRemoteRoutingAndEnablesSupportedPhotos() {
+        val cloud = dev.yashasvm.mobie.core.model.CloudModel("fixture-vision", "Vision fixture", true, "Fixture privacy")
+        composeRule.setContent {
+            ScreenTheme {
+                ChatScreen(state = MobieUiState(selected = cloud.asAiModel(),
+                    runtimeState = RuntimeState.READY, imageInputReady = true), onSend = { _, _ -> true })
+            }
+        }
+        composeRule.onNodeWithContentDescription("Attach image").assertIsDisplayed()
+        composeRule.onNodeWithText("Cloud · OpenCode").assertIsDisplayed()
+        composeRule.onNodeWithText("offline · on this phone").assertDoesNotExist()
+        composeRule.onNodeWithTag("open_compute_settings").assertDoesNotExist()
+        captureEvidence("mobie-cloud-chat.png")
+    }
+
+    @Test
+    fun textOnlyCloudModelDisablesPhotoInput() {
+        val cloud = dev.yashasvm.mobie.core.model.CloudModel("fixture-text", "Text fixture", false, "Fixture privacy")
+        composeRule.setContent {
+            ScreenTheme {
+                ChatScreen(state = MobieUiState(selected = cloud.asAiModel(),
+                    runtimeState = RuntimeState.READY), onSend = { _, _ -> true })
+            }
+        }
+        composeRule.onNodeWithContentDescription("Attach image").assertDoesNotExist()
+        composeRule.onNodeWithText("Cloud · OpenCode").assertIsDisplayed()
+    }
+
+    @Test
+    fun modelsMenuOpensWithoutBottomTabs() {
+        var menuOpened = false
+        composeRule.setContent {
+            ScreenTheme {
+                CatalogScreen(
+                    state = MobieUiState(loading = false),
+                    onQuery = {}, onSearch = {}, onSelect = {}, onFeatured = {},
+                    onMenu = { menuOpened = true },
+                )
+            }
+        }
+        composeRule.onNodeWithTag("open_menu").assertIsDisplayed().performClick()
+        composeRule.runOnIdle { assertTrue(menuOpened) }
+        composeRule.onNodeWithTag("bottom_nav_discover").assertDoesNotExist()
+        composeRule.onNodeWithTag("bottom_nav_cloud").assertDoesNotExist()
+    }
+
+    @Test
+    fun chatModelHeaderOpensPickerAndStatsAreHiddenByDefault() {
+        var pickerOpened = false
+        composeRule.setContent {
+            ScreenTheme {
+                ChatScreen(
+                    state = MobieUiState(
+                        selected = testModel(), runtimeState = RuntimeState.READY,
+                        activeCompute = ActiveCompute(backend = ComputeBackend.CPU),
+                    ),
+                    onSend = { _, _ -> true },
+                    onModelPicker = { pickerOpened = true },
+                )
+            }
+        }
+        composeRule.onNodeWithTag("chat_model_picker").assertIsDisplayed().performClick()
+        composeRule.runOnIdle { assertTrue(pickerOpened) }
+        composeRule.onNodeWithTag("run_details_toggle").assertDoesNotExist()
+        composeRule.onNodeWithTag("open_compute_settings").assertDoesNotExist()
+        composeRule.onNodeWithTag("chat_controls").assertIsDisplayed()
+    }
+
+    @Test
+    fun settingsExposeRuntimeControlsWithoutEnablingStats() {
+        var statsEnabled = false
+        var runtimeOpened = false
+        composeRule.setContent {
+            ScreenTheme {
+                CatalogScreen(
+                    state = MobieUiState(cloudConnectionUrl = "https://fixture.invalid"),
+                    page = CatalogPage.SETTINGS,
+                    onQuery = {}, onSearch = {}, onSelect = {}, onFeatured = {},
+                    onStatsForNerdsChange = { statsEnabled = it },
+                    onAdvancedSettings = { runtimeOpened = true },
+                )
+            }
+        }
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithTag("catalog_title").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("advanced_settings").assertDoesNotExist()
+        composeRule.onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("runtime_settings"))
+        composeRule.onNodeWithTag("runtime_settings").performClick()
+        composeRule.runOnIdle { assertTrue(runtimeOpened) }
+        composeRule.onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("stats_for_nerds"))
+        composeRule.onNodeWithTag("stats_for_nerds").performClick()
+        composeRule.runOnIdle { assertTrue(statsEnabled) }
+        composeRule.onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("runtime_settings"))
+        composeRule.onNodeWithTag("runtime_settings").performClick()
+        composeRule.runOnIdle { assertTrue(runtimeOpened) }
     }
 
     private fun testModel() = AiModel(
@@ -280,6 +443,8 @@ class ModelScreensTest {
 @Composable
 private fun ScreenTheme(content: @Composable () -> Unit) {
     MobieTheme {
-        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground, content = content)
+        androidx.compose.material3.Surface(color = MaterialTheme.colorScheme.background) {
+            CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground, content = content)
+        }
     }
 }

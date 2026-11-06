@@ -135,7 +135,7 @@ internal fun SectionLabel(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(
-            text.uppercase(Locale.US),
+            text,
             style = MaterialTheme.typography.labelMedium,
             color = color,
             maxLines = 1,
@@ -165,7 +165,7 @@ internal fun Metric(
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Text(
-            label.uppercase(Locale.US),
+            label,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,

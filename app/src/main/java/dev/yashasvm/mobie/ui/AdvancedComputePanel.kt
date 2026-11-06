@@ -1,14 +1,12 @@
 package dev.yashasvm.mobie.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -29,17 +27,13 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.composables.icons.lucide.R as LucideR
@@ -51,14 +45,13 @@ import dev.yashasvm.mobie.core.runtime.ComputeOptions
 import dev.yashasvm.mobie.core.runtime.SamplerSettings
 import dev.yashasvm.mobie.ui.theme.Mobie
 
-private const val EXPERIMENT_WARNING = "Experimental — not yet tested on this phone"
+private const val EXPERIMENT_WARNING = "Experimental. Not yet tested on this phone."
 
 /** The one phone and model where activation was measured. Do not extend this claim to other phones or models. */
 private const val FP16_HINT = "FP16 was 7% slower than Auto in one S24 Ultra test."
 
 /**
- * Expert knobs, collapsed by default under a one-line toggle that names what is inside. Controls
- * are grouped by what they change: speed and memory, the reply, and experiments. A control is
+ * Settings are grouped by memory and processing, reply generation, and experiments. A control is
  * shown only when this artifact's metadata says it applies.
  */
 @Composable
@@ -72,27 +65,24 @@ internal fun AdvancedComputePanel(
     onReset: () -> Unit,
     onValidityChange: (Boolean) -> Unit = {},
 ) {
-    var expanded by rememberSaveable { mutableStateOf(false) }
     var resetVersion by remember { mutableIntStateOf(0) }
     val invalidFields = remember { mutableStateMapOf<String, Boolean>() }
     val validate: (String, Boolean) -> Unit = { tag, valid ->
         invalidFields[tag] = !valid
         onValidityChange(invalidFields.values.none { it })
     }
-    AdvancedToggle(expanded) { expanded = !expanded; invalidFields.clear(); onValidityChange(true) }
-    if (!expanded) return
     // Edits change the saved choice; selected values show what this artifact would actually run.
     val effective = AdvancedComputePolicy.forArtifact(options, coreCount, capabilities)
     key(resetVersion) {
     Column(Modifier.testTag("advanced_controls"), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-        SectionLabel("Speed & memory")
-        AdvancedField("CPU threads", "Auto chooses workers for your CPU layout; extra threads can slow it down.", "advanced_threads") {
+        SectionLabel("Memory and processing")
+        AdvancedField("CPU threads", "CPU only. Auto is recommended.", "advanced_threads") {
             val selected = CpuThreadPolicy.clamp(options.cpuThreads, coreCount)
             AdvancedChoices(listOf<Int?>(null) + (1..CpuThreadPolicy.limit(coreCount)), selected, { it?.toString() ?: "Auto" }) {
                 onOptionsChange(options.copy(cpuThreads = it))
             }
         }
-        AdvancedField("Context size", "How many tokens of conversation the model keeps in mind. Smaller sizes use less memory.", "advanced_context") {
+        AdvancedField("Context size", "Conversation memory. Smaller uses less RAM.", "advanced_context") {
             if (capabilities == null) {
                 Hint("Run this model once to read its context limits.")
             } else {
@@ -109,8 +99,8 @@ internal fun AdvancedComputePanel(
             }
             Hint(FP16_HINT, Modifier.testTag("activation_hint"))
         }
-        SectionLabel("Reply")
-        AdvancedField("Max output tokens", "Caps reasoning and the visible reply together, within the context limit.", "advanced_output") {
+        SectionLabel("Reply generation")
+        AdvancedField("Reply length", "Maximum tokens for reasoning and the visible reply together. A token is roughly part of a word.", "advanced_output") {
             NumberOption(options.maxOutputTokens.toString(), "1–1024", "output_tokens", validate) { text ->
                 text.toIntOrNull()?.takeIf { it in 1..1_024 }?.let { onOptionsChange(options.copy(maxOutputTokens = it)) }
                     ?: return@NumberOption "Enter a whole number from 1 to 1024."
@@ -182,31 +172,6 @@ internal fun AdvancedComputePanel(
     }
 }
 
-/** `Advanced  threads · context · sampler  ▸`: a full-width row that says what it hides. */
-@Composable
-private fun AdvancedToggle(expanded: Boolean, onToggle: () -> Unit) {
-    val dim = MaterialTheme.colorScheme.onSurfaceVariant
-    Column {
-        Hairline()
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .heightIn(min = 48.dp)
-                .clickable(role = Role.Button, onClickLabel = if (expanded) "Hide advanced settings" else "Show advanced settings", onClick = onToggle)
-                .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" }
-                .testTag("advanced_toggle"),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            LucideIcon(LucideR.drawable.lucide_ic_sliders_horizontal, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
-            Text("Advanced", style = Mobie.numeric.small, color = MaterialTheme.colorScheme.onSurface)
-            Text("threads · context · sampler", style = Mobie.numeric.tiny, color = dim, maxLines = 1,
-                overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            Text(if (expanded) "▾" else "▸", style = Mobie.numeric.small, color = dim)
-        }
-    }
-}
-
 @Composable
 private fun AdvancedField(
     title: String,
@@ -217,8 +182,8 @@ private fun AdvancedField(
 ) {
     Column(Modifier.fillMaxWidth().testTag(tag), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(title, style = Mobie.numeric.small.copy(fontWeight = FontWeight.Medium), color = MaterialTheme.colorScheme.onSurface)
-            if (experimental) Text(EXPERIMENT_WARNING, style = Mobie.numeric.tiny, color = Mobie.signals.caution)
+            Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
+            if (experimental) Text(EXPERIMENT_WARNING, style = MaterialTheme.typography.bodySmall, color = Mobie.signals.caution)
             Hint(explanation)
         }
         content()
@@ -252,7 +217,7 @@ private fun NumberOption(
     val supporting = error ?: hint
     OutlinedTextField(text, { newValue -> text = newValue; error = onChange(newValue); onValidityChanged(tag, error == null) },
         label = { Text(label) }, singleLine = true, shape = RectangleShape, isError = error != null,
-        textStyle = Mobie.numeric.small.copy(color = MaterialTheme.colorScheme.onSurface),
+        textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
         supportingText = supporting?.let { message -> { Text(message) } }, modifier = Modifier.fillMaxWidth().testTag(tag))
 }
 
@@ -269,6 +234,7 @@ internal fun ComputeSettingsSheet(
     onApply: () -> Unit,
     onReset: () -> Unit,
     onClose: () -> Unit,
+    onReplySpeedChange: (Int?) -> Unit = {},
 ) {
     val resolver = remember { CompatibilityResolver() }
     val backendAdmissions = remember(state.device, state.selectedArtifact, state.computeOptions, state.computeCapabilities, state.selected) {
@@ -298,20 +264,27 @@ internal fun ComputeSettingsSheet(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("run settings", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface,
+                    Text("Chat settings", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.semantics { heading() })
                     state.selected?.let { model ->
                         val running = state.activeCompute?.let { " · running on ${it.label}" }.orEmpty()
-                        Text(model.title + running, style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        Text(model.title + running, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
                 IconButton(onClick = onClose, modifier = Modifier.testTag("close_compute_settings")) {
-                    LucideIcon(LucideR.drawable.lucide_ic_x, "Close run settings", Modifier.size(22.dp))
+                    LucideIcon(LucideR.drawable.lucide_ic_x, "Close chat settings", Modifier.size(22.dp))
                 }
             }
             Hairline()
-            Column(Modifier.verticalScroll(rememberScrollState()).padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 24.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()).padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                ReplySpeedControl(state.replyTokensPerSecond, onReplySpeedChange)
+                state.error?.let { message ->
+                    Text(message, style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("settings_error"))
+                }
+                Hairline()
                 ComputeSettingsPanel(
                     backend = state.computeBackend, cpuThreads = state.cpuThreads,
                     onBackendChange = { onOptionsChange(state.computeOptions.copy(backend = it)) },

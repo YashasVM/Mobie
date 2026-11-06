@@ -48,7 +48,7 @@ class ChatComputeSettingsTest {
         downloadedPath = "/private/test.litertlm",
     ).let { it.copy(appliedComputeOptions = it.effectiveComputeOptions) }
 
-    @Test fun chatChipNamesTheActiveBackendAndOpensRunSettingsInOneTap() {
+    @Test fun chatSettingsOpensUnifiedControlsInOneTap() {
         var state by mutableStateOf(loaded)
         var show by mutableStateOf(false)
         var applied = 0
@@ -70,12 +70,12 @@ class ChatComputeSettingsTest {
             }
         }
         composeRule.onNodeWithTag("compute_sheet").assertDoesNotExist()
-        composeRule.onNodeWithContentDescription("Run settings. Running on CPU · 4 threads").assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("chat_controls").assertIsDisplayed().performClick()
 
-        composeRule.onNodeWithText("run settings").assertIsDisplayed()
+        composeRule.onNodeWithText("Chat settings").assertIsDisplayed()
         composeRule.onNodeWithText("Test Model · running on CPU · 4 threads").assertIsDisplayed()
         composeRule.onNodeWithTag("backend_AUTO").assertIsSelected()
-        composeRule.onNodeWithText("These settings are in use.").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Settings in use.").performScrollTo().assertIsDisplayed()
         captureUiFixture("chat-run-settings-sheet-fixture.png")
 
         // Changing the backend from chat asks for an explicit reload, and applying closes the sheet.
@@ -86,9 +86,36 @@ class ChatComputeSettingsTest {
         composeRule.onNodeWithTag("compute_sheet").assertDoesNotExist()
 
         // Close leaves settings untouched.
-        composeRule.onNodeWithTag("open_compute_settings").performClick()
-        composeRule.onNodeWithContentDescription("Close run settings").performClick()
+        composeRule.onNodeWithTag("chat_controls").performClick()
+        composeRule.onNodeWithContentDescription("Close chat settings").performClick()
         composeRule.runOnIdle { assertTrue(!show); assertEquals(1, applied) }
+    }
+
+    @Test fun settingsAreAvailableWithoutEnablingStats() {
+        var opened = 0
+        composeRule.setContent {
+            MobieTheme {
+                ChatScreen(
+                    state = loaded.copy(statsForNerds = false),
+                    onSend = { _, _ -> true },
+                    onComputeSettings = { opened++ },
+                )
+            }
+        }
+        composeRule.onNodeWithTag("chat_controls").assertIsDisplayed().performClick()
+        composeRule.runOnIdle { assertEquals(1, opened) }
+        composeRule.onNodeWithTag("chat_controls_sheet").assertDoesNotExist()
+    }
+
+    @Test fun textDisplayPresetChangesOnlyTheDisplayRate() {
+        var rate: Int? = null
+        composeRule.setContent {
+            MobieTheme { ReplySpeedControl(rate) { rate = it } }
+        }
+        composeRule.onNodeWithTag("reply_speed_30").performClick()
+        composeRule.runOnIdle { assertEquals(30, rate) }
+        composeRule.onNodeWithTag("reply_speed_unlimited").performClick()
+        composeRule.runOnIdle { assertEquals(null, rate) }
     }
 
     @Test fun chipStillOffersRunSettingsBeforeTheEngineReportsABackend() {
@@ -98,7 +125,7 @@ class ChatComputeSettingsTest {
                 ChatScreen(state = loaded.copy(activeCompute = null), onSend = { _, _ -> true }, onComputeSettings = { opened++ })
             }
         }
-        composeRule.onNodeWithContentDescription("Run settings").assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("chat_controls").assertIsDisplayed().performClick()
         composeRule.runOnIdle { assertEquals(1, opened) }
     }
 

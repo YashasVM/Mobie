@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+# Only container loopback and the allowlisted CONNECT proxy are reachable.
+iptables -P OUTPUT DROP
+iptables -A OUTPUT -o lo -j ACCEPT
+iptables -A OUTPUT -d 172.17.0.1 -p tcp --dport 18788 -j ACCEPT
+exec setpriv --reuid=1000 --regid=1000 --clear-groups --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs /app/opencode "$@"

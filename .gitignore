@@ -13,3 +13,9 @@ captures/
 secrets.properties
 models/
 /.claude/worktrees/
+
+# Python bridge runtime artifacts and pairing secrets
+__pycache__/
+*.pyc
+server/opencode-bridge/pairing.key
+server/opencode-bridge/requests/

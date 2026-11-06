@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+ROOT=/home/yvm/mobie-cloud
+REQUEST_DIR=$(readlink -f "${MOBIE_REQUEST_DIR:?MOBIE_REQUEST_DIR is required}")
+[ "$(dirname "$REQUEST_DIR")" = "$ROOT/requests" ] || { echo "Invalid request directory" >&2; exit 64; }
+case "$(basename "$REQUEST_DIR")" in chat-*) ;; *) echo "Invalid request directory" >&2; exit 64;; esac
+[ -d "$REQUEST_DIR" ] && [ ! -e "$REQUEST_DIR/container.id" ] || exit 64
+exec docker run --rm -i --log-driver=none --cidfile "$REQUEST_DIR/container.id" --read-only --cap-drop=ALL --cap-add=NET_ADMIN --cap-add=SETUID --cap-add=SETGID --cap-add=SETPCAP --security-opt=no-new-privileges --pids-limit=100 --memory=1g --cpus=2 --sysctl=net.ipv6.conf.all.disable_ipv6=1 --tmpfs=/run:rw,nosuid,nodev,size=1m --tmpfs=/tmp:rw,nosuid,nodev,size=256m --tmpfs=/home/mobie:rw,nosuid,nodev,size=256m,uid=1000,gid=1000 --tmpfs=/workspace:rw,nosuid,nodev,size=16m,uid=1000,gid=1000 --mount=type=bind,src="$ROOT/bin/opencode",dst=/app/opencode,readonly --mount=type=bind,src="$ROOT/config/sandbox-opencode.json",dst=/app/opencode.json,readonly --mount=type=bind,src="$REQUEST_DIR",dst=/request,readonly --workdir=/workspace --env=HOME=/home/mobie --env=USER=mobie --env=HTTPS_PROXY=http://172.17.0.1:18788 --env=HTTP_PROXY=http://172.17.0.1:18788 --env=https_proxy=http://172.17.0.1:18788 --env=http_proxy=http://172.17.0.1:18788 --env=NO_PROXY=localhost,127.0.0.1,::1 --env=no_proxy=localhost,127.0.0.1,::1 --env=OPENCODE_CONFIG=/app/opencode.json sha256:376bbc732b16fd15ca1ae59198f0de3bda1f9de5fee623a4fcdfb7a310320a85 "$@"
