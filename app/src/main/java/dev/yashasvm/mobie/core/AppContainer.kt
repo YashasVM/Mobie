@@ -14,6 +14,7 @@ import dev.yashasvm.mobie.core.runtime.RuntimeRegistry
 import dev.yashasvm.mobie.core.runtime.ThermalGuardRuntimeAdapter
 import dev.yashasvm.mobie.core.security.HuggingFaceTokenStore
 import dev.yashasvm.mobie.data.catalog.HuggingFaceCatalogRepository
+import dev.yashasvm.mobie.data.attachment.AttachmentReader
 import dev.yashasvm.mobie.data.conversion.ConversionRepository
 import dev.yashasvm.mobie.data.download.ModelDownloadManager
 import dev.yashasvm.mobie.data.history.ChatHistoryStore
@@ -33,7 +34,9 @@ class AppContainer(context: Context) {
     val conversion by lazy { ConversionRepository(http) }
     val downloads by lazy { ModelDownloadManager(appContext) }
     val chatHistory by lazy { ChatHistoryStore(appContext) }
+    val attachments by lazy { AttachmentReader(appContext) }
     val samplerSettings by lazy { SamplerSettingsStore(appContext) }
+    val lastUsedModel by lazy { LastUsedModelStore(appContext) }
     val deviceProfile by lazy { DeviceProfileProvider(appContext) }
     val runSampler by lazy { DeviceRunSampler(appContext) }
     val compatibility = CompatibilityResolver()

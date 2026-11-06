@@ -41,7 +41,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -70,7 +72,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -90,16 +94,16 @@ import kotlinx.coroutines.delay
 // Shared visual building blocks. Screens compose these instead of styling raw Surfaces so that
 // panels, telemetry, and status colors read as one system.
 
-// Terminal windows are square. The names stay so call sites read the same as before.
-internal val PanelShape: Shape = RectangleShape
-internal val PillShape: Shape = RectangleShape
+// Cards are 14dp rounded with a 1dp hairline; chips and badges are fully rounded pills.
+internal val PanelShape: Shape = RoundedCornerShape(14.dp)
+internal val PillShape: Shape = RoundedCornerShape(50)
 
-/** Flat surface with a hairline border. The base container for every grouped block. */
+/** Raised surface with a 1dp hairline border. The base container for every grouped block. */
 @Composable
 internal fun Panel(
     modifier: Modifier = Modifier,
     shape: Shape = PanelShape,
-    color: Color = MaterialTheme.colorScheme.surface,
+    color: Color = MaterialTheme.colorScheme.surfaceContainer,
     borderColor: Color = Mobie.signals.hairline,
     onClick: (() -> Unit)? = null,
     content: @Composable () -> Unit,
@@ -127,10 +131,9 @@ internal fun SectionLabel(
     color: Color = MaterialTheme.colorScheme.onSurfaceVariant,
     trailing: (@Composable RowScope.() -> Unit)? = null,
 ) {
-    // Reads like a man-page section: NAME followed by a dashed rule to the edge.
-    val rule = Mobie.signals.hairline
+    // Small mono caps label followed by a hairline to the edge. Chrome, not body copy.
     Row(
-        modifier.fillMaxWidth(),
+        modifier.fillMaxWidth().semantics { heading() },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -140,15 +143,7 @@ internal fun SectionLabel(
             color = color,
             maxLines = 1,
         )
-        Canvas(Modifier.weight(1f).height(1.dp)) {
-            drawLine(
-                rule,
-                Offset(0f, 0f),
-                Offset(size.width, 0f),
-                strokeWidth = size.height,
-                pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx())),
-            )
-        }
+        Box(Modifier.weight(1f).height(1.dp).background(Mobie.signals.hairline))
         trailing?.invoke(this)
     }
 }
@@ -245,7 +240,7 @@ internal fun BlinkingCursor(
 /** Jumps between start and end values, like a terminal cursor, instead of fading. */
 internal val StepEasing = Easing { fraction -> if (fraction < .5f) 0f else 1f }
 
-/** Compact bordered tag. Use [color] to tint for status; defaults to neutral. */
+/** Small rounded chip. Use [color] to tint for status; defaults to neutral. */
 @Composable
 internal fun Tag(
     text: String,
@@ -257,34 +252,111 @@ internal fun Tag(
     val tint = color ?: MaterialTheme.colorScheme.onSurfaceVariant
     Row(
         modifier
-            .background(color?.copy(alpha = .08f) ?: Color.Transparent)
-            .border(1.dp, color?.copy(alpha = .45f) ?: Mobie.signals.hairline)
-            .padding(horizontal = 6.dp, vertical = 2.dp),
+            .clip(PillShape)
+            .background(color?.copy(alpha = .14f) ?: MaterialTheme.colorScheme.surfaceContainerHighest)
+            .padding(horizontal = 10.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         if (icon != null) LucideIcon(icon, null, Modifier.size(12.dp), tint = tint)
         Text(
             text,
             style = Mobie.numeric.tiny,
-            color = tint,
+            color = if (color == null) MaterialTheme.colorScheme.onSurfaceVariant else tint,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
 
-/** Status tag with a leading dot, colored by compatibility. */
+/** Status pill with a leading dot, colored by compatibility. */
 @Composable
 internal fun SignalTag(text: String, color: Color, modifier: Modifier = Modifier, pulsing: Boolean = false) {
     Row(
         modifier
-            .border(1.dp, color.copy(alpha = .7f))
-            .padding(horizontal = 7.dp, vertical = 2.dp),
+            .clip(PillShape)
+            .background(color.copy(alpha = .14f))
+            .padding(horizontal = 10.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         StatusDot(color, pulsing = pulsing, size = 6.dp)
         Text(text, style = Mobie.numeric.tiny, color = color, maxLines = 1)
+    }
+}
+
+/**
+ * Fit badge for a model: `Runs here`, `Free memory first`, `Won't fit`, and so on, colored by the
+ * compatibility signal. Shown on every model card and on the model screen verdict.
+ */
+@Composable
+internal fun FitBadge(status: Compatibility?, modifier: Modifier = Modifier) {
+    SignalTag(statusLabel(status), status.signalColor(), modifier)
+}
+
+/**
+ * A label and a value on one row, e.g. `Download size ........ 1.2 GB`. The label is body copy
+ * and the value is mono so numbers line up. Use [stacked] when the value is too long for one line.
+ */
+@Composable
+internal fun StatRow(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    valueColor: Color? = null,
+    stacked: Boolean = false,
+) {
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    val ink = valueColor ?: MaterialTheme.colorScheme.onSurface
+    if (stacked) {
+        Column(modifier.fillMaxWidth().padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(label, style = MaterialTheme.typography.bodySmall, color = muted)
+            Text(value, style = Mobie.numeric.small, color = ink)
+        }
+    } else {
+        Row(
+            modifier.fillMaxWidth().heightIn(min = 40.dp).padding(vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(label, style = MaterialTheme.typography.bodyMedium, color = muted, modifier = Modifier.weight(.45f))
+            Text(
+                value,
+                style = Mobie.numeric.small,
+                color = ink,
+                modifier = Modifier.weight(.55f),
+                textAlign = TextAlign.End,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** A rounded, tappable choice chip. The selected chip is filled with the accent. 48dp tall. */
+@Composable
+internal fun ChoiceChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val accent = MaterialTheme.colorScheme.primary
+    Box(
+        modifier
+            .heightIn(min = 48.dp)
+            .widthIn(min = 48.dp)
+            .clip(PillShape)
+            .background(if (selected) accent else MaterialTheme.colorScheme.surfaceContainerHighest)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .padding(horizontal = 16.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            style = Mobie.numeric.small,
+            color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+        )
     }
 }
 
@@ -316,56 +388,39 @@ internal fun MemoryBar(
             .height(height)
             .semantics { contentDescription = description },
     ) {
-        // A row of block cells, like a `█████░░░░` meter. Each cell takes the color of the segment
-        // covering most of it, so the bar stays crisp at any width.
-        val cell = 5.dp.toPx()
-        val gap = 1.5.dp.toPx()
-        val count = ((size.width + gap) / (cell + gap)).toInt().coerceAtLeast(1)
-        val pitch = (size.width + gap) / count
-        val visible = segments.filter { it.bytes > 0 }
-        val total = if (capacityBytes > 0) capacityBytes.toFloat() else 1f
-        for (i in 0 until count) {
-            val mid = (i + .5f) / count
-            var acc = 0f
-            var fill = track
-            if (capacityBytes > 0 && mid <= reveal.value) {
-                for (segment in visible) {
-                    acc += segment.bytes / total
-                    if (mid <= acc) { fill = segment.color; break }
-                }
-            }
-            drawRect(fill, topLeft = Offset(i * pitch, 0f), size = Size(pitch - gap, size.height))
-        }
+        // A rounded track with each segment drawn in order from the left, sized against capacity.
+        val radius = CornerRadius(size.height / 2)
+        drawRoundRect(track, cornerRadius = radius)
         if (capacityBytes <= 0) return@Canvas
+        val total = capacityBytes.toFloat()
+        var x = 0f
+        for (segment in segments.filter { it.bytes > 0 }) {
+            val width = (segment.bytes / total * size.width * reveal.value).coerceAtMost(size.width - x)
+            if (width <= 0f) continue
+            drawRoundRect(segment.color, topLeft = Offset(x, 0f), size = Size(width, size.height), cornerRadius = radius)
+            x += width
+        }
         markerBytes?.takeIf { it in 1..capacityBytes }?.let { marker ->
             val mx = marker.toFloat() / capacityBytes * size.width
-            drawRect(markerColor.copy(alpha = reveal.value), topLeft = Offset(mx - 1f, -2f), size = Size(2.dp.toPx(), size.height + 4f))
+            drawRect(markerColor.copy(alpha = reveal.value), topLeft = Offset(mx - 1f, -3f), size = Size(2.dp.toPx(), size.height + 6f))
         }
     }
 }
 
-/** Thin progress track (download, load). */
+/** Thin rounded progress bar (download, load). Animates between values. */
 @Composable
-internal fun ProgressTrack(progress: Float, modifier: Modifier = Modifier, color: Color = MaterialTheme.colorScheme.primary) {
+internal fun ProgressTrack(
+    progress: Float,
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.primary,
+    height: Dp = 6.dp,
+) {
     val track = Mobie.signals.track
     val animated by animateFloatAsState(progress.coerceIn(0f, 1f), tween(MotionMedium, easing = EmphasizedEase), label = "progress")
-    val blink = rememberInfiniteTransition(label = "progress head")
-    val head = blink.animateFloat(1f, .25f, infiniteRepeatable(tween(530, easing = StepEasing), RepeatMode.Reverse), label = "progress head alpha")
-    Canvas(modifier.fillMaxWidth().height(8.dp)) {
-        // `[██████▒░░░░░]`: filled cells, a blinking head cell while work is ongoing, empty track.
-        val cell = 4.dp.toPx()
-        val gap = 1.5.dp.toPx()
-        val count = ((size.width + gap) / (cell + gap)).toInt().coerceAtLeast(1)
-        val pitch = (size.width + gap) / count
-        val filled = (animated * count).toInt().coerceIn(0, count)
-        for (i in 0 until count) {
-            val fill = when {
-                i < filled -> color
-                i == filled && animated in 0.0001f..0.9999f -> color.copy(alpha = head.value)
-                else -> track
-            }
-            drawRect(fill, topLeft = Offset(i * pitch, 0f), size = Size(pitch - gap, size.height))
-        }
+    Canvas(modifier.fillMaxWidth().height(height)) {
+        val radius = CornerRadius(size.height / 2)
+        drawRoundRect(track, cornerRadius = radius)
+        if (animated > 0f) drawRoundRect(color, size = Size(size.width * animated, size.height), cornerRadius = radius)
     }
 }
 
@@ -386,14 +441,14 @@ internal fun TuiWindow(
     Panel(modifier, color = MaterialTheme.colorScheme.surfaceContainer, borderColor = borderColor, onClick = onClick) {
         Column {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    title,
-                    style = Mobie.numeric.tiny,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    title.uppercase(Locale.US),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
@@ -410,8 +465,8 @@ internal fun TuiWindow(
 internal enum class TermButtonStyle { Primary, Ghost, Danger }
 
 /**
- * The website's `[ download apk ]` button: a bordered label that inverts while pressed. Primary is
- * filled amber because it is the one action we want on a screen; Ghost and Danger stay outlined.
+ * App button, 48dp minimum, rounded 14dp, with a ripple. Primary is the one filled accent action on
+ * a screen. Ghost is outlined for secondary actions. Danger is outlined in the blocked color.
  */
 @Composable
 internal fun TermButton(
@@ -424,39 +479,38 @@ internal fun TermButton(
     hint: String? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
+    val shape = RoundedCornerShape(14.dp)
     val accent = when (style) {
         TermButtonStyle.Primary -> MaterialTheme.colorScheme.primary
         TermButtonStyle.Ghost -> MaterialTheme.colorScheme.onSurface
         TermButtonStyle.Danger -> Mobie.signals.blocked
     }
-    val filled = enabled && (style == TermButtonStyle.Primary) != pressed
-    val content = when {
-        !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .6f)
-        filled -> MaterialTheme.colorScheme.background
-        else -> accent
-    }
-    val border = when {
-        !enabled -> Mobie.signals.hairline
-        style == TermButtonStyle.Ghost && !pressed -> MaterialTheme.colorScheme.outline
-        else -> accent
+    val (fill, ink, border) = when {
+        !enabled -> Triple(MaterialTheme.colorScheme.surfaceContainerHigh, MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .7f), Color.Transparent)
+        style == TermButtonStyle.Primary -> Triple(accent, MaterialTheme.colorScheme.onPrimary, Color.Transparent)
+        style == TermButtonStyle.Ghost -> Triple(Color.Transparent, accent, MaterialTheme.colorScheme.outline)
+        else -> Triple(Color.Transparent, accent, accent.copy(alpha = .6f))
     }
     Row(
         modifier
-            .heightIn(min = 44.dp)
-            .background(if (filled) accent else Color.Transparent)
-            .border(1.dp, border)
-            .clickable(interactionSource = interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .heightIn(min = 48.dp)
+            .clip(shape)
+            .background(fill, shape)
+            .border(1.dp, border, shape)
+            .clickable(
+                interactionSource = interaction,
+                indication = ripple(color = ink),
+                enabled = enabled,
+                role = Role.Button,
+                onClick = onClick,
+            )
+            .padding(horizontal = 18.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
     ) {
-        if (icon != null) LucideIcon(icon, null, Modifier.size(16.dp), tint = content)
-        // Brackets are separate glyphs so the label keeps its exact text for accessibility and tests.
-        Text("[", style = MaterialTheme.typography.labelLarge, color = content.copy(alpha = .7f))
-        Text(text, style = MaterialTheme.typography.labelLarge, color = content, maxLines = 1)
-        Text("]", style = MaterialTheme.typography.labelLarge, color = content.copy(alpha = .7f))
-        if (hint != null) Text(hint, style = Mobie.numeric.tiny, color = content.copy(alpha = .7f), maxLines = 1)
+        if (icon != null) LucideIcon(icon, null, Modifier.size(18.dp), tint = ink)
+        Text(text, style = MaterialTheme.typography.labelLarge, color = ink, maxLines = 1)
+        if (hint != null) Text(hint, style = Mobie.numeric.tiny, color = ink.copy(alpha = .75f), maxLines = 1)
     }
 }
 
@@ -473,35 +527,37 @@ internal fun StatusLine(
     selected: Int = 0,
     trailing: String? = null,
 ) {
-    val bar = MaterialTheme.colorScheme.primary
-    val ink = MaterialTheme.colorScheme.background
-    Row(modifier.fillMaxWidth().height(26.dp).background(bar), verticalAlignment = Alignment.CenterVertically) {
-        segments.forEachIndexed { index, segment ->
-            val on = index == selected
-            Text(
-                segment.text,
-                style = Mobie.numeric.tiny.copy(fontWeight = FontWeight.Medium),
-                color = if (on) bar else ink,
-                maxLines = 1,
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .background(if (on) ink else Color.Transparent)
-                    .then(if (segment.onClick != null) Modifier.clickable(onClick = segment.onClick) else Modifier)
-                    .wrapContentHeight(Alignment.CenterVertically)
-                    .padding(horizontal = 9.dp),
-            )
+    val accent = MaterialTheme.colorScheme.primary
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    Column(modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().height(40.dp).padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            segments.forEachIndexed { index, segment ->
+                val on = index == selected
+                Text(
+                    segment.text,
+                    style = Mobie.numeric.tiny.copy(fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium),
+                    color = if (on) accent else muted,
+                    maxLines = 1,
+                    modifier = Modifier
+                        .then(if (segment.onClick != null) Modifier.clickable(role = Role.Button, onClick = segment.onClick) else Modifier)
+                        .padding(end = 14.dp),
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            if (trailing != null) {
+                Text(
+                    trailing,
+                    style = Mobie.numeric.tiny,
+                    color = muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
-        Spacer(Modifier.weight(1f))
-        if (trailing != null) {
-            Text(
-                trailing,
-                style = Mobie.numeric.tiny.copy(fontWeight = FontWeight.Medium),
-                color = ink,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(horizontal = 9.dp),
-            )
-        }
+        Hairline()
     }
 }
 
@@ -521,11 +577,19 @@ internal fun PromptLine(
     }
 }
 
-/** A `[✓] text` / `[!] text` / `[x] text` checklist line in the matching signal color. */
+/** A checklist line: a small tinted mark (`✓`, `!`, `x`) in the matching signal color, then the text. */
 @Composable
 internal fun CheckLine(text: String, mark: String, color: Color, modifier: Modifier = Modifier) {
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("[$mark]", style = Mobie.numeric.small, color = color)
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Box(
+            Modifier
+                .size(22.dp)
+                .clip(RoundedCornerShape(7.dp))
+                .background(color.copy(alpha = .16f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(mark, style = Mobie.numeric.small, color = color)
+        }
         Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
     }
 }

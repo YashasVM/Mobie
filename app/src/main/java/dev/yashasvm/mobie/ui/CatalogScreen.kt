@@ -5,7 +5,6 @@ import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -15,6 +14,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+<<<<<<< HEAD
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -28,18 +28,18 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.foundation.Canvas
+=======
+>>>>>>> 26db589 (Chat-first launch, model switcher, document attachments, and readable terminal theme)
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -53,10 +53,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Switch
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -73,10 +77,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -131,6 +132,8 @@ internal fun CatalogScreen(
     darkTheme: Boolean = true,
     onDarkThemeChange: (Boolean) -> Unit = {},
     onSaveToken: (String) -> Unit = {},
+    /** Set when an installed model is active, so the user can get back to its chat from here. */
+    onReturnToChat: (() -> Unit)? = null,
 ) {
     var selectedTab by rememberSaveable { mutableIntStateOf(TAB_DISCOVER) }
     var pendingDelete by remember { mutableStateOf<InstalledModelEntry?>(null) }
@@ -157,6 +160,11 @@ internal fun CatalogScreen(
             scrolled = scrolled,
             trailing = if (selectedTab == TAB_DISCOVER) chipName(state.device) ?: deviceName(state.device) else null,
         )
+        if (onReturnToChat != null) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                TermButton("back to chat", onClick = onReturnToChat, style = TermButtonStyle.Ghost)
+            }
+        }
         AnimatedContent(
             targetState = selectedTab,
             modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -255,6 +263,7 @@ private fun LazyListScope.discoverTab(
     onSelect: (AiModel) -> Unit,
     onFeatured: () -> Unit,
 ) {
+<<<<<<< HEAD
     item(key = "rig") { DeviceStrip(state.device, Modifier.entrance(tracker, "rig", 0).padding(top = 4.dp, bottom = 12.dp)) }
     // Search stays pinned under the top bar while the list scrolls beneath it.
     stickyHeader(key = "search") {
@@ -265,6 +274,19 @@ private fun LazyListScope.discoverTab(
                 .entrance(tracker, "search", 1)
                 .padding(bottom = 10.dp),
         ) {
+=======
+    item(key = "header") {
+        ScreenHeader(
+            path = "~/models",
+            title = "Models for this phone",
+            subtitle = "Sized against this phone's memory. Once downloaded, they run fully offline.",
+            modifier = Modifier.entrance(tracker, "header", 0).padding(bottom = GroupGap),
+        )
+    }
+    item(key = "rig") { DeviceRig(state.device, Modifier.entrance(tracker, "rig", 1).padding(bottom = GroupGap)) }
+    item(key = "search") {
+        Box(Modifier.entrance(tracker, "search", 2).padding(bottom = GroupGap)) {
+>>>>>>> 26db589 (Chat-first launch, model switcher, document attachments, and readable terminal theme)
             SearchField(state.query, onQuery, onSearch, onClear = onFeatured)
         }
     }
@@ -283,7 +305,7 @@ private fun LazyListScope.discoverTab(
             MessagePanel(
                 title = "Couldn't load models",
                 body = state.catalogError,
-                mark = "[!]",
+                mark = "!",
                 markColor = Mobie.signals.blocked,
                 actionLabel = "Retry",
                 onAction = onFeatured,
@@ -295,7 +317,7 @@ private fun LazyListScope.discoverTab(
             MessagePanel(
                 title = "No matching models",
                 body = "Only LiteRT-LM models from litert-community are listed. Try another name.",
-                mark = "[ ]",
+                mark = "",
                 actionLabel = if (state.query.isNotBlank()) "Show recommended" else null,
                 onAction = onFeatured,
                 modifier = Modifier.appear(),
@@ -399,11 +421,11 @@ private fun SearchField(query: String, onQuery: (String) -> Unit, onSearch: () -
         },
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
         keyboardActions = KeyboardActions(onSearch = { onSearch() }),
-        shape = RectangleShape,
+        shape = RoundedCornerShape(14.dp),
         colors = OutlinedTextFieldDefaults.colors(
-            focusedContainerColor = MaterialTheme.colorScheme.surface,
-            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-            unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = .55f),
+            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+            unfocusedBorderColor = Mobie.signals.hairline,
             focusedBorderColor = MaterialTheme.colorScheme.primary,
             cursorColor = MaterialTheme.colorScheme.primary,
         ),
@@ -432,24 +454,31 @@ private fun ModelRow(
         "needs access".takeIf { model.gated },
     ).joinToString(" · ")
     ListRow(onClick = onClick, modifier = modifier) { tone ->
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    model.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = tone.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    flags,
+                    style = Mobie.numeric.tiny,
+                    color = tone.dim,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Text(
-                statusGlyph(status),
+                formatBytes(artifact?.sizeBytes ?: 0),
                 style = Mobie.numeric.medium,
-                color = tone.tint(statusColor),
-                modifier = Modifier.width(14.dp),
-                textAlign = TextAlign.Center,
-            )
-            Text(
-                model.title,
-                style = MaterialTheme.typography.titleSmall,
                 color = tone.ink,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
             )
-            Text(formatBytes(artifact?.sizeBytes ?: 0), style = Mobie.numeric.small, color = tone.ink, maxLines = 1)
         }
+<<<<<<< HEAD
         if (specs.isNotBlank()) SpecText(specs, tone.dim)
         Row(
             Modifier.padding(start = 24.dp),
@@ -474,21 +503,38 @@ private fun ModelRow(
             } else {
                 Spacer(Modifier.weight(1f))
             }
+=======
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            FitBadge(status)
+            if (specs.isNotBlank()) {
+                Text(
+                    specs,
+                    style = Mobie.numeric.tiny,
+                    color = tone.dim,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+        if (device != null && device.totalRamBytes > 0 && estimatedRam > 0) {
+            MemoryBar(
+                segments = listOf(MemorySegment("Estimated RAM", estimatedRam, statusColor)),
+                capacityBytes = device.totalRamBytes,
+                markerBytes = device.availableRamBytes.takeIf { it > 0 },
+                height = 6.dp,
+            )
+            Text(
+                "needs ~${formatBytes(estimatedRam)} of ${formatBytes(device.totalRamBytes)} · " +
+                    "${formatBytes(device.availableRamBytes)} free",
+                style = Mobie.numeric.tiny,
+                color = tone.dim,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+>>>>>>> 26db589 (Chat-first launch, model switcher, document attachments, and readable terminal theme)
         }
     }
-}
-
-/** Dim second line under a row name, indented to sit under the title rather than the status glyph. */
-@Composable
-private fun SpecText(text: String, color: Color) {
-    Text(
-        text,
-        style = Mobie.numeric.tiny,
-        color = color,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.padding(start = 24.dp),
-    )
 }
 
 /** Byte count for a key/value row, or a dash when the platform reports nothing. */
@@ -502,13 +548,6 @@ private fun specLine(quantization: String?, estimatedRamBytes: Long, contextToke
         "~${formatBytes(estimatedRamBytes)} RAM".takeIf { estimatedRamBytes > 0 && !ramShownBelow },
         "${formatTokens(contextTokens)} ctx".takeIf { contextTokens > 0 },
     ).joinToString(" · ")
-
-private fun statusGlyph(status: Compatibility?): String = when (status) {
-    Compatibility.COMPATIBLE -> "✓"
-    Compatibility.WARNING -> "!"
-    null -> "·"
-    else -> "x"
-}
 
 @Composable
 private fun SkeletonList() {
@@ -560,11 +599,22 @@ private fun LazyListScope.installedTab(
     onDelete: (InstalledModelEntry) -> Unit,
     onBrowse: () -> Unit,
 ) {
+<<<<<<< HEAD
+=======
+    item(key = "header") {
+        ScreenHeader(
+            path = "~/library",
+            title = "Your local models",
+            subtitle = "Stored on this phone and ready offline. Tap one to start a new chat.",
+            modifier = Modifier.entrance(tracker, "header", 0).padding(bottom = GroupGap),
+        )
+    }
+>>>>>>> 26db589 (Chat-first launch, model switcher, document attachments, and readable terminal theme)
     state.error?.let { message ->
         item(key = "error") {
             TuiWindow(
                 title = "error",
-                meta = "[!]",
+                meta = "!",
                 metaColor = Mobie.signals.blocked,
                 borderColor = Mobie.signals.blocked.copy(alpha = .6f),
                 modifier = Modifier.fillMaxWidth().padding(bottom = GroupGap).appear().semantics(mergeDescendants = true) {
@@ -585,7 +635,7 @@ private fun LazyListScope.installedTab(
             MessagePanel(
                 title = "Nothing downloaded yet",
                 body = "Models you download live here, ready for private chats without a connection.",
-                mark = "[ ]",
+                mark = "",
                 actionLabel = "Browse models",
                 onAction = onBrowse,
                 primaryAction = true,
@@ -640,6 +690,7 @@ private fun InstalledRow(
     val estimatedRam = compatibility?.estimatedRamBytes ?: 0
     val context = compatibility?.contextWindowTokens?.takeIf { it > 0 } ?: artifact?.contextWindowTokens ?: 0
     val specs = specLine(artifact?.quantization, estimatedRam, context)
+<<<<<<< HEAD
     val haptics = LocalHapticFeedback.current
     val swipe = rememberSwipeToDismissBoxState(
         confirmValueChange = {
@@ -695,6 +746,44 @@ private fun InstalledRowContent(entry: InstalledModelEntry, specs: String, onOpe
                 modifier = Modifier.weight(1f),
             )
             IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
+=======
+    ListRow(onClick = onOpen, modifier = modifier) { tone ->
+        Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    model.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = tone.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    listOfNotNull("on this phone", artifact?.runtimeLabel, "vision".takeIf { model.supportsVision }).joinToString(" · "),
+                    style = Mobie.numeric.tiny,
+                    color = tone.dim,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(formatBytes(artifact?.sizeBytes ?: 0), style = Mobie.numeric.medium, color = tone.ink, maxLines = 1)
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            SignalTag("Ready offline", Mobie.signals.ready)
+            if (specs.isNotBlank()) {
+                Text(
+                    specs,
+                    style = Mobie.numeric.tiny,
+                    color = tone.dim,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = onDelete, modifier = Modifier.size(48.dp)) {
+>>>>>>> 26db589 (Chat-first launch, model switcher, document attachments, and readable terminal theme)
                 LucideIcon(
                     LucideR.drawable.lucide_ic_trash_2,
                     "Delete ${model.title}",
@@ -702,7 +791,11 @@ private fun InstalledRowContent(entry: InstalledModelEntry, specs: String, onOpe
                     tint = tone.dim,
                 )
             }
+<<<<<<< HEAD
             LucideIcon(LucideR.drawable.lucide_ic_chevron_right, null, Modifier.size(18.dp), tint = tone.tint(MaterialTheme.colorScheme.primary))
+=======
+            TermButton("Open", onClick = onOpen, style = TermButtonStyle.Ghost)
+>>>>>>> 26db589 (Chat-first launch, model switcher, document attachments, and readable terminal theme)
         }
         SpecText(
             listOfNotNull(
@@ -727,6 +820,17 @@ private fun LazyListScope.settingsTab(
     onDarkThemeChange: (Boolean) -> Unit,
     onSaveToken: (String) -> Unit,
 ) {
+<<<<<<< HEAD
+=======
+    item(key = "header") {
+        ScreenHeader(
+            path = "~/settings",
+            title = "Settings",
+            subtitle = "Access, appearance, and how Mobie handles your data.",
+            modifier = Modifier.entrance(tracker, "header", 0).padding(bottom = GroupGap),
+        )
+    }
+>>>>>>> 26db589 (Chat-first launch, model switcher, document attachments, and readable terminal theme)
     item(key = "appearance") {
         SettingsGroup("Appearance", Modifier.entrance(tracker, "appearance", 1).padding(bottom = GroupGap)) {
             Column {
@@ -739,6 +843,7 @@ private fun LazyListScope.settingsTab(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
+<<<<<<< HEAD
                     Text("Dark mode", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                     Switch(
                         checked = darkTheme,
@@ -748,6 +853,17 @@ private fun LazyListScope.settingsTab(
                             checkedTrackColor = MaterialTheme.colorScheme.primary,
                         ),
                     )
+=======
+                    Column(Modifier.weight(1f)) {
+                        Text("Dark mode", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            if (darkTheme) "On" else "Off",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = darkTheme, onCheckedChange = null)
+>>>>>>> 26db589 (Chat-first launch, model switcher, document attachments, and readable terminal theme)
                 }
             }
         }
@@ -839,9 +955,9 @@ private fun TokenSettings(tokenConfigured: Boolean, onSaveToken: (String) -> Uni
                     visualTransformation = PasswordVisualTransformation(),
                     label = { Text("Access token") },
                     supportingText = { Text("Leave blank and save to remove it.", style = MaterialTheme.typography.bodySmall) },
-                    shape = RectangleShape,
+                    shape = RoundedCornerShape(14.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = .55f),
+                        unfocusedBorderColor = Mobie.signals.hairline,
                         focusedBorderColor = MaterialTheme.colorScheme.primary,
                         cursorColor = MaterialTheme.colorScheme.primary,
                     ),
@@ -878,7 +994,7 @@ private fun PrivacyLine(title: String, body: String, mark: String, color: Color)
             body,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 34.dp),
+            modifier = Modifier.padding(start = 32.dp),
         )
     }
 }
@@ -916,6 +1032,7 @@ private fun InfoRow(
 
 // region Shared pieces
 
+<<<<<<< HEAD
 private val TabTitles = listOf("Discover", "Library", "Settings")
 
 /**
@@ -948,13 +1065,32 @@ private fun HomeTopBar(title: String, scrolled: Boolean, trailing: String? = nul
             }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(rule))
+=======
+/**
+ * Screen title with a mono path line (`~/discover`) above a sans heading. The title text is kept as
+ * written so it reads the same to tests and screen readers.
+ */
+@Composable
+private fun ScreenHeader(path: String, title: String, subtitle: String, modifier: Modifier = Modifier) {
+    Column(modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            path,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1,
+        )
+        Text(
+            title,
+            style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.semantics { heading() },
+        )
+        Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+>>>>>>> 26db589 (Chat-first launch, model switcher, document attachments, and readable terminal theme)
     }
 }
 
-/**
- * Section heading in the website's `h2` style: amber title, then a dashed rule to the edge.
- * Text is kept in its natural case so screen readers and tests read it as written.
- */
+/** Section heading in sans, with an optional count, note, and action. Text stays in its natural case. */
 @Composable
 private fun ListHeader(
     title: String,
@@ -966,19 +1102,19 @@ private fun ListHeader(
     Row(
         modifier.fillMaxWidth().heightIn(min = 44.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
             title,
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.primary,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             modifier = Modifier.semantics { heading() },
         )
         if (count != null) {
-            Text("[$count]", style = Mobie.numeric.small, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("$count", style = Mobie.numeric.small, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        DashedRule(Modifier.weight(1f))
+        Spacer(Modifier.weight(1f))
         if (trailingNote != null) {
             Text(trailingNote, style = Mobie.numeric.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
         }
@@ -986,57 +1122,28 @@ private fun ListHeader(
     }
 }
 
-@Composable
-private fun DashedRule(modifier: Modifier = Modifier) {
-    val rule = MaterialTheme.colorScheme.outline.copy(alpha = .5f)
-    Canvas(modifier.height(1.dp)) {
-        drawLine(
-            rule,
-            Offset(0f, 0f),
-            Offset(size.width, 0f),
-            strokeWidth = size.height,
-            pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx())),
-        )
-    }
+/** Row colors. Kept as a small holder so card content reads the same whatever the state. */
+private class RowTone(val ink: Color, val dim: Color) {
+    fun tint(color: Color): Color = color
 }
 
-/** Tone of a list row. Colors flip to the inverted palette while the row is pressed, like the website's `.row.on`. */
-private class RowTone(val inverted: Boolean, val ink: Color, val dim: Color) {
-    fun tint(color: Color): Color = if (inverted) ink else color
-}
-
-/** Flat terminal list row with a hairline below. Pressing it inverts the row to amber. */
+/** A model or installed-model card: raised, rounded, 48dp+ touch target, ripple on press. */
 @Composable
 private fun ListRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    content: @Composable (RowTone) -> Unit,
+    content: @Composable ColumnScope.(RowTone) -> Unit,
 ) {
-    val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    val background by animateColorAsState(
-        if (pressed) MaterialTheme.colorScheme.primary else Color.Transparent,
-        tween(MotionShort),
-        label = "row inverse",
-    )
-    val ink = MaterialTheme.colorScheme.background
-    val tone = if (pressed) {
-        RowTone(inverted = true, ink = ink, dim = ink.copy(alpha = .7f))
-    } else {
-        RowTone(inverted = false, ink = MaterialTheme.colorScheme.onSurface, dim = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-    Column(modifier.fillMaxWidth()) {
+    val tone = RowTone(ink = MaterialTheme.colorScheme.onSurface, dim = MaterialTheme.colorScheme.onSurfaceVariant)
+    Panel(
+        modifier.fillMaxWidth().padding(bottom = 10.dp),
+        onClick = onClick,
+    ) {
         Column(
-            Modifier
-                .fillMaxWidth()
-                .background(background)
-                .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onClick)
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            content(tone)
-        }
-        Hairline()
+            Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            content = { content(tone) },
+        )
     }
 }
 
@@ -1045,7 +1152,7 @@ private fun MessagePanel(
     title: String,
     body: String,
     modifier: Modifier = Modifier,
-    mark: String = "[i]",
+    mark: String = "i",
     markColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
     actionLabel: String? = null,
     onAction: () -> Unit = {},
@@ -1081,6 +1188,7 @@ private fun MessagePanel(
 
 @Composable
 private fun ConsoleNavBar(selectedTab: Int, onSelect: (Int) -> Unit) {
+<<<<<<< HEAD
     // Icon-over-label tabs, like any phone app. The selected tab gets an amber indicator above its icon.
     val items = listOf(
         Triple("discover", "bottom_nav_discover", LucideR.drawable.lucide_ic_compass),
@@ -1140,6 +1248,23 @@ private fun ConsoleNavBar(selectedTab: Int, onSelect: (Int) -> Unit) {
                     Text(label, style = Mobie.numeric.tiny, color = ink, maxLines = 1)
                 }
             }
+=======
+    // Material bottom bar: three destinations, thumb reach, insets handled by the bar itself.
+    val items = listOf(
+        Triple("discover", LucideR.drawable.lucide_ic_compass, "bottom_nav_discover"),
+        Triple("library", LucideR.drawable.lucide_ic_library, "bottom_nav_installed"),
+        Triple("settings", LucideR.drawable.lucide_ic_settings, "bottom_nav_settings"),
+    )
+    NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
+        items.forEachIndexed { index, (label, icon, tag) ->
+            NavigationBarItem(
+                selected = selectedTab == index,
+                onClick = { onSelect(index) },
+                icon = { LucideIcon(icon, null, Modifier.size(22.dp)) },
+                label = { Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1) },
+                modifier = Modifier.testTag(tag),
+            )
+>>>>>>> 26db589 (Chat-first launch, model switcher, document attachments, and readable terminal theme)
         }
     }
 }
