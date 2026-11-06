@@ -8,6 +8,7 @@ import dev.yashasvm.mobie.data.history.HistoryMessage
 import dev.yashasvm.mobie.data.download.DownloadFilePolicy
 import dev.yashasvm.mobie.data.download.DownloadSourceIdentity
 import dev.yashasvm.mobie.data.download.ModelDownloadManager
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -19,7 +20,7 @@ import java.util.Properties
 @RunWith(AndroidJUnit4::class)
 class LocalPersistenceTest {
     @Test
-    fun chatHistorySurvivesStoreRecreationAndCanBeCleared() {
+    fun chatHistorySurvivesStoreRecreationAndCanBeCleared() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val modelId = "test/history-model"
         val messages = listOf(HistoryMessage(true, "Hello"), HistoryMessage(false, "Hi"))
@@ -32,7 +33,7 @@ class LocalPersistenceTest {
     }
 
     @Test
-    fun chatHistoryKeepsMoreThanOneLocalSession() {
+    fun chatHistoryKeepsMoreThanOneLocalSession() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val modelId = "test/session-model"
         val store = ChatHistoryStore(context)
@@ -51,7 +52,7 @@ class LocalPersistenceTest {
     }
 
     @Test
-    fun repeatedHistoryWritesPreserveInactiveSessionsAndSurviveRecreation() {
+    fun repeatedHistoryWritesPreserveInactiveSessionsAndSurviveRecreation() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val modelId = "test/cached-session-writes"
         val store = ChatHistoryStore(context)
@@ -79,7 +80,7 @@ class LocalPersistenceTest {
     }
 
     @Test
-    fun writingRestoredLegacyChatUpdatesItInsteadOfCreatingDuplicateSession() {
+    fun writingRestoredLegacyChatUpdatesItInsteadOfCreatingDuplicateSession() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val modelId = "test/legacy-chat-write"
         val store = ChatHistoryStore(context)
@@ -113,7 +114,7 @@ class LocalPersistenceTest {
     }
 
     @Test
-    fun staleActiveSessionPointerFallsBackToExistingSession() {
+    fun staleActiveSessionPointerFallsBackToExistingSession() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val modelId = "test/stale-chat-pointer"
         val store = ChatHistoryStore(context)
