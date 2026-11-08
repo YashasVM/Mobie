@@ -1,5 +1,9 @@
 import importlib.util
+import json
 from pathlib import Path
+import subprocess
+import sys
+import tempfile
 from types import SimpleNamespace
 import unittest
 
@@ -196,6 +200,26 @@ class SummaryTest(unittest.TestCase):
         result = module.summarize([self.run_record(0), self.run_record(1)], self.args)
         self.assertFalse(result["requested_run_id_matched"])
         self.assertIn("Without --run-id", result["note"])
+
+    def test_sustained_load_metrics_must_be_finite_and_nonnegative(self):
+        for value in (float("nan"), float("inf"), -float("inf"), -1, True, None, "200"):
+            for in_row in (True, False):
+                with self.subTest(value=value, in_row=in_row):
+                    records = ([self.sustained_row(0, [self.sample(12, 100)], load_ms=value)]
+                               if in_row else [self.repetition_row(0, 12, 100, load_ms=value),
+                                               self.repetition_row(1, 12, 100, load_ms=200)])
+                    with self.assertRaisesRegex(ValueError, "load_ms"):
+                        module.summarize(records, self.args)
+
+    def test_cli_rejects_nonfinite_optional_output_without_printing_a_summary(self):
+        record = self.sustained_row(0, [self.sample(12, 100, thermal_start=float("nan"))])
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "capture.jsonl"
+            path.write_text(json.dumps(record) + "\n")
+            result = subprocess.run([sys.executable, module.__file__, str(path)],
+                                    capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
 
 if __name__ == '__main__':
     unittest.main()

@@ -146,6 +146,7 @@ def _summarize_latency_probe(records):
 
 def _summarize_sustained(records):
     for record in records:
+        _require_number(record, "load_ms", "sustained iteration")
         if not record.get("prompt_id") or not record.get("prompt_sha256"):
             raise ValueError("Sustained-decode rows must record prompt_id and prompt_sha256.")
     minimum = records[0].get("min_native_decode_tokens")
@@ -227,7 +228,7 @@ def main():
     args = parser.parse_args()
     records = [json.loads(line) for line in args.path.read_text().splitlines() if line.strip()]
     try:
-        print(json.dumps(summarize(records, args), indent=2))
+        print(json.dumps(summarize(records, args), indent=2, allow_nan=False))
     except ValueError as error:
         raise SystemExit(str(error)) from error
 
